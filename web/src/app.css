@@ -51,6 +51,11 @@ nav button.active {
   border-bottom-color: #6cb6ff;
 }
 
+nav button:last-child {
+  color: #6e7681;
+  border-bottom-color: transparent;
+}
+
 ul {
   list-style: none;
   padding: 0;
