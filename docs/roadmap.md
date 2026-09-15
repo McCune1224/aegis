@@ -22,8 +22,8 @@ The flags seed an empty database on first boot. After that the database is the
 source of truth, and the flags are ignored, which is what lets the web app take
 over without a flag overwriting it on restart.
 
-What is missing is the reason anyone would want to: the API and the web app. The
-backend is one unit away from serving a configuration screen.
+What is missing is the reason anyone would want to use it, which is the API and
+the web app. The backend is one unit away from serving a configuration screen.
 
 ## Next
 
