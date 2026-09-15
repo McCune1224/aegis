@@ -23,6 +23,7 @@ import (
 	"aegis/internal/filter"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
+	"aegis/web"
 )
 
 // defaultProfile is the profile every client gets until a client entry names
@@ -124,6 +125,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Store:    database,
 		Reloader: engine,
 		Hub:      hub,
+		Files:    web.Files(),
 		Address:  cfg.APIAddress,
 		Logger:   logger,
 	})

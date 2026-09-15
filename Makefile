@@ -1,10 +1,22 @@
 GO ?= go
 BIN := bin/aegis
+WEB := web
+WEBSTAMP := $(WEB)/node_modules/.installed
 
-.PHONY: build test gen fmt vet lint tools crossbuild clean
+.PHONY: build test gen fmt vet lint tools crossbuild clean web dev
 
-build:
+build: web
 	$(GO) build -o $(BIN) ./cmd/aegis
+
+web: $(WEBSTAMP)
+	npm --prefix $(WEB) run build
+
+$(WEBSTAMP): $(WEB)/package.json $(WEB)/package-lock.json
+	npm --prefix $(WEB) ci
+	@touch $(WEBSTAMP)
+
+dev: $(WEBSTAMP)
+	npm --prefix $(WEB) run dev
 
 test:
 	$(GO) test -race ./...
