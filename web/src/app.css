@@ -10,15 +10,45 @@ body {
 }
 
 main {
-  max-width: 40rem;
+  max-width: 46rem;
   margin: 0 auto;
-  padding: 2rem 1rem;
+  padding: 2rem 1rem 4rem;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid #232b33;
+  margin-bottom: 1.5rem;
 }
 
 h1 {
   font-size: 1.25rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+h2 {
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9da7b3;
+}
+
+nav button {
+  background: none;
+  border: none;
+  color: #9da7b3;
+  font: inherit;
+  padding: 0.6rem 0.8rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+nav button.active {
+  color: #e6edf3;
+  border-bottom-color: #6cb6ff;
 }
 
 ul {
@@ -28,9 +58,87 @@ ul {
 
 li {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 1rem;
   padding: 0.6rem 0.8rem;
   border-bottom: 1px solid #232b33;
+}
+
+li div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.muted {
+  color: #9da7b3;
+  font-size: 0.85rem;
+}
+
+.selectors {
+  color: #6e7681;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+}
+
+form {
+  margin-top: 2rem;
+  padding: 1rem;
+  border: 1px solid #232b33;
+  border-radius: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: #9da7b3;
+}
+
+input,
+select,
+textarea {
+  background: #0b0f13;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 0.35rem;
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+}
+
+textarea {
+  min-height: 4rem;
+  resize: vertical;
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+button {
+  background: #1f6feb;
+  color: #fff;
+  border: none;
+  border-radius: 0.35rem;
+  padding: 0.4rem 0.8rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+li .row-actions button {
+  background: #21262d;
+  border: 1px solid #30363d;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .error {
