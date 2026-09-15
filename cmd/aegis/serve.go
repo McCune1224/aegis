@@ -42,11 +42,6 @@ func newServeCmd() *cobra.Command {
 	flags.String("dns-address", "127.0.0.1:53", "address to listen on, as host:port")
 	flags.String("upstream", "9.9.9.9:53", "upstream resolver, as host:port")
 	flags.String("api-address", "127.0.0.1:8080", "address for the HTTP API, as host:port")
-	flags.Bool("api-allow-remote", false, "allow the API to bind beyond loopback")
-	flags.String("admin-password", "", "admin password on first boot, generated and logged when empty")
-	flags.String("tls-cert", "", "TLS certificate file for the API")
-	flags.String("tls-key", "", "TLS key file for the API")
-	flags.Bool("tls-self-signed", false, "generate a self-signed TLS certificate for the API")
 	flags.String("db", "aegis.db", "path to the configuration database")
 	flags.String("blocking-mode", "nxdomain", "nxdomain, null-address, custom-address, or refused, for the default profile")
 	flags.String("custom-address", "", "the address to answer with when the default profile blocks")
@@ -101,13 +96,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	hash, err := ensureAdmin(ctx, database, cfg.AdminPassword, logger)
-	if err != nil {
-		return err
-	}
-	tlsEnabled := cfg.TLSCert != "" || cfg.TLSSelfSigned
-	auth := api.NewAuth(hash, tlsEnabled)
-
 	engine := runtime.New(database, rules)
 	if err := engine.Reload(ctx); err != nil {
 		return err
@@ -134,17 +122,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	apiServer, err := api.Start(api.Config{
-		Store:       database,
-		Reloader:    engine,
-		Hub:         hub,
-		Auth:        auth,
-		Files:       web.Files(),
-		Address:     cfg.APIAddress,
-		CertFile:    cfg.TLSCert,
-		KeyFile:     cfg.TLSKey,
-		SelfSigned:  cfg.TLSSelfSigned,
-		AllowRemote: cfg.APIAllowRemote,
-		Logger:      logger,
+		Store:    database,
+		Reloader: engine,
+		Hub:      hub,
+		Files:    web.Files(),
+		Address:  cfg.APIAddress,
+		Logger:   logger,
 	})
 	if err != nil {
 		_ = server.Shutdown(context.Background())
@@ -168,35 +151,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	return errors.Join(apiServer.Shutdown(shutdown), server.Shutdown(shutdown))
-}
-
-// ensureAdmin returns the stored admin password hash, creating one from the
-// supplied password on first boot. With no password it generates one and logs
-// it once, because there is no other way in.
-func ensureAdmin(ctx context.Context, database *store.Store, password string, logger *slog.Logger) (string, error) {
-	hash, found, err := database.AdminPasswordHash(ctx)
-	if err != nil {
-		return "", err
-	}
-	if found {
-		return hash, nil
-	}
-
-	if password == "" {
-		password, err = api.GeneratePassword()
-		if err != nil {
-			return "", err
-		}
-		logger.Warn("generated an admin password, record it now, it is not shown again", "password", password)
-	}
-	hash, err = api.HashPassword(password)
-	if err != nil {
-		return "", err
-	}
-	if err := database.SetAdminPasswordHash(ctx, hash); err != nil {
-		return "", err
-	}
-	return hash, nil
 }
 
 // seed writes the flag configuration into an empty database. Once anything is

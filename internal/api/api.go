@@ -27,16 +27,9 @@ type Config struct {
 	Store    *store.Store
 	Reloader Reloader
 	Hub      *Hub
-	Auth     *Auth
 	Files    fs.FS
 	Address  string
-
-	CertFile    string
-	KeyFile     string
-	SelfSigned  bool
-	AllowRemote bool
-
-	Logger *slog.Logger
+	Logger   *slog.Logger
 }
 
 // Server is the HTTP control plane. It holds its own listener, separate from
@@ -45,7 +38,6 @@ type Server struct {
 	store    *store.Store
 	reloader Reloader
 	hub      *Hub
-	auth     *Auth
 	files    fs.FS
 	http     *http.Server
 	listener net.Listener
@@ -68,27 +60,10 @@ func Start(cfg Config) (*Server, error) {
 	if cfg.Address == "" {
 		return nil, errors.New("api: Config.Address is required")
 	}
-	if cfg.Auth == nil {
-		return nil, errors.New("api: Config.Auth is required")
-	}
-	if !cfg.AllowRemote {
-		loopback, err := loopbackAddress(cfg.Address)
-		if err != nil {
-			return nil, err
-		}
-		if !loopback {
-			return nil, fmt.Errorf("api: %s is not loopback, set AllowRemote to listen wider", cfg.Address)
-		}
-	}
 
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
-	}
-
-	tlsConfig, err := serverTLS(cfg)
-	if err != nil {
-		return nil, err
 	}
 
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", cfg.Address)
@@ -96,22 +71,15 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, hub: cfg.Hub, auth: cfg.Auth, files: cfg.Files, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, hub: cfg.Hub, files: cfg.Files, listener: listener}
 	s.http = &http.Server{
-		Handler:   s.routes(),
-		ErrorLog:  slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
-		TLSConfig: tlsConfig,
+		Handler:  s.routes(),
+		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
 
 	go func() {
-		var serveErr error
-		if tlsConfig != nil {
-			serveErr = s.http.ServeTLS(listener, "", "")
-		} else {
-			serveErr = s.http.Serve(listener)
-		}
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			logger.Warn("api: listener stopped", "error", serveErr)
+		if err := s.http.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Warn("api: listener stopped", "error", err)
 		}
 	}()
 	return s, nil
@@ -125,21 +93,15 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ct
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("POST /api/v1/session", s.login)
-	mux.HandleFunc("GET /api/v1/session", s.sessionStatus)
-	mux.HandleFunc("DELETE /api/v1/session", s.requireAuth(s.requireCSRF(s.logout)))
-
-	mux.HandleFunc("GET /api/v1/profiles", s.requireAuth(s.listProfiles))
-	mux.HandleFunc("PUT /api/v1/profiles/{name}", s.requireAuth(s.requireCSRF(s.putProfile)))
-	mux.HandleFunc("GET /api/v1/profiles/{name}", s.requireAuth(s.getProfile))
-	mux.HandleFunc("DELETE /api/v1/profiles/{name}", s.requireAuth(s.requireCSRF(s.deleteProfile)))
-	mux.HandleFunc("GET /api/v1/clients", s.requireAuth(s.listClients))
-	mux.HandleFunc("PUT /api/v1/clients/{name}", s.requireAuth(s.requireCSRF(s.putClient)))
-	mux.HandleFunc("GET /api/v1/clients/{name}", s.requireAuth(s.getClient))
-	mux.HandleFunc("DELETE /api/v1/clients/{name}", s.requireAuth(s.requireCSRF(s.deleteClient)))
-	mux.HandleFunc("GET /api/v1/stream/queries", s.requireAuth(s.streamQueries))
-
+	mux.HandleFunc("GET /api/v1/profiles", s.listProfiles)
+	mux.HandleFunc("PUT /api/v1/profiles/{name}", s.putProfile)
+	mux.HandleFunc("GET /api/v1/profiles/{name}", s.getProfile)
+	mux.HandleFunc("DELETE /api/v1/profiles/{name}", s.deleteProfile)
+	mux.HandleFunc("GET /api/v1/clients", s.listClients)
+	mux.HandleFunc("PUT /api/v1/clients/{name}", s.putClient)
+	mux.HandleFunc("GET /api/v1/clients/{name}", s.getClient)
+	mux.HandleFunc("DELETE /api/v1/clients/{name}", s.deleteClient)
+	mux.HandleFunc("GET /api/v1/stream/queries", s.streamQueries)
 	if s.files != nil {
 		mux.Handle("GET /", http.FileServerFS(s.files))
 	}

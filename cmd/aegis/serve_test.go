@@ -4,12 +4,10 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"net/http/cookiejar"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -134,7 +132,6 @@ func TestServeCommandServesTheAPI(t *testing.T) {
 		"--upstream", upstream,
 		"--db", filepath.Join(t.TempDir(), "aegis.db"),
 		"--api-address", apiAddress,
-		"--admin-password", "secret",
 		"--log-level", "error",
 	})
 	cmd.SetContext(ctx)
@@ -142,36 +139,18 @@ func TestServeCommandServesTheAPI(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Execute() }()
 
-	jar, err := cookiejar.New(nil)
-	require.NoError(t, err)
-	client := &http.Client{Jar: jar}
-
 	require.Eventually(t, func() bool {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+apiAddress+"/api/v1/session", nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+apiAddress+"/api/v1/profiles", nil)
 		if err != nil {
 			return false
 		}
-		resp, err := client.Do(req)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return false
 		}
 		defer func() { _ = resp.Body.Close() }()
 		return resp.StatusCode == http.StatusOK
 	}, 5*time.Second, 25*time.Millisecond, "serve never served the API")
-
-	login, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+apiAddress+"/api/v1/session", strings.NewReader(`{"password":"secret"}`))
-	require.NoError(t, err)
-	loginResp, err := client.Do(login)
-	require.NoError(t, err)
-	require.NoError(t, loginResp.Body.Close())
-	require.Equal(t, http.StatusOK, loginResp.StatusCode)
-
-	profiles, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+apiAddress+"/api/v1/profiles", nil)
-	require.NoError(t, err)
-	profilesResp, err := client.Do(profiles)
-	require.NoError(t, err)
-	require.NoError(t, profilesResp.Body.Close())
-	require.Equal(t, http.StatusOK, profilesResp.StatusCode)
 
 	cancel()
 	select {
