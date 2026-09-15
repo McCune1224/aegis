@@ -2,10 +2,12 @@ import { createEffect, createSignal } from "solid-js";
 import {
   deleteClient as removeClient,
   deleteProfile as removeProfile,
+  getDefaultProfile,
   listClients,
   listProfiles,
   saveClient as putClient,
   saveProfile as putProfile,
+  setDefaultProfile as putDefaultProfile,
   type Client,
   type ClientInput,
   type Profile,
@@ -20,12 +22,18 @@ export default function App() {
   const [tab, setTab] = createSignal<Tab>("profiles");
   const [profiles, setProfiles] = createSignal<Profile[]>([]);
   const [clients, setClients] = createSignal<Client[]>([]);
+  const [defaultProfile, setDefaultProfile] = createSignal("");
   const [error, setError] = createSignal<string>();
 
   async function refresh() {
-    const [nextProfiles, nextClients] = await Promise.all([listProfiles(), listClients()]);
+    const [nextProfiles, nextClients, nextDefault] = await Promise.all([
+      listProfiles(),
+      listClients(),
+      getDefaultProfile(),
+    ]);
     setProfiles(nextProfiles);
     setClients(nextClients);
+    setDefaultProfile(nextDefault.profile);
   }
 
   createEffect(
@@ -55,6 +63,11 @@ export default function App() {
     await refresh();
   }
 
+  async function makeDefault(name: string) {
+    await putDefaultProfile(name);
+    await refresh();
+  }
+
   return (
     <main>
       <header>
@@ -80,7 +93,13 @@ export default function App() {
       </header>
       {error() ? <p class="error">Could not load the configuration: {error()}</p> : null}
       {tab() === "profiles" ? (
-        <Profiles profiles={profiles()} onSave={saveProfile} onDelete={deleteProfile} />
+        <Profiles
+          profiles={profiles()}
+          defaultProfile={defaultProfile()}
+          onSave={saveProfile}
+          onDelete={deleteProfile}
+          onSetDefault={makeDefault}
+        />
       ) : (
         <Clients
           clients={clients()}

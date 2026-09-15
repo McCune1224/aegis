@@ -295,6 +295,30 @@ type decisionEventJSON struct {
 	} `json:"rule"`
 }
 
+func TestTheDefaultProfileCanBeChangedOverHTTP(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/profiles/kids", `{"mode":"refused"}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodPut, "/api/v1/default-profile", `{"profile":"kids"}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.1", h.dnsAddress).Rcode)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/default-profile", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, "kids")
+}
+
+func TestTheDefaultProfileMustExist(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/default-profile", `{"profile":"ghost"}`)
+
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Contains(t, body, "ghost")
+}
+
 func TestUnknownProfilesAndClientsReturnNotFound(t *testing.T) {
 	h := startHarness(t)
 

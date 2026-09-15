@@ -5,8 +5,10 @@ const modes = ["nxdomain", "null-address", "custom-address", "refused"];
 
 type Props = {
   profiles: Profile[];
+  defaultProfile: string;
   onSave: (name: string, input: ProfileInput) => Promise<void>;
   onDelete: (name: string) => Promise<void>;
+  onSetDefault: (name: string) => Promise<void>;
 };
 
 export default function Profiles(props: Props) {
@@ -65,6 +67,15 @@ export default function Profiles(props: Props) {
     }
   }
 
+  async function makeDefault(target: string) {
+    setError(undefined);
+    try {
+      await props.onSetDefault(target);
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }
+
   return (
     <section>
       <ul>
@@ -80,6 +91,15 @@ export default function Profiles(props: Props) {
                 </span>
               </div>
               <div class="row-actions">
+                {profile.name === props.defaultProfile ? (
+                  <span class="badge" data-testid="profile-default">
+                    default
+                  </span>
+                ) : (
+                  <button type="button" onClick={() => void makeDefault(profile.name)}>
+                    Make default
+                  </button>
+                )}
                 <button type="button" onClick={() => edit(profile)}>
                   Edit
                 </button>

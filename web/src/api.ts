@@ -70,6 +70,17 @@ export function deleteProfile(name: string): Promise<void> {
   return request<void>(`/api/v1/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
+export function getDefaultProfile(): Promise<{ profile: string }> {
+  return request<{ profile: string }>("/api/v1/default-profile");
+}
+
+export function setDefaultProfile(profile: string): Promise<{ profile: string }> {
+  return request<{ profile: string }>("/api/v1/default-profile", {
+    method: "PUT",
+    body: JSON.stringify({ profile }),
+  });
+}
+
 export function listClients(): Promise<Client[]> {
   return request<Client[]>("/api/v1/clients");
 }
