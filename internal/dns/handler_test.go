@@ -305,11 +305,12 @@ func TestHandleSetsRecursionAvailableOnEveryAnswer(t *testing.T) {
 
 func TestHandlePublishesEachDecisionToTheObserver(t *testing.T) {
 	observer := &captureObserver{}
+	second := &captureObserver{}
 	upstream := &stubResolver{}
 	handler, err := dns.NewHandler(dns.Config{
-		Decider:  deciderFor(t, defaultPolicy, blockedAds()),
-		Upstream: upstream,
-		Observer: observer,
+		Decider:   deciderFor(t, defaultPolicy, blockedAds()),
+		Upstream:  upstream,
+		Observers: []dns.Observer{observer, second},
 	})
 	require.NoError(t, err)
 
@@ -326,11 +327,15 @@ func TestHandlePublishesEachDecisionToTheObserver(t *testing.T) {
 	require.Equal(t, filter.ActionBlock, blocked.Action)
 	require.Equal(t, "ads.example.com", blocked.Name.String())
 	require.Equal(t, netip.MustParseAddr("10.9.9.2"), blocked.Address)
+	require.Equal(t, "A", blocked.Type)
 	require.NotNil(t, blocked.Match)
 	require.Equal(t, "block-ads", blocked.Match.RuleID)
 
 	require.Equal(t, filter.ActionAllow, observer.decisions[1].Action)
 	require.Nil(t, observer.decisions[1].Match)
+
+	require.Len(t, second.decisions, 2, "every observer sees every decision")
+	require.Equal(t, "A", second.decisions[0].Type)
 }
 
 type captureObserver struct {

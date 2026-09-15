@@ -121,6 +121,17 @@ func (r *Runtime) Decide(name filter.Domain, address netip.Addr) filter.Verdict 
 	return current.set.Decide(name, current.identity.Key(address))
 }
 
+// ValidateLists reads and parses every list file the way publish will, so a
+// bad file fails the start before the database is created.
+func ValidateLists(lists []ListFile) error {
+	for _, list := range lists {
+		if _, err := readListFile(list); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // readLists parses every blocklist file fresh. A file that cannot be read
 // fails the publish, so the previous generation keeps serving rather than the
 // resolver quietly dropping the rules the operator asked for.
