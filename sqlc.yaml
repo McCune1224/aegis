@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema: "db/migrations"
+    queries: "db/query"
+    gen:
+      go:
+        # Generated code lives in its own package so a row type can never
+        # collide with a domain type in internal/store.
+        package: "storedb"
+        out: "internal/store/storedb"
+        emit_pointers_for_null_types: true

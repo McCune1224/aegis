@@ -56,3 +56,46 @@ func TestNoSpecsLeavesEveryAddressUnidentified(t *testing.T) {
 
 	require.Equal(t, filter.ClientKey(""), resolver.Key(netip.MustParseAddr("10.9.9.2")))
 }
+
+func TestTheLongerPrefixWins(t *testing.T) {
+	resolver, err := client.New([]client.Spec{
+		{Key: "home", Prefixes: []netip.Prefix{netip.MustParsePrefix("10.9.0.0/16")}},
+		{Key: "guest", Prefixes: []netip.Prefix{netip.MustParsePrefix("10.9.9.0/24")}},
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, filter.ClientKey("guest"), resolver.Key(netip.MustParseAddr("10.9.9.10")))
+	require.Equal(t, filter.ClientKey("home"), resolver.Key(netip.MustParseAddr("10.9.8.10")))
+}
+
+func TestAnExactAddressBeatsAPrefix(t *testing.T) {
+	resolver, err := client.New([]client.Spec{
+		{Key: "guest", Prefixes: []netip.Prefix{netip.MustParsePrefix("10.9.9.0/24")}},
+		{Key: "tablet", Addresses: []netip.Addr{netip.MustParseAddr("10.9.9.10")}},
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, filter.ClientKey("tablet"), resolver.Key(netip.MustParseAddr("10.9.9.10")))
+	require.Equal(t, filter.ClientKey("guest"), resolver.Key(netip.MustParseAddr("10.9.9.11")))
+}
+
+func TestAnAddressOutsideEveryPrefixIsUnidentified(t *testing.T) {
+	resolver, err := client.New([]client.Spec{
+		{Key: "guest", Prefixes: []netip.Prefix{netip.MustParsePrefix("10.9.9.0/24")}},
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, filter.ClientKey(""), resolver.Key(netip.MustParseAddr("192.0.2.7")))
+}
+
+func TestOnePrefixCannotCarryTwoIdentities(t *testing.T) {
+	prefix := netip.MustParsePrefix("10.9.9.0/24")
+
+	_, err := client.New([]client.Spec{
+		{Key: "guest", Prefixes: []netip.Prefix{prefix}},
+		{Key: "tablet", Prefixes: []netip.Prefix{prefix}},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "claimed by both")
+}
