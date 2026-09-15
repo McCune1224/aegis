@@ -126,7 +126,8 @@ make vet       # go vet ./...
 make tools     # go install goose, golangci-lint, goreleaser
 ```
 
-`make build` gains a web bundle step when the Solid app exists.
+`make build` runs the Vite bundle, then `go build`. The result embeds `web/dist`
+and ships as one file. `make dev` runs Vite against a live server.
 
 ## Verification path
 

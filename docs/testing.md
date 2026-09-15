@@ -131,13 +131,7 @@ covers foreign hardware. A VM would only add value for a question neither covers
 such as testing the DHCP server against a real DHCP client, or testing on a
 distribution other than the development machine. Both are later than phase one.
 
-## Current gaps
+## Where the gaps live
 
-- Tier 4 is unexercised by CI. The build runs, but nothing asserts the `file`
-  output, so a CGO dependency could break the release matrix without a red check.
-- Tier 5 has never run. Every performance number in the repository so far comes
-  from a development machine.
-- `goreleaser` is not installed, so the release matrix itself has never been
-  built, only the raw Go cross-compile under it. `make crossbuild` covers the
-  compiler and the linker flags but not the archive names, the checksums, or the
-  published artifacts.
+The tracker owns which tiers are exercised and which are not. This document
+records what each tier is for and how to run it, not its status.

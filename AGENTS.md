@@ -8,22 +8,24 @@ canvas. Both ship as one static binary.
 Read `docs/stack.md` before you add a dependency or change the build. It records
 why each tool is here and which alternatives lost.
 
-Work is tracked as GitHub issues rather than in a roadmap file. `gh issue list
---label next` is the queue, and each issue carries its own acceptance check.
+Work is tracked as GitHub issues rather than in a roadmap file. #61 Product
+goals is the index, and every other issue carries its own acceptance check. The
+docs under `docs/` hold decisions, not status.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `make build` | Build `bin/aegis`. |
+| `make build` | Build `bin/aegis`, running the web bundle first. |
+| `make dev` | Run the Vite dev server against a local aegis. |
+| `make web` | Build the web bundle into `web/dist`. |
 | `make test` | Run the Go tests with the race detector. |
 | `make lint` | Run golangci-lint. Run `make tools` first if it is missing. |
 | `make fmt` | Format the Go sources. |
 | `make vet` | Run `go vet ./...`. |
 | `make gen` | Regenerate the typed queries from `db/query` into `internal/store/storedb`. |
+| `make crossbuild` | Build every release target with `CGO_ENABLED=0`. |
 | `make tools` | Install goose, golangci-lint, goreleaser, and sqlc. |
-
-`make build` gains a web bundle step once `web/` exists.
 
 ## Layout
 
@@ -35,11 +37,8 @@ db/               goose migrations and sqlc query sources
 web/              Solid 2 app, embedded into the binary
 ```
 
-`internal/` gets one package per domain concept as the work lands. What exists
-now is `filter` for rules and policy, `client` for identity, `blocklist` for
-list parsing, `store` for SQLite, `runtime` for the reload loop, and `dns` for
-the query pipeline. Still to come are `api` for HTTP and SSE, and `upstream` for
-resolver selection.
+`internal/` gets one package per domain concept as the work lands. The tracker
+owns the package list and what is next; #61 Product goals is the index.
 
 ## Rules
 
