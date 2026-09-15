@@ -58,23 +58,52 @@ Each unit ends in a check and lands as its own commit.
    modes, with the upstream behind a `Resolver` seam. Done.
 5. **DNS server and forwarder.** Bind UDP and TCP, and forward allowed queries to
    a configured upstream. Done.
-6. **More matchers.** Wildcard, regular expression, CIDR, and client. Each is a
-   new match kind rather than a new branch in `Decide`.
-7. **Profiles and client identity.** Inheritance resolved at compile time, with
+6. **Profiles and client identity.** Inheritance resolved at compile time, with
    cycles rejected, and an address resolved to an identity outside the filter
    package. Done. The check is that two addresses asking the same blocked name
    get two different answers, proven in a rootless namespace per
    `docs/testing.md` tier 3.
-8. **Schedules.** Compile windows into a minute-of-week table.
-9. **Store.** SQLite through sqlc and goose, holding sources, rules, profiles,
-   clients, and the query log.
-10. **HTTP API.** chi routes plus SSE for the live query stream.
-11. **Web UI.** The Solid 2 shell first, then the node graph.
+7. **Store.** SQLite through sqlc and goose, holding profiles, clients, and the
+   selectors that identify them. Done. The check is a round trip through a real
+   file that ends in a verdict and a resolved identity.
+8. **Runtime.** One owner that rebuilds the engine from the store and publishes,
+   so a stored change reaches a running server without a restart.
+9. **HTTP API.** chi routes over the store, plus SSE for the live query stream.
+10. **Web app.** The Solid 2 shell, then the configuration screens, then the
+    node graph.
+11. **Query log.** Persist each decision and serve it to the dashboard.
+12. **More matchers.** Wildcard, regular expression, and CIDR rules.
+13. **Schedules.** Compile windows into a minute-of-week table.
 
-The matcher work moved from fourth to sixth and the DNS work moved up. The
-strongest check available for everything built so far is a real DNS query, and
-more matchers add breadth to a system nobody can run yet. The handler comes
-first because it is the part that is pure and cheap to test on its own.
+## Why the order changed twice
+
+The DNS work moved ahead of the matchers, because a real DNS query is the
+strongest check available for everything built before it, and more matchers add
+breadth to a system nobody can run yet.
+
+The store, the API, and the web app then moved ahead of the matchers and the
+schedules, because the web app is the configuration surface the product is built
+around. A flag per setting does not scale to per-client profiles and per-device
+selectors, and the command line is now a bootstrap path rather than the way an
+operator configures Aegis. The store is the source of truth, and the YAML file
+this project originally planned is now only a way to seed a first boot.
+
+## How a client is identified
+
+A client is a name plus the selectors that carry it, because one device answers
+on more than one address and a whole network can share a policy. Selectors
+resolve with an explicit precedence, and the first one that matches wins.
+
+1. An exact address.
+2. The longest matching prefix.
+
+An exact address beats a prefix, because pinning one address is deliberate. The
+longest prefix wins, because it is the most specific network. Two identities
+claiming the same selector is a load error rather than a silent last-one-wins,
+because two policies fighting over one device is the thing an operator cannot
+debug from the outside.
+
+An address nothing claims gives the empty key, which takes the default profile.
 
 ## Deferred, with the reason
 
