@@ -1,0 +1,117 @@
+# Aegis agent guide
+
+Aegis is a DNS sinkhole. It blocks ads, trackers, and distracting sites for a
+whole network, with per-client policies, blocklist management, scheduling, and a
+node graph dashboard. The backend is Go. The web UI is Solid 2 over a WebGL
+canvas. Both ship as one static binary.
+
+Read `docs/stack.md` before you add a dependency or change the build. It records
+why each tool is here and which alternatives lost.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `make build` | Build `bin/aegis`. |
+| `make test` | Run the Go tests with the race detector. |
+| `make lint` | Run golangci-lint. Run `make tools` first if it is missing. |
+| `make fmt` | Format the Go sources. |
+| `make vet` | Run `go vet ./...`. |
+| `make tools` | Install goose, golangci-lint, and goreleaser. |
+
+`make build` gains a web bundle step once `web/` exists.
+
+## Layout
+
+```
+cmd/aegis/        cobra root and command wiring
+internal/         every package, none exported until a consumer exists
+docs/             design records, starting with docs/stack.md
+db/               goose migrations and sqlc query sources
+web/              Solid 2 app, embedded into the binary
+```
+
+`internal/` gets one package per domain concept as the work lands. Planned
+homes are `filter` for matching, `blocklist` for sources and parsing, `client`
+for identity and profiles, `schedule` for time windows, `upstream` for resolver
+clients, `dns` for the query pipeline, `store` for SQLite access, `api` for HTTP
+and SSE, and `tui` for the Bubble Tea screens.
+
+## Rules
+
+### Write the failing test first
+
+Add the test, run it, and watch it fail for the intended reason. Then write the
+implementation and watch it pass. Quote the failing run in the pull request.
+
+Skip this only when the behavior needs a real socket or a real GPU to exercise.
+When you skip it, name the closest executable check you used instead.
+
+### Test behavior, not implementation
+
+Call the package the way `main` calls it and assert a literal expected value. If
+the test would still pass when every function it imports returned `nil`, delete
+it and write one that would fail.
+
+A test that asserts which functions were called, or restates a constant the code
+already holds, catches nothing.
+
+### Keep CGO off
+
+Never add a dependency that needs CGO. Cross-compilation with `CGO_ENABLED=0`
+across armv7, armv6, arm64, and amd64 is what makes one release command cover
+every target. If a library requires CGO, find another library.
+
+### Parse at the boundary
+
+Blocklist files, config, DNS wire messages, DHCP leases, and upstream responses
+are untyped until a parser converts them. Parse in the package that owns the
+boundary and return typed values. Packages inside the boundary take typed values
+and trust them. Do not re-validate an internal type at every call site.
+
+### Name the data shape before the logic
+
+Write down what the data is before writing code that branches on it. A state
+machine replaces scattered booleans. A registry or table replaces a switch that
+grows a case per release. A typed profile replaces a repeated list of fields.
+
+The signal that you skipped this is a new feature that adds one more branch to
+an existing `if` chain, or a second boolean that must stay in step with the
+first.
+
+### One package per concept, not per step
+
+`internal/filter` owns matching. `internal/blocklist` owns source parsing. Do
+not add `validate`, `transform`, or `handler` packages. Execution order is not
+ownership.
+
+### No narrating comments
+
+A comment earns its place only for a non-obvious reason the code cannot show.
+Delete phase labels, restatements of the next line, and banner comments. The
+assertion string and the log line are the documentation.
+
+### Commits
+
+Use Conventional Commits, `type(scope): subject`, short and imperative. One
+concern per commit. A behavior change and its test land in the same commit.
+
+### Dependencies
+
+Name every new dependency and the reason in the pull request body. Prefer the
+standard library over a small library, and a small library over a framework.
+
+## Verification
+
+Every change needs evidence from the surface it touches. "It compiles" and "the
+unit tests pass" are not that evidence on their own.
+
+The Go backend needs `make test` plus a run that exercises the real path. Use a
+temp SQLite file and a real socket on an ephemeral port rather than a mock.
+
+The TUI needs a driven session in a real terminal. Use the `control-cli` skill
+to start `bin/aegis`, send keys, and assert on captured frames.
+
+The web UI needs a browser driven over CDP. Use the `control-ui` skill. The node
+graph renders to a WebGL canvas with no DOM to query, so assert on a screenshot
+diff rather than on DOM nodes.
