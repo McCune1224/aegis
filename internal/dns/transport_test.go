@@ -112,9 +112,8 @@ func TestForwarderHonoursACancelledContext(t *testing.T) {
 
 func TestServerAnswersOverUdpAndTcp(t *testing.T) {
 	handler, err := dns.NewHandler(dns.Config{
-		Engine:   engineFor(t, defaultPolicy, blockedAds()),
+		Decider:  deciderFor(t, defaultPolicy, blockedAds()),
 		Upstream: dns.NewForwarder(startUpstream(t, answerWith("203.0.113.23"))),
-		Clients:  clients{},
 	})
 	require.NoError(t, err)
 
@@ -132,9 +131,8 @@ func TestServerAnswersOverUdpAndTcp(t *testing.T) {
 func TestServerBlocksByRuleAndForwardsTheRestThroughARealUpstream(t *testing.T) {
 	upstreamAddress := "203.0.113.30"
 	handler, err := dns.NewHandler(dns.Config{
-		Engine:   engineFor(t, defaultPolicy, blockedAds()),
+		Decider:  deciderFor(t, defaultPolicy, blockedAds()),
 		Upstream: dns.NewForwarder(startUpstream(t, answerWith(upstreamAddress))),
-		Clients:  clients{},
 	})
 	require.NoError(t, err)
 
@@ -155,9 +153,8 @@ func TestServerBlocksByRuleAndForwardsTheRestThroughARealUpstream(t *testing.T) 
 
 func TestServerStopsAnsweringAfterShutdown(t *testing.T) {
 	handler, err := dns.NewHandler(dns.Config{
-		Engine:   engineFor(t, defaultPolicy),
+		Decider:  deciderFor(t, defaultPolicy),
 		Upstream: dns.NewForwarder(startUpstream(t, answerWith("203.0.113.24"))),
-		Clients:  clients{},
 	})
 	require.NoError(t, err)
 
@@ -174,9 +171,8 @@ func TestServerStopsAnsweringAfterShutdown(t *testing.T) {
 
 func TestStartRejectsAnIncompleteConfig(t *testing.T) {
 	handler, err := dns.NewHandler(dns.Config{
-		Engine:   engineFor(t, defaultPolicy),
+		Decider:  deciderFor(t, defaultPolicy),
 		Upstream: dns.NewForwarder("127.0.0.1:53"),
-		Clients:  clients{},
 	})
 	require.NoError(t, err)
 
@@ -189,9 +185,8 @@ func TestStartRejectsAnIncompleteConfig(t *testing.T) {
 
 func TestStartReportsThePortItBound(t *testing.T) {
 	handler, err := dns.NewHandler(dns.Config{
-		Engine:   engineFor(t, defaultPolicy),
+		Decider:  deciderFor(t, defaultPolicy),
 		Upstream: dns.NewForwarder("127.0.0.1:53"),
-		Clients:  clients{},
 	})
 	require.NoError(t, err)
 

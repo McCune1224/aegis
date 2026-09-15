@@ -13,6 +13,7 @@ func serveFlags() *pflag.FlagSet {
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	flags.String("dns-address", "127.0.0.1:53", "")
 	flags.String("upstream", "9.9.9.9:53", "")
+	flags.String("db", "aegis.db", "")
 	flags.String("blocking-mode", "nxdomain", "")
 	flags.String("custom-address", "", "")
 	flags.StringArray("blocklist", nil, "")
@@ -28,6 +29,7 @@ func TestLoadReadsEveryFlagValue(t *testing.T) {
 	require.NoError(t, flags.Parse([]string{
 		"--dns-address", "0.0.0.0:5353",
 		"--upstream", "1.1.1.1:53",
+		"--db", "/tmp/aegis.db",
 		"--blocking-mode", "refused",
 		"--custom-address", "192.0.2.1",
 		"--blocklist", "/lists/one.txt",
@@ -44,6 +46,7 @@ func TestLoadReadsEveryFlagValue(t *testing.T) {
 	require.Equal(t, config.Config{
 		DNSAddress:    "0.0.0.0:5353",
 		Upstream:      "1.1.1.1:53",
+		DB:            "/tmp/aegis.db",
 		BlockingMode:  "refused",
 		CustomAddress: "192.0.2.1",
 		Blocklists:    []string{"/lists/one.txt", "/lists/two.txt"},

@@ -21,40 +21,37 @@ type Resolver interface {
 	Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error)
 }
 
-// ClientResolver turns a query's source address into the identity policy keys
-// on. Identity resolution lives outside this package, so this layer never reads
-// a lease table or an address list.
-type ClientResolver interface {
-	Key(address netip.Addr) filter.ClientKey
+// Decider answers a query for the client at one address. The runtime implements
+// it, and it reads one snapshot per call, so the rule set and the identity table
+// behind an answer always come from the same generation. Splitting these into
+// two dependencies would let a query pair a new rule set with an old selector
+// table during a reload.
+type Decider interface {
+	Decide(name filter.Domain, address netip.Addr) filter.Verdict
 }
 
 // Config is what a Handler needs to answer queries.
 type Config struct {
-	Engine   *filter.Engine
+	Decider  Decider
 	Upstream Resolver
-	Clients  ClientResolver
 }
 
 // Handler answers one DNS message. It holds no mutable state, so one Handler
 // serves every worker.
 type Handler struct {
-	engine   *filter.Engine
+	decider  Decider
 	upstream Resolver
-	clients  ClientResolver
 }
 
 // NewHandler checks the config and returns a Handler.
 func NewHandler(cfg Config) (*Handler, error) {
-	if cfg.Engine == nil {
-		return nil, errors.New("dns: Config.Engine is required")
+	if cfg.Decider == nil {
+		return nil, errors.New("dns: Config.Decider is required")
 	}
 	if cfg.Upstream == nil {
 		return nil, errors.New("dns: Config.Upstream is required")
 	}
-	if cfg.Clients == nil {
-		return nil, errors.New("dns: Config.Clients is required")
-	}
-	return &Handler{engine: cfg.Engine, upstream: cfg.Upstream, clients: cfg.Clients}, nil
+	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream}, nil
 }
 
 // Handle answers one query for the client at address. A blocked name never
@@ -73,7 +70,7 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 		return h.forward(ctx, req)
 	}
 
-	verdict := h.engine.Decide(name, h.clients.Key(address))
+	verdict := h.decider.Decide(name, address)
 	if verdict.Action == filter.ActionBlock {
 		return blocked(req, question, verdict.Policy), nil
 	}

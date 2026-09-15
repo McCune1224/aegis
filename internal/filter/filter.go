@@ -120,6 +120,7 @@ type RuleSet struct {
 	subdomains map[string]*entry
 	clients    map[ClientKey]Policy
 	fallback   Policy
+	rules      int
 }
 
 type entry struct {
@@ -159,7 +160,12 @@ func Compile(cfg Config) (*RuleSet, error) {
 	return rs, nil
 }
 
+// Len is how many rules the set was built from, which is more than the number
+// of index keys when several rules claim one name.
+func (rs *RuleSet) Len() int { return rs.rules }
+
 func (rs *RuleSet) indexRules(specs []RuleSpec) error {
+	rs.rules = len(specs)
 	for order, spec := range specs {
 		if spec.Domain.name == "" {
 			return fmt.Errorf("filter: rule %q has no domain", spec.ID)

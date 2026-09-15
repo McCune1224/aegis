@@ -53,11 +53,22 @@ func customPtr(address netip.Addr) *netip.Addr {
 // defaultPolicy is what a test that only cares about rules gets.
 var defaultPolicy = filter.Policy{Mode: filter.NXDomain}
 
-// engineFor builds an engine whose default profile answers blocked names with
-// policy.
-func engineFor(t *testing.T, policy filter.Policy, specs ...filter.RuleSpec) *filter.Engine {
+// stubDecider pairs one rule set with one identity table, which is the shape the
+// runtime holds behind a single pointer.
+type stubDecider struct {
+	set     *filter.RuleSet
+	clients clients
+}
+
+func (d stubDecider) Decide(name filter.Domain, address netip.Addr) filter.Verdict {
+	return d.set.Decide(name, d.clients.Key(address))
+}
+
+// deciderFor builds a decider whose default profile answers blocked names with
+// policy and whose every client is unidentified.
+func deciderFor(t *testing.T, policy filter.Policy, specs ...filter.RuleSpec) stubDecider {
 	t.Helper()
-	set, err := filter.Compile(filter.Config{
+	return stubDecider{set: compileSet(t, filter.Config{
 		Rules: specs,
 		Profiles: []filter.ProfileSpec{{
 			ID:     "default",
@@ -65,17 +76,19 @@ func engineFor(t *testing.T, policy filter.Policy, specs ...filter.RuleSpec) *fi
 			Custom: customPtr(policy.Custom),
 		}},
 		Default: "default",
-	})
-	require.NoError(t, err)
-
-	engine := filter.New()
-	engine.Publish(set)
-	return engine
+	})}
 }
 
-func handlerFor(t *testing.T, engine *filter.Engine, upstream dns.Resolver, resolver dns.ClientResolver) *dns.Handler {
+func compileSet(t *testing.T, cfg filter.Config) *filter.RuleSet {
 	t.Helper()
-	handler, err := dns.NewHandler(dns.Config{Engine: engine, Upstream: upstream, Clients: resolver})
+	set, err := filter.Compile(cfg)
+	require.NoError(t, err)
+	return set
+}
+
+func handlerFor(t *testing.T, decider dns.Decider, upstream dns.Resolver) *dns.Handler {
+	t.Helper()
+	handler, err := dns.NewHandler(dns.Config{Decider: decider, Upstream: upstream})
 	require.NoError(t, err)
 	return handler
 }
@@ -111,7 +124,7 @@ func upstreamA(req *mdns.Msg, address string) *mdns.Msg {
 
 func TestHandleAnswersNxDomainForABlockedNameAndStillForwardsTheOther(t *testing.T) {
 	upstream := &stubResolver{}
-	handler := handlerFor(t, engineFor(t, defaultPolicy, blockedAds()), upstream, clients{})
+	handler := handlerFor(t, deciderFor(t, defaultPolicy, blockedAds()), upstream)
 
 	got, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), netip.Addr{})
 	require.NoError(t, err)
@@ -129,8 +142,8 @@ func TestHandleAnswersNxDomainForABlockedNameAndStillForwardsTheOther(t *testing
 
 func TestHandleAnswersTheNullAddressForABlockedName(t *testing.T) {
 	handler := handlerFor(t,
-		engineFor(t, filter.Policy{Mode: filter.NullAddress}, blockedAds()),
-		&stubResolver{}, clients{})
+		deciderFor(t, filter.Policy{Mode: filter.NullAddress}, blockedAds()),
+		&stubResolver{})
 
 	v4, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), netip.Addr{})
 	require.NoError(t, err)
@@ -148,8 +161,8 @@ func TestHandleAnswersTheNullAddressForABlockedName(t *testing.T) {
 func TestHandleAnswersAConfiguredAddressForABlockedName(t *testing.T) {
 	custom := netip.MustParseAddr("192.0.2.7")
 	handler := handlerFor(t,
-		engineFor(t, filter.Policy{Mode: filter.CustomAddress, Custom: custom}, blockedAds()),
-		&stubResolver{}, clients{})
+		deciderFor(t, filter.Policy{Mode: filter.CustomAddress, Custom: custom}, blockedAds()),
+		&stubResolver{})
 
 	got, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), netip.Addr{})
 
@@ -161,8 +174,8 @@ func TestHandleAnswersAConfiguredAddressForABlockedName(t *testing.T) {
 
 func TestHandleAnswersRefusedForABlockedName(t *testing.T) {
 	handler := handlerFor(t,
-		engineFor(t, filter.Policy{Mode: filter.Refused}, blockedAds()),
-		&stubResolver{}, clients{})
+		deciderFor(t, filter.Policy{Mode: filter.Refused}, blockedAds()),
+		&stubResolver{})
 
 	got, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), netip.Addr{})
 
@@ -174,7 +187,7 @@ func TestHandleUsesThePolicyOfTheClientThatAsked(t *testing.T) {
 	tablet := netip.MustParseAddr("10.9.9.2")
 	laptop := netip.MustParseAddr("10.9.9.3")
 
-	set, err := filter.Compile(filter.Config{
+	set := compileSet(t, filter.Config{
 		Rules: []filter.RuleSpec{blockedAds()},
 		Profiles: []filter.ProfileSpec{
 			{ID: "strict", Mode: modePtr(filter.Refused)},
@@ -186,11 +199,8 @@ func TestHandleUsesThePolicyOfTheClientThatAsked(t *testing.T) {
 		},
 		Default: "loose",
 	})
-	require.NoError(t, err)
-	engine := filter.New()
-	engine.Publish(set)
 
-	handler := handlerFor(t, engine, &stubResolver{}, clients{tablet: "tablet", laptop: "laptop"})
+	handler := handlerFor(t, stubDecider{set: set, clients: clients{tablet: "tablet", laptop: "laptop"}}, &stubResolver{})
 
 	fromTablet, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), tablet)
 	require.NoError(t, err)
@@ -204,7 +214,7 @@ func TestHandleUsesThePolicyOfTheClientThatAsked(t *testing.T) {
 }
 
 func TestHandleUsesTheDefaultPolicyForAnUnidentifiedClient(t *testing.T) {
-	set, err := filter.Compile(filter.Config{
+	set := compileSet(t, filter.Config{
 		Rules: []filter.RuleSpec{blockedAds()},
 		Profiles: []filter.ProfileSpec{
 			{ID: "strict", Mode: modePtr(filter.Refused)},
@@ -213,11 +223,8 @@ func TestHandleUsesTheDefaultPolicyForAnUnidentifiedClient(t *testing.T) {
 		Clients: []filter.ClientSpec{{Key: "tablet", Profile: "strict"}},
 		Default: "default",
 	})
-	require.NoError(t, err)
-	engine := filter.New()
-	engine.Publish(set)
 
-	handler := handlerFor(t, engine, &stubResolver{}, clients{netip.MustParseAddr("10.9.9.2"): "tablet"})
+	handler := handlerFor(t, stubDecider{set: set, clients: clients{netip.MustParseAddr("10.9.9.2"): "tablet"}}, &stubResolver{})
 
 	got, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), netip.MustParseAddr("10.9.9.9"))
 
@@ -229,7 +236,7 @@ func TestHandleUsesTheDefaultPolicyForAnUnidentifiedClient(t *testing.T) {
 
 func TestHandleForwardsAnAllowedChildOfABlockedName(t *testing.T) {
 	upstream := &stubResolver{}
-	engine := engineFor(t, defaultPolicy,
+	decider := deciderFor(t, defaultPolicy,
 		blockedAds(),
 		filter.RuleSpec{
 			ID:     "allow-news",
@@ -239,7 +246,7 @@ func TestHandleForwardsAnAllowedChildOfABlockedName(t *testing.T) {
 			Action: filter.ActionAllow,
 		},
 	)
-	handler := handlerFor(t, engine, upstream, clients{})
+	handler := handlerFor(t, decider, upstream)
 
 	stillBlocked, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), netip.Addr{})
 	require.NoError(t, err)
@@ -257,7 +264,7 @@ func TestHandleForwardsAnAllowedChildOfABlockedName(t *testing.T) {
 
 func TestHandleForwardsANameItCannotParse(t *testing.T) {
 	upstream := &stubResolver{}
-	handler := handlerFor(t, engineFor(t, defaultPolicy, blockedAds()), upstream, clients{})
+	handler := handlerFor(t, deciderFor(t, defaultPolicy, blockedAds()), upstream)
 	req := query(".", mdns.TypeNS)
 	resp := new(mdns.Msg)
 	resp.SetReply(req)
@@ -271,7 +278,7 @@ func TestHandleForwardsANameItCannotParse(t *testing.T) {
 }
 
 func TestHandleAnswersServfailAndReportsWhenTheUpstreamFails(t *testing.T) {
-	handler := handlerFor(t, engineFor(t, defaultPolicy), &stubResolver{err: errors.New("no route to host")}, clients{})
+	handler := handlerFor(t, deciderFor(t, defaultPolicy), &stubResolver{err: errors.New("no route to host")})
 
 	got, err := handler.Handle(context.Background(), query("example.com.", mdns.TypeA), netip.Addr{})
 
@@ -282,7 +289,7 @@ func TestHandleAnswersServfailAndReportsWhenTheUpstreamFails(t *testing.T) {
 
 func TestHandleSetsRecursionAvailableOnEveryAnswer(t *testing.T) {
 	upstream := &stubResolver{}
-	handler := handlerFor(t, engineFor(t, defaultPolicy, blockedAds()), upstream, clients{})
+	handler := handlerFor(t, deciderFor(t, defaultPolicy, blockedAds()), upstream)
 
 	blocked, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), netip.Addr{})
 	require.NoError(t, err)
@@ -296,13 +303,12 @@ func TestHandleSetsRecursionAvailableOnEveryAnswer(t *testing.T) {
 }
 
 func TestNewHandlerRejectsAnIncompleteConfig(t *testing.T) {
-	engine := engineFor(t, defaultPolicy)
+	decider := deciderFor(t, defaultPolicy)
 	upstream := &stubResolver{}
 
 	cases := map[string]dns.Config{
-		"no engine":   {Upstream: upstream, Clients: clients{}},
-		"no upstream": {Engine: engine, Clients: clients{}},
-		"no clients":  {Engine: engine, Upstream: upstream},
+		"no decider":  {Upstream: upstream},
+		"no upstream": {Decider: decider},
 	}
 	for name, cfg := range cases {
 		_, err := dns.NewHandler(cfg)

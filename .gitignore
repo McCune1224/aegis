@@ -20,6 +20,11 @@ profile.cov
 # Build output
 /bin/
 
+# Local configuration database
+*.db
+*.db-shm
+*.db-wal
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 

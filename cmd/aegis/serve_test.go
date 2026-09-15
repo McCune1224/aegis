@@ -73,6 +73,7 @@ func TestServeCommandBlocksByRuleAndForwardsTheRest(t *testing.T) {
 		"serve",
 		"--dns-address", address,
 		"--upstream", upstream,
+		"--db", filepath.Join(t.TempDir(), "aegis.db"),
 		"--blocklist", list,
 		"--log-level", "error",
 	})
