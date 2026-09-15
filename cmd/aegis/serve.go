@@ -16,10 +16,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"aegis/internal/blocklist"
-	"aegis/internal/client"
 	"aegis/internal/config"
 	"aegis/internal/dns"
 	"aegis/internal/filter"
+	"aegis/internal/runtime"
+	"aegis/internal/store"
 )
 
 // defaultProfile is the profile every client gets until a client entry names
@@ -37,6 +38,7 @@ func newServeCmd() *cobra.Command {
 	flags := cmd.Flags()
 	flags.String("dns-address", "127.0.0.1:53", "address to listen on, as host:port")
 	flags.String("upstream", "9.9.9.9:53", "upstream resolver, as host:port")
+	flags.String("db", "aegis.db", "path to the configuration database")
 	flags.String("blocking-mode", "nxdomain", "nxdomain, null-address, custom-address, or refused, for the default profile")
 	flags.String("custom-address", "", "the address to answer with when the default profile blocks")
 	flags.StringArray("blocklist", nil, "path to a blocklist file, repeatable")
@@ -49,6 +51,8 @@ func newServeCmd() *cobra.Command {
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
+
 	cfg, err := config.Load(cmd.Flags())
 	if err != nil {
 		return err
@@ -59,47 +63,43 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// Everything the flags describe is parsed before the database is touched, so
+	// a typo in a flag cannot leave a half-initialised file behind.
 	format, err := blocklist.ParseFormat(cfg.BlockFormat)
 	if err != nil {
 		return err
 	}
-
+	profiles, err := buildProfiles(cfg)
+	if err != nil {
+		return err
+	}
+	records, err := buildClients(cfg.Clients)
+	if err != nil {
+		return err
+	}
 	rules, err := loadBlocklists(cfg.Blocklists, format, logger)
 	if err != nil {
 		return err
 	}
 
-	profiles, err := buildProfiles(cfg)
+	database, err := store.Open(ctx, cfg.DB)
 	if err != nil {
+		return err
+	}
+	defer func() { _ = database.Close() }()
+
+	if err := seed(ctx, database, profiles, records, logger); err != nil {
 		return err
 	}
 
-	clientSpecs, addresses, err := buildClients(cfg.Clients)
-	if err != nil {
+	engine := runtime.New(database, rules)
+	if err := engine.Reload(ctx); err != nil {
 		return err
 	}
-
-	identity, err := client.New(addresses)
-	if err != nil {
-		return err
-	}
-
-	set, err := filter.Compile(filter.Config{
-		Rules:    rules,
-		Profiles: profiles,
-		Clients:  clientSpecs,
-		Default:  defaultProfile,
-	})
-	if err != nil {
-		return err
-	}
-	engine := filter.New()
-	engine.Publish(set)
 
 	handler, err := dns.NewHandler(dns.Config{
-		Engine:   engine,
+		Decider:  engine,
 		Upstream: dns.NewForwarder(cfg.Upstream),
-		Clients:  identity,
 	})
 	if err != nil {
 		return err
@@ -118,23 +118,55 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		"udp", server.UDPAddr().String(),
 		"tcp", server.TCPAddr().String(),
 		"upstream", cfg.Upstream,
-		"rules", len(rules),
-		"profiles", len(profiles),
-		"clients", len(clientSpecs),
+		"database", cfg.DB,
+		"rules", engine.Size(),
 	)
 
-	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
+	stop, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	<-stop.Done()
 
 	logger.Info("aegis is shutting down")
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
 	return server.Shutdown(shutdown)
 }
 
+// seed writes the flag configuration into an empty database. Once anything is
+// stored, the database is the source of truth and the flags are ignored, which
+// is what lets the web app take over without a flag overwriting it on restart.
+func seed(ctx context.Context, database *store.Store, profiles []filter.ProfileSpec, records []store.Client, logger *slog.Logger) error {
+	empty, err := database.Unconfigured(ctx)
+	if err != nil {
+		return err
+	}
+	if !empty {
+		return nil
+	}
+
+	for _, profile := range profiles {
+		if err := database.SaveProfile(ctx, profile); err != nil {
+			return err
+		}
+	}
+	for _, record := range records {
+		if err := database.SaveClient(ctx, record); err != nil {
+			return err
+		}
+	}
+	if err := database.SetDefaultProfile(ctx, defaultProfile); err != nil {
+		return err
+	}
+
+	logger.Info("seeded an empty database from the flags",
+		"profiles", len(profiles),
+		"clients", len(records),
+	)
+	return nil
+}
+
 // buildProfiles turns the default settings and any configured profiles into the
-// specs Compile resolves.
+// specs the store holds.
 func buildProfiles(cfg config.Config) ([]filter.ProfileSpec, error) {
 	mode, err := filter.ParseBlockingMode(cfg.BlockingMode)
 	if err != nil {
@@ -184,28 +216,27 @@ func parseProfile(raw string) (filter.ProfileSpec, error) {
 	return profile, nil
 }
 
-// buildClients returns the policy bindings and the identity bindings for the
-// same set of entries, so the two can never disagree. The address doubles as
-// the client key, which makes a verdict readable without a lookup table.
-func buildClients(entries []string) ([]filter.ClientSpec, []client.Spec, error) {
-	var policies []filter.ClientSpec
-	var addresses []client.Spec
-
+// buildClients reads address=profile. The address doubles as the client key
+// until the web app gives clients names.
+func buildClients(entries []string) ([]store.Client, error) {
+	var records []store.Client
 	for _, raw := range entries {
 		addressText, profile, found := strings.Cut(raw, "=")
 		if !found || profile == "" {
-			return nil, nil, fmt.Errorf("aegis: client %q must be address=profile", raw)
+			return nil, fmt.Errorf("aegis: client %q must be address=profile", raw)
 		}
 		address, err := netip.ParseAddr(addressText)
 		if err != nil {
-			return nil, nil, fmt.Errorf("aegis: client %q: %w", raw, err)
+			return nil, fmt.Errorf("aegis: client %q: %w", raw, err)
 		}
 
-		key := filter.ClientKey(address.String())
-		policies = append(policies, filter.ClientSpec{Key: key, Profile: filter.ProfileID(profile)})
-		addresses = append(addresses, client.Spec{Key: key, Addresses: []netip.Addr{address}})
+		records = append(records, store.Client{
+			Key:       filter.ClientKey(address.String()),
+			Profile:   filter.ProfileID(profile),
+			Addresses: []netip.Addr{address},
+		})
 	}
-	return policies, addresses, nil
+	return records, nil
 }
 
 // loadBlocklists reads every configured file in one format and returns the

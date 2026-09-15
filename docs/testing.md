@@ -54,6 +54,7 @@ profiles and ask the same blocked name from two addresses:
 ./bin/aegis serve \
   --dns-address 10.9.9.1:15353 \
   --upstream 127.0.0.1:1 \
+  --db /tmp/aegis.db \
   --blocklist ./list.txt \
   --profile kids=refused \
   --client 10.9.9.2=kids \
@@ -66,6 +67,21 @@ dig -b 10.9.9.3 @10.9.9.1 -p 15353 ads.example.com   # NXDOMAIN, the default
 The upstream is unreachable on purpose. A blocked name never reaches it, so the
 check needs no working resolver and no internet access, which is what makes it
 runnable inside the namespace.
+
+### Proving the database is the source of truth
+
+The first boot seeds the database from the flags. Every boot after that ignores
+them, which is what lets the web app take over without a flag overwriting it.
+Run the server twice against one database, the second time with no profile or
+client flags at all, and confirm the answers do not change.
+
+```
+./bin/aegis serve ... --db /tmp/aegis.db --profile kids=refused --client 10.9.9.2=kids
+# log says: seeded an empty database from the flags
+
+./bin/aegis serve ... --db /tmp/aegis.db
+# no seeded line, and 10.9.9.2 still gets REFUSED
+```
 
 ## Tier 4. Cross-architecture build
 

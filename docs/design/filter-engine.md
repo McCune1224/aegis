@@ -67,7 +67,9 @@ Each unit ends in a check and lands as its own commit.
    selectors that identify them. Done. The check is a round trip through a real
    file that ends in a verdict and a resolved identity.
 8. **Runtime.** One owner that rebuilds the engine from the store and publishes,
-   so a stored change reaches a running server without a restart.
+   so a stored change reaches a running server without a restart. Done. The rule
+   set and the identity table live in one snapshot, because holding them in two
+   would let a query pair the new rules with the old selectors during a reload.
 9. **HTTP API.** chi routes over the store, plus SSE for the live query stream.
 10. **Web app.** The Solid 2 shell, then the configuration screens, then the
     node graph.

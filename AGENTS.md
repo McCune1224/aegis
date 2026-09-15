@@ -32,11 +32,11 @@ db/               goose migrations and sqlc query sources
 web/              Solid 2 app, embedded into the binary
 ```
 
-`internal/` gets one package per domain concept as the work lands. Planned
-homes are `filter` for matching, `blocklist` for sources and parsing, `client`
-for identity and profiles, `schedule` for time windows, `upstream` for resolver
-clients, `dns` for the query pipeline, `store` for SQLite access, `api` for HTTP
-and SSE, and `tui` for the Bubble Tea screens.
+`internal/` gets one package per domain concept as the work lands. What exists
+now is `filter` for rules and policy, `client` for identity, `blocklist` for
+list parsing, `store` for SQLite, `runtime` for the reload loop, and `dns` for
+the query pipeline. Still to come are `api` for HTTP and SSE, and `upstream` for
+resolver selection.
 
 ## Rules
 
