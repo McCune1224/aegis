@@ -104,17 +104,22 @@ type Provenance struct {
 }
 
 // Verdict is the decision for one query. A nil Match means no rule matched and
-// the query is allowed by default.
+// the query is allowed by default. Policy belongs to the client, and it rides
+// here so the caller answers without a second lookup.
 type Verdict struct {
 	Action Action
 	Match  *Provenance
+	Policy Policy
 }
 
-// RuleSet is an immutable rule index. Build it with Compile, then read it from
-// any number of goroutines. Nothing mutates a RuleSet after Compile returns.
+// RuleSet is an immutable rule index and policy table. Build it with Compile,
+// then read it from any number of goroutines. Nothing mutates a RuleSet after
+// Compile returns.
 type RuleSet struct {
 	exact      map[string]*entry
 	subdomains map[string]*entry
+	clients    map[ClientKey]Policy
+	fallback   Policy
 }
 
 type entry struct {
@@ -129,19 +134,38 @@ type candidate struct {
 	order      int
 }
 
-// Compile indexes rules for lookup. It rejects a rule the tables cannot express
-// instead of dropping it, so a bad list fails the load rather than failing open.
-func Compile(specs []RuleSpec) (*RuleSet, error) {
-	rs := &RuleSet{
-		exact:      make(map[string]*entry, len(specs)),
-		subdomains: make(map[string]*entry, len(specs)),
+// Compile resolves every profile and client and indexes the rules for lookup.
+// It rejects a rule or a profile the tables cannot express instead of dropping
+// it, so a bad config fails the load rather than failing open.
+func Compile(cfg Config) (*RuleSet, error) {
+	profiles, err := compileProfiles(cfg.Profiles, cfg.Default)
+	if err != nil {
+		return nil, err
 	}
+	clients, err := compileClients(cfg.Clients, profiles)
+	if err != nil {
+		return nil, err
+	}
+
+	rs := &RuleSet{
+		exact:      make(map[string]*entry, len(cfg.Rules)),
+		subdomains: make(map[string]*entry, len(cfg.Rules)),
+		clients:    clients,
+		fallback:   profiles[cfg.Default],
+	}
+	if err := rs.indexRules(cfg.Rules); err != nil {
+		return nil, err
+	}
+	return rs, nil
+}
+
+func (rs *RuleSet) indexRules(specs []RuleSpec) error {
 	for order, spec := range specs {
 		if spec.Domain.name == "" {
-			return nil, fmt.Errorf("filter: rule %q has no domain", spec.ID)
+			return fmt.Errorf("filter: rule %q has no domain", spec.ID)
 		}
 		if spec.Action != ActionAllow && spec.Action != ActionBlock {
-			return nil, fmt.Errorf("filter: rule %q has unknown action %d", spec.ID, spec.Action)
+			return fmt.Errorf("filter: rule %q has unknown action %d", spec.ID, spec.Action)
 		}
 
 		var (
@@ -154,7 +178,7 @@ func Compile(specs []RuleSpec) (*RuleSet, error) {
 		case MatchSubdomains:
 			table, exact = rs.subdomains, false
 		default:
-			return nil, fmt.Errorf("filter: rule %q has unknown match kind %d", spec.ID, spec.Kind)
+			return fmt.Errorf("filter: rule %q has unknown match kind %d", spec.ID, spec.Kind)
 		}
 
 		e := table[spec.Domain.name]
@@ -170,12 +194,18 @@ func Compile(specs []RuleSpec) (*RuleSet, error) {
 			order:      order,
 		})
 	}
-	return rs, nil
+	return nil
 }
 
-// Decide returns the verdict for one name. It looks up the whole name and then
-// each parent, so its cost follows the label count and not the rule count.
-func (rs *RuleSet) Decide(name Domain) Verdict {
+// Decide returns the verdict for one name and one client. It looks up the
+// client's policy once, then the whole name and each parent, so its cost
+// follows the label count and not the rule count.
+func (rs *RuleSet) Decide(name Domain, client ClientKey) Verdict {
+	policy := rs.fallback
+	if specific, exists := rs.clients[client]; exists {
+		policy = specific
+	}
+
 	var best *candidate
 
 	if e := rs.exact[name.name]; e != nil {
@@ -195,9 +225,9 @@ func (rs *RuleSet) Decide(name Domain) Verdict {
 	}
 
 	if best == nil {
-		return Verdict{Action: ActionAllow}
+		return Verdict{Action: ActionAllow, Policy: policy}
 	}
-	return Verdict{Action: best.action, Match: &best.provenance}
+	return Verdict{Action: best.action, Match: &best.provenance, Policy: policy}
 }
 
 // better picks between two candidates for the same name. Tie-breaking is by

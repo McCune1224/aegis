@@ -32,7 +32,8 @@ func (e *Engine) Publish(next *RuleSet) {
 	e.current.Store(next)
 }
 
-// Decide answers one query against the set the Engine answers from now.
-func (e *Engine) Decide(name Domain) Verdict {
-	return e.current.Load().Decide(name)
+// Decide answers one query for one client against the set the Engine answers
+// from now.
+func (e *Engine) Decide(name Domain, client ClientKey) Verdict {
+	return e.current.Load().Decide(name, client)
 }

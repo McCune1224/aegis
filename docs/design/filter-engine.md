@@ -54,14 +54,17 @@ Each unit ends in a check and lands as its own commit.
 3. **Blocklist parsing.** Parse hosts files, AdBlock syntax, and domains-only
    lists into `RuleSpec`. Done. The check is one fixture per format with a
    literal expected `[]RuleSpec`.
-4. **DNS handler.** Turn a verdict into a wire response and apply the four
-   blocking modes, with the upstream behind a `Resolver` seam.
+4. **DNS handler.** Turn a verdict into a wire response and apply the blocking
+   modes, with the upstream behind a `Resolver` seam. Done.
 5. **DNS server and forwarder.** Bind UDP and TCP, and forward allowed queries to
-   a configured upstream.
+   a configured upstream. Done.
 6. **More matchers.** Wildcard, regular expression, CIDR, and client. Each is a
    new match kind rather than a new branch in `Decide`.
-7. **Profiles.** Inheritance resolved at compile time, with cycles rejected. The
-   check is that a child setting wins and that a cycle fails to compile.
+7. **Profiles and client identity.** Inheritance resolved at compile time, with
+   cycles rejected, and an address resolved to an identity outside the filter
+   package. Done. The check is that two addresses asking the same blocked name
+   get two different answers, proven in a rootless namespace per
+   `docs/testing.md` tier 3.
 8. **Schedules.** Compile windows into a minute-of-week table.
 9. **Store.** SQLite through sqlc and goose, holding sources, rules, profiles,
    clients, and the query log.

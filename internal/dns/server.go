@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"sync"
 
 	mdns "github.com/miekg/dns"
@@ -110,7 +111,7 @@ type serveDNS struct {
 }
 
 func (s *serveDNS) ServeDNS(w mdns.ResponseWriter, req *mdns.Msg) {
-	resp, err := s.handler.Handle(context.Background(), req)
+	resp, err := s.handler.Handle(context.Background(), req, remoteAddress(w))
 	if err != nil {
 		s.logger.Warn("dns: query failed", "error", err, "client", w.RemoteAddr().String())
 	}
@@ -119,5 +120,19 @@ func (s *serveDNS) ServeDNS(w mdns.ResponseWriter, req *mdns.Msg) {
 	}
 	if err := w.WriteMsg(resp); err != nil {
 		s.logger.Warn("dns: write failed", "error", err, "client", w.RemoteAddr().String())
+	}
+}
+
+// remoteAddress turns the transport address into a client address. It unmaps a
+// v4-mapped v6 address so that an IPv4 client matches the IPv4 address an
+// operator configured for it.
+func remoteAddress(w mdns.ResponseWriter) netip.Addr {
+	switch addr := w.RemoteAddr().(type) {
+	case *net.UDPAddr:
+		return addr.AddrPort().Addr().Unmap()
+	case *net.TCPAddr:
+		return addr.AddrPort().Addr().Unmap()
+	default:
+		return netip.Addr{}
 	}
 }
