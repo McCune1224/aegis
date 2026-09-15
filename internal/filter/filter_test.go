@@ -208,3 +208,25 @@ func TestCompileRejectsBadRules(t *testing.T) {
 	}})
 	require.Error(t, err)
 }
+
+func TestParseDomainRejectsCharactersThatNeverAppearInAName(t *testing.T) {
+	for _, raw := range []string{
+		"exa mple.com",
+		"example.com/path",
+		"*.example.com",
+		"example,com",
+		"ex\u00e4mple.com",
+		"http://example.com",
+	} {
+		got, err := filter.ParseDomain(raw)
+		require.Error(t, err, "raw=%q", raw)
+		require.Equal(t, "", got.String(), "raw=%q", raw)
+	}
+}
+
+func TestParseDomainAcceptsTheUnderscoreLabelsDnsActuallyUses(t *testing.T) {
+	got, err := filter.ParseDomain("_dmarc.example.com")
+
+	require.NoError(t, err)
+	require.Equal(t, "_dmarc.example.com", got.String())
+}

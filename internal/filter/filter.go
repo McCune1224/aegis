@@ -15,17 +15,38 @@ type Domain struct {
 
 // ParseDomain turns a name from DNS wire, config, or a blocklist file into a
 // Domain. It is the boundary for names, so raw strings stop here and Domain
-// values move inward.
+// values move inward. A name with a label DNS cannot carry is an error rather
+// than a key that silently never matches.
 func ParseDomain(raw string) (Domain, error) {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	s = strings.TrimSuffix(s, ".")
 	if s == "" {
 		return Domain{}, fmt.Errorf("filter: empty domain %q", raw)
 	}
-	if strings.HasPrefix(s, ".") || strings.Contains(s, "..") {
+	if !validName(s) {
 		return Domain{}, fmt.Errorf("filter: malformed domain %q", raw)
 	}
 	return Domain{name: s}, nil
+}
+
+// validName reports whether every label holds only bytes that can appear in a
+// DNS name. It checks in place so a query does not allocate on the way in.
+func validName(name string) bool {
+	label := 0
+	for i := 0; i < len(name); i++ {
+		switch c := name[i]; {
+		case c == '.':
+			if label == 0 {
+				return false
+			}
+			label = 0
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-', c == '_':
+			label++
+		default:
+			return false
+		}
+	}
+	return label > 0
 }
 
 func (d Domain) String() string { return d.name }
@@ -54,6 +75,8 @@ type MatchKind uint8
 
 const (
 	MatchExact MatchKind = iota
+	// MatchSubdomains covers the rule's domain and every name under it, so a
+	// rule for example.com also covers ads.example.com.
 	MatchSubdomains
 )
 
