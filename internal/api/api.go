@@ -28,6 +28,7 @@ type Config struct {
 	Reloader Reloader
 	Hub      *Hub
 	Files    fs.FS
+	Upstream string
 	Address  string
 	Logger   *slog.Logger
 }
@@ -39,6 +40,7 @@ type Server struct {
 	reloader Reloader
 	hub      *Hub
 	files    fs.FS
+	upstream string
 	http     *http.Server
 	listener net.Listener
 
@@ -71,7 +73,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, hub: cfg.Hub, files: cfg.Files, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, hub: cfg.Hub, files: cfg.Files, upstream: cfg.Upstream, listener: listener}
 	s.http = &http.Server{
 		Handler:  s.routes(),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
@@ -93,6 +95,7 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ct
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/status", s.status)
 	mux.HandleFunc("GET /api/v1/profiles", s.listProfiles)
 	mux.HandleFunc("GET /api/v1/default-profile", s.getDefaultProfile)
 	mux.HandleFunc("PUT /api/v1/default-profile", s.putDefaultProfile)

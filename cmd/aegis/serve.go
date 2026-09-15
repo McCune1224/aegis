@@ -143,6 +143,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Reloader: engine,
 		Hub:      hub,
 		Files:    web.Files(),
+		Upstream: cfg.Upstream,
 		Address:  cfg.APIAddress,
 		Logger:   logger,
 	})

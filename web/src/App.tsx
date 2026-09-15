@@ -3,6 +3,7 @@ import {
   deleteClient as removeClient,
   deleteProfile as removeProfile,
   getDefaultProfile,
+  getStatus,
   listClients,
   listProfiles,
   saveClient as putClient,
@@ -14,26 +15,30 @@ import {
   type ProfileInput,
 } from "./api";
 import Clients from "./Clients";
+import Graph from "./Graph";
 import Profiles from "./Profiles";
 
-type Tab = "profiles" | "clients";
+type Tab = "profiles" | "clients" | "graph";
 
 export default function App() {
   const [tab, setTab] = createSignal<Tab>("profiles");
   const [profiles, setProfiles] = createSignal<Profile[]>([]);
   const [clients, setClients] = createSignal<Client[]>([]);
   const [defaultProfile, setDefaultProfile] = createSignal("");
+  const [upstream, setUpstream] = createSignal("");
   const [error, setError] = createSignal<string>();
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextDefault] = await Promise.all([
+    const [nextProfiles, nextClients, nextDefault, nextStatus] = await Promise.all([
       listProfiles(),
       listClients(),
       getDefaultProfile(),
+      getStatus(),
     ]);
     setProfiles(nextProfiles);
     setClients(nextClients);
     setDefaultProfile(nextDefault.profile);
+    setUpstream(nextStatus.upstream);
   }
 
   createEffect(
@@ -89,6 +94,14 @@ export default function App() {
           >
             Clients
           </button>
+          <button
+            type="button"
+            data-testid="tab-graph"
+            class={tab() === "graph" ? "active" : ""}
+            onClick={() => setTab("graph")}
+          >
+            Graph
+          </button>
         </nav>
       </header>
       {error() ? <p class="error">Could not load the configuration: {error()}</p> : null}
@@ -100,12 +113,19 @@ export default function App() {
           onDelete={deleteProfile}
           onSetDefault={makeDefault}
         />
-      ) : (
+      ) : tab() === "clients" ? (
         <Clients
           clients={clients()}
           profiles={profiles()}
           onSave={saveClient}
           onDelete={deleteClient}
+        />
+      ) : (
+        <Graph
+          profiles={profiles()}
+          clients={clients()}
+          defaultProfile={defaultProfile()}
+          upstream={upstream()}
         />
       )}
     </main>
