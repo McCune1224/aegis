@@ -27,19 +27,19 @@ func TestASourceAddedOverHTTPBlocksARealQuery(t *testing.T) {
 	status, body := h.do(t, http.MethodPut, "/api/v1/sources/trackers", `{"url":"`+url+`/list","format":"hosts","enabled":true}`)
 	require.Equal(t, http.StatusOK, status, body)
 
-	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress, "tracker.example.net.").Rcode)
+	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
 }
 
 func TestDisablingASourceStopsItBlocking(t *testing.T) {
 	h := startHarness(t)
 	url := startListServer(t)
 	h.do(t, http.MethodPut, "/api/v1/sources/trackers", `{"url":"`+url+`/list","format":"hosts","enabled":true}`)
-	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress, "tracker.example.net.").Rcode)
+	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
 
 	status, body := h.do(t, http.MethodPut, "/api/v1/sources/trackers", `{"enabled":false}`)
 	require.Equal(t, http.StatusOK, status, body)
 
-	require.NotEqual(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress, "tracker.example.net.").Rcode)
+	require.NotEqual(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
 }
 
 func TestSourceCRUDReadsBackWhatWasStored(t *testing.T) {

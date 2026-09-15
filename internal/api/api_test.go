@@ -82,12 +82,16 @@ func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// queryFor asks the harness DNS server for name from the loopback address the
-// policy defaults to.
-func queryFor(t *testing.T, server, name string) *mdns.Msg {
+// listedName is the name the harness's list server blocks, and the name every
+// DNS-path test in this package asks for.
+const listedName = "tracker.example.net"
+
+// queryFor asks the harness DNS server for the listed name from the loopback
+// address the policy defaults to.
+func queryFor(t *testing.T, server string) *mdns.Msg {
 	t.Helper()
 	client := &mdns.Client{Net: "udp", Timeout: 2 * time.Second}
-	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion(name, mdns.TypeA), server)
+	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion(listedName+".", mdns.TypeA), server)
 	require.NoError(t, err)
 	return resp
 }
