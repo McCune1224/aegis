@@ -118,3 +118,7 @@ to start `bin/aegis`, send keys, and assert on captured frames.
 The web UI needs a browser driven over CDP. Use the `control-ui` skill. The node
 graph renders to a WebGL canvas with no DOM to query, so assert on a screenshot
 diff rather than on DOM nodes.
+
+## Subagents
+
+AVOID SUBAGENTS UNLESS 100% NEEDED. IF I FIND THEM BEING USED IN A SHIT MANNER I WILL NUKE YOU.
