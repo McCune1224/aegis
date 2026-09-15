@@ -22,13 +22,13 @@ func compile(t *testing.T, specs ...filter.RuleSpec) *filter.RuleSet {
 	return rs
 }
 
-func hagezi(id string, kind filter.MatchKind, name string, action filter.Action) filter.RuleSpec {
+func hagezi(id string, kind filter.MatchKind, name string) filter.RuleSpec {
 	return filter.RuleSpec{
 		ID:     id,
 		Source: filter.Source{ID: "hagezi", Name: "Hagezi"},
 		Kind:   kind,
 		Domain: mustParse(name),
-		Action: action,
+		Action: filter.ActionBlock,
 	}
 }
 
@@ -64,7 +64,7 @@ func TestParseDomainRejectsEmpty(t *testing.T) {
 
 func TestDecideAppliesAllowBeforeBlock(t *testing.T) {
 	rs := compile(t,
-		hagezi("block-ads", filter.MatchSubdomains, "doubleclick.net", filter.ActionBlock),
+		hagezi("block-ads", filter.MatchSubdomains, "doubleclick.net"),
 		filter.RuleSpec{
 			ID:     "allow-news",
 			Source: filter.Source{ID: "local", Name: "Local"},
@@ -83,7 +83,7 @@ func TestDecideAppliesAllowBeforeBlock(t *testing.T) {
 }
 
 func TestDecideSubdomainRuleMatchesTheDomainItself(t *testing.T) {
-	rs := compile(t, hagezi("block-ads", filter.MatchSubdomains, "doubleclick.net", filter.ActionBlock))
+	rs := compile(t, hagezi("block-ads", filter.MatchSubdomains, "doubleclick.net"))
 
 	got := rs.Decide(domain(t, "doubleclick.net"))
 
@@ -93,7 +93,7 @@ func TestDecideSubdomainRuleMatchesTheDomainItself(t *testing.T) {
 }
 
 func TestDecideExactRuleDoesNotMatchChildName(t *testing.T) {
-	rs := compile(t, hagezi("block-exact", filter.MatchExact, "ads.example.com", filter.ActionBlock))
+	rs := compile(t, hagezi("block-exact", filter.MatchExact, "ads.example.com"))
 
 	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "cdn.ads.example.com")).Action)
 	require.Nil(t, rs.Decide(domain(t, "cdn.ads.example.com")).Match)
@@ -111,7 +111,7 @@ func TestDecideWithoutAMatchAllows(t *testing.T) {
 
 func TestDecidePrefersTheMoreSpecificRule(t *testing.T) {
 	rs := compile(t,
-		hagezi("block-net", filter.MatchSubdomains, "doubleclick.net", filter.ActionBlock),
+		hagezi("block-net", filter.MatchSubdomains, "doubleclick.net"),
 		filter.RuleSpec{
 			ID:     "block-ads",
 			Source: filter.Source{ID: "oisd", Name: "OISD"},
@@ -130,7 +130,7 @@ func TestDecidePrefersTheMoreSpecificRule(t *testing.T) {
 
 func TestDecidePrefersExactOverSubdomain(t *testing.T) {
 	rs := compile(t,
-		hagezi("block-sub", filter.MatchSubdomains, "ads.example.com", filter.ActionBlock),
+		hagezi("block-sub", filter.MatchSubdomains, "ads.example.com"),
 		filter.RuleSpec{
 			ID:     "block-exact",
 			Source: filter.Source{ID: "oisd", Name: "OISD"},
@@ -148,7 +148,7 @@ func TestDecidePrefersExactOverSubdomain(t *testing.T) {
 
 func TestDecideBreaksTiesByDeclarationOrder(t *testing.T) {
 	rs := compile(t,
-		hagezi("first", filter.MatchSubdomains, "example.com", filter.ActionBlock),
+		hagezi("first", filter.MatchSubdomains, "example.com"),
 		filter.RuleSpec{
 			ID:     "second",
 			Source: filter.Source{ID: "oisd", Name: "OISD"},
@@ -166,7 +166,7 @@ func TestDecideBreaksTiesByDeclarationOrder(t *testing.T) {
 
 func TestDecideKeepsAllowFromOneSourceWhenAnotherBlocks(t *testing.T) {
 	rs := compile(t,
-		hagezi("block-a", filter.MatchSubdomains, "example.com", filter.ActionBlock),
+		hagezi("block-a", filter.MatchSubdomains, "example.com"),
 		filter.RuleSpec{
 			ID:     "allow-a",
 			Source: filter.Source{ID: "local", Name: "Local"},
