@@ -10,7 +10,8 @@ Aegis targets a single static binary that runs on a Raspberry Pi, a NAS, a route
 
 | Concern | Choice | Notes |
 |---|---|---|
-| HTTP router | `go-chi/chi/v5` | Thin wrapper over `net/http`. Handlers stay stdlib-shaped. |
+| HTTP router | stdlib `net/http` | Go 1.22 `ServeMux` carries method and path patterns, which is all the API surface needs. chi was the first choice, but once the standard library caught up it added a dependency without adding capability. |
+| Live query stream | stdlib `net/http` with `text/event-stream` | Server-sent events. No upgrade handling, and `EventSource` reconnects on its own, which a dashboard wants. |
 | DNS engine | `github.com/miekg/dns` | Message parsing, server, and client. The query pipeline is ours. |
 | Upstream DoT | `miekg/dns` `Net: "tcp-tls"` | Built into the dns package. |
 | Upstream DoH | stdlib `net/http` | POST and GET wire formats. |
