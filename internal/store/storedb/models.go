@@ -31,3 +31,15 @@ type Setting struct {
 	Key   string
 	Value string
 }
+
+type Source struct {
+	Name      string
+	Url       string
+	Format    string
+	Enabled   int64
+	Etag      string
+	LastFetch int64
+	LastError string
+	RuleCount int64
+	Body      []byte
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -30,6 +31,9 @@ import (
 // another one.
 const defaultProfile filter.ProfileID = "default"
 
+// sourceTimeout bounds one blocklist fetch, redirects included.
+const sourceTimeout = 30 * time.Second
+
 func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -46,6 +50,7 @@ func newServeCmd() *cobra.Command {
 	flags.String("blocking-mode", "nxdomain", "nxdomain, null-address, custom-address, or refused, for the default profile")
 	flags.String("custom-address", "", "the address to answer with when the default profile blocks")
 	flags.StringArray("blocklist", nil, "path to a blocklist file, repeatable")
+	flags.StringArray("source", nil, "blocklist source as name=url, repeatable")
 	flags.String("block-format", "hosts", "hosts, domains, or adblock, applied to every blocklist")
 	flags.StringArray("profile", nil, "extra profile as name=mode or name=mode=address, repeatable")
 	flags.StringArray("client", nil, "bind an address to a profile as address=profile, repeatable")
@@ -92,9 +97,21 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = database.Close() }()
 
-	if err := seed(ctx, database, profiles, records, logger); err != nil {
+	firstBoot, err := database.Unconfigured(ctx)
+	if err != nil {
 		return err
 	}
+	if err := seed(ctx, database, profiles, records, firstBoot, logger); err != nil {
+		return err
+	}
+	if err := seedSources(ctx, database, cfg.Sources, format, firstBoot, logger); err != nil {
+		return err
+	}
+	sourceRules, err := fetchSourceRules(ctx, database, blocklist.NewFetcher(sourceTimeout), logger)
+	if err != nil {
+		return err
+	}
+	rules = append(rules, sourceRules...)
 
 	engine := runtime.New(database, rules)
 	if err := engine.Reload(ctx); err != nil {
@@ -156,12 +173,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 // seed writes the flag configuration into an empty database. Once anything is
 // stored, the database is the source of truth and the flags are ignored, which
 // is what lets the web app take over without a flag overwriting it on restart.
-func seed(ctx context.Context, database *store.Store, profiles []filter.ProfileSpec, records []store.Client, logger *slog.Logger) error {
-	empty, err := database.Unconfigured(ctx)
-	if err != nil {
-		return err
-	}
-	if !empty {
+func seed(ctx context.Context, database *store.Store, profiles []filter.ProfileSpec, records []store.Client, firstBoot bool, logger *slog.Logger) error {
+	if !firstBoot {
 		return nil
 	}
 
@@ -184,6 +197,75 @@ func seed(ctx context.Context, database *store.Store, profiles []filter.ProfileS
 		"clients", len(records),
 	)
 	return nil
+}
+
+// seedSources stores the flag sources on first boot, so the database stays the
+// source of truth after that.
+func seedSources(ctx context.Context, database *store.Store, entries []string, format blocklist.Format, firstBoot bool, logger *slog.Logger) error {
+	if !firstBoot || len(entries) == 0 {
+		return nil
+	}
+	for _, raw := range entries {
+		source, err := parseSource(raw, format)
+		if err != nil {
+			return err
+		}
+		if err := database.SaveSource(ctx, source); err != nil {
+			return err
+		}
+	}
+	logger.Info("seeded blocklist sources from the flags", "sources", len(entries))
+	return nil
+}
+
+func parseSource(raw string, format blocklist.Format) (store.Source, error) {
+	name, url, found := strings.Cut(raw, "=")
+	if !found || name == "" || url == "" {
+		return store.Source{}, fmt.Errorf("aegis: source %q must be name=url", raw)
+	}
+	return store.Source{Name: name, URL: url, Format: format, Enabled: true}, nil
+}
+
+// fetchSourceRules downloads every enabled source and returns its rules. A
+// source that fails still contributes its cached body and its error is recorded,
+// so one broken list cannot take the resolver down or quietly empty it.
+func fetchSourceRules(ctx context.Context, database *store.Store, fetcher *blocklist.Fetcher, logger *slog.Logger) ([]filter.RuleSpec, error) {
+	sources, err := database.EnabledSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var rules []filter.RuleSpec
+	for _, source := range sources {
+		fetched, fetchErr := fetcher.Fetch(ctx, source.URL, source.ETag)
+		body := source.Body
+		etag := source.ETag
+		if fetchErr == nil && !fetched.NotModified {
+			body = fetched.Body
+			etag = fetched.ETag
+		}
+
+		ruleCount := 0
+		if len(body) > 0 {
+			result, parseErr := blocklist.ParseList(bytes.NewReader(body), filter.Source{ID: source.Name, Name: source.Name}, source.Format)
+			switch {
+			case parseErr != nil && fetchErr == nil:
+				fetchErr = parseErr
+			case parseErr == nil:
+				rules = append(rules, result.Rules...)
+				ruleCount = len(result.Rules)
+				logger.Info("blocklist source loaded", "source", source.Name, "rules", ruleCount, "skipped", result.Skipped)
+			}
+		}
+
+		if fetchErr != nil {
+			logger.Warn("blocklist source failed", "source", source.Name, "url", source.URL, "error", fetchErr)
+		}
+		if err := database.RecordSourceFetch(ctx, source.Name, etag, time.Now(), fetchErr, ruleCount, body); err != nil {
+			return nil, err
+		}
+	}
+	return rules, nil
 }
 
 // buildProfiles turns the default settings and any configured profiles into the
