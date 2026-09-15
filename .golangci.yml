@@ -11,7 +11,6 @@ linters:
     - nilerr
     - noctx
     - prealloc
-    - revive
     - unconvert
     - unparam
     - whitespace
