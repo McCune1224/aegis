@@ -13,17 +13,22 @@ import (
 // because these values arrive from flags and the environment, and the command
 // parses each one into a typed value where it is used.
 type Config struct {
-	DNSAddress    string   `mapstructure:"dns-address"`
-	Upstream      string   `mapstructure:"upstream"`
-	APIAddress    string   `mapstructure:"api-address"`
-	DB            string   `mapstructure:"db"`
-	BlockingMode  string   `mapstructure:"blocking-mode"`
-	CustomAddress string   `mapstructure:"custom-address"`
-	Blocklists    []string `mapstructure:"blocklist"`
-	BlockFormat   string   `mapstructure:"block-format"`
-	Profiles      []string `mapstructure:"profile"`
-	Clients       []string `mapstructure:"client"`
-	LogLevel      string   `mapstructure:"log-level"`
+	DNSAddress     string   `mapstructure:"dns-address"`
+	Upstream       string   `mapstructure:"upstream"`
+	APIAddress     string   `mapstructure:"api-address"`
+	APIAllowRemote bool     `mapstructure:"api-allow-remote"`
+	AdminPassword  string   `mapstructure:"admin-password"`
+	TLSCert        string   `mapstructure:"tls-cert"`
+	TLSKey         string   `mapstructure:"tls-key"`
+	TLSSelfSigned  bool     `mapstructure:"tls-self-signed"`
+	DB             string   `mapstructure:"db"`
+	BlockingMode   string   `mapstructure:"blocking-mode"`
+	CustomAddress  string   `mapstructure:"custom-address"`
+	Blocklists     []string `mapstructure:"blocklist"`
+	BlockFormat    string   `mapstructure:"block-format"`
+	Profiles       []string `mapstructure:"profile"`
+	Clients        []string `mapstructure:"client"`
+	LogLevel       string   `mapstructure:"log-level"`
 }
 
 // Load reads the environment over the flag defaults, and a flag that was set
