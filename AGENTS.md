@@ -6,8 +6,10 @@ node graph dashboard. The backend is Go. The web UI is Solid 2 over a WebGL
 canvas. Both ship as one static binary.
 
 Read `docs/stack.md` before you add a dependency or change the build. It records
-why each tool is here and which alternatives lost. `docs/roadmap.md` is the map
-of what is built, what is next, and what is left, with an issue number for each.
+why each tool is here and which alternatives lost.
+
+Work is tracked as GitHub issues rather than in a roadmap file. `gh issue list
+--label next` is the queue, and each issue carries its own acceptance check.
 
 ## Commands
 
