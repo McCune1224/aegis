@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/cookiejar"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,13 +26,10 @@ type harness struct {
 	apiURL     string
 	dnsAddress string
 	hub        *api.Hub
-	client     *http.Client
-	csrf       string
 }
 
 // startHarness runs the store, runtime, DNS server, and API in process, the way
-// serve wires them, so a mutation travels the whole path to a wire answer. It
-// signs in first, because every route but login now needs a session.
+// serve wires them, so a mutation travels the whole path to a wire answer.
 func startHarness(t *testing.T) *harness {
 	t.Helper()
 	ctx := t.Context()
@@ -56,49 +52,22 @@ func startHarness(t *testing.T) *harness {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = dnsServer.Shutdown(context.Background()) })
 
-	hash, err := api.HashPassword("secret")
-	require.NoError(t, err)
-	apiServer, err := api.Start(api.Config{
-		Store:    database,
-		Reloader: rt,
-		Hub:      hub,
-		Auth:     api.NewAuth(hash, false),
-		Address:  "127.0.0.1:0",
-	})
+	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Hub: hub, Address: "127.0.0.1:0"})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = apiServer.Shutdown(context.Background()) })
 
-	jar, err := cookiejar.New(nil)
-	require.NoError(t, err)
-	h := &harness{
+	return &harness{
 		apiURL:     "http://" + apiServer.Addr().String(),
 		dnsAddress: dnsServer.UDPAddr().String(),
 		hub:        hub,
-		client:     &http.Client{Jar: jar},
 	}
-	h.signIn(t, "secret")
-	return h
-}
-
-func (h *harness) signIn(t *testing.T, password string) {
-	t.Helper()
-	status, body := h.do(t, http.MethodPost, "/api/v1/session", `{"password":"`+password+`"}`)
-	require.Equal(t, http.StatusOK, status, body)
-	var payload struct {
-		CSRF string `json:"csrf"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(body), &payload))
-	h.csrf = payload.CSRF
 }
 
 func (h *harness) do(t *testing.T, method, path, body string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, h.apiURL+path, strings.NewReader(body))
 	require.NoError(t, err)
-	if h.csrf != "" {
-		req.Header.Set("X-CSRF-Token", h.csrf)
-	}
-	resp, err := h.client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	payload, err := io.ReadAll(resp.Body)
@@ -282,7 +251,7 @@ func TestTheQueryStreamCarriesADecisionFromARealQuery(t *testing.T) {
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.apiURL+"/api/v1/stream/queries", nil)
 	require.NoError(t, err)
-	resp, err := h.client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)

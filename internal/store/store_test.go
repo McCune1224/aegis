@@ -137,22 +137,6 @@ func TestLoadReportsAStoredValueItCannotParse(t *testing.T) {
 	require.Contains(t, err.Error(), "unknown blocking mode")
 }
 
-func TestAdminPasswordHashIsOnlyStoredOnceSet(t *testing.T) {
-	s := open(t)
-	ctx := t.Context()
-
-	_, found, err := s.AdminPasswordHash(ctx)
-	require.NoError(t, err)
-	require.False(t, found)
-
-	require.NoError(t, s.SetAdminPasswordHash(ctx, "encoded-hash"))
-
-	got, found, err := s.AdminPasswordHash(ctx)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, "encoded-hash", got)
-}
-
 func TestDeleteClientAlsoRemovesItsSelectors(t *testing.T) {
 	s := open(t)
 	ctx := t.Context()
