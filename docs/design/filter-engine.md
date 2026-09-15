@@ -47,24 +47,31 @@ the graph the compiler consumes and there is no second representation.
 Each unit ends in a check and lands as its own commit.
 
 1. **Rule matching.** Exact and subdomain rules, allow beats block, provenance on
-   the verdict. Done. 30 ns per decision against 10 rules and 37 ns against
+   the verdict. Done. 30 ns per decision against 10 rules and 34 ns against
    100000, both at zero allocations.
-2. **Rule set swap.** An `Engine` holding one atomic pointer with `Publish`. The
-   check is a test that a query in flight sees one consistent set.
+2. **Rule set swap.** An `Engine` holding one atomic pointer with `Publish`. Done.
+   The check is a test that a query in flight sees one consistent set.
 3. **Blocklist parsing.** Parse hosts files, AdBlock syntax, and domains-only
-   lists into `RuleSpec`. This is the boundary. The check is one fixture per
-   format with a literal expected `[]RuleSpec`.
-4. **More matchers.** Wildcard, regular expression, CIDR, and client. Each is a
+   lists into `RuleSpec`. Done. The check is one fixture per format with a
+   literal expected `[]RuleSpec`.
+4. **DNS handler.** Turn a verdict into a wire response and apply the four
+   blocking modes, with the upstream behind a `Resolver` seam.
+5. **DNS server and forwarder.** Bind UDP and TCP, and forward allowed queries to
+   a configured upstream.
+6. **More matchers.** Wildcard, regular expression, CIDR, and client. Each is a
    new match kind rather than a new branch in `Decide`.
-5. **Profiles.** Inheritance resolved at compile time, with cycles rejected. The
+7. **Profiles.** Inheritance resolved at compile time, with cycles rejected. The
    check is that a child setting wins and that a cycle fails to compile.
-6. **Schedules.** Compile windows into a minute-of-week table.
-7. **Store.** SQLite through sqlc and goose, holding sources, rules, profiles,
+8. **Schedules.** Compile windows into a minute-of-week table.
+9. **Store.** SQLite through sqlc and goose, holding sources, rules, profiles,
    clients, and the query log.
-8. **DNS pipeline.** A `miekg/dns` listener that calls `Decide` and applies the
-   four blocking modes.
-9. **HTTP API.** chi routes plus SSE for the live query stream.
-10. **Web UI.** The Solid 2 shell first, then the node graph.
+10. **HTTP API.** chi routes plus SSE for the live query stream.
+11. **Web UI.** The Solid 2 shell first, then the node graph.
+
+The matcher work moved from fourth to sixth and the DNS work moved up. The
+strongest check available for everything built so far is a real DNS query, and
+more matchers add breadth to a system nobody can run yet. The handler comes
+first because it is the part that is pure and cheap to test on its own.
 
 ## Deferred, with the reason
 
