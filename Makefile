@@ -1,13 +1,16 @@
 GO ?= go
 BIN := bin/aegis
 
-.PHONY: build test fmt vet lint tools clean
+.PHONY: build test fmt vet lint tools crossbuild clean
 
 build:
 	$(GO) build -o $(BIN) ./cmd/aegis
 
 test:
 	$(GO) test -race ./...
+
+crossbuild:
+	./scripts/check-release-targets.sh
 
 fmt:
 	gofmt -l -w .

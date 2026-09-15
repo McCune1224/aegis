@@ -106,6 +106,9 @@ standard library over a small library, and a small library over a framework.
 Every change needs evidence from the surface it touches. "It compiles" and "the
 unit tests pass" are not that evidence on their own.
 
+`docs/testing.md` names the five tiers and which one a change belongs in. Most
+work stops at the pure tests or at local sockets on an ephemeral port.
+
 The Go backend needs `make test` plus a run that exercises the real path. Use a
 temp SQLite file and a real socket on an ephemeral port rather than a mock.
 
