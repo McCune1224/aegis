@@ -58,22 +58,74 @@ const maxScale = 3;
 
 const elk = new ELK();
 
-function glowTexture(): Texture {
+// makeStarTexture bakes one star: a soft outer halo, a colored inner glow,
+// four diffraction spikes, and a hot core. Tint arrives as an rgb hex string
+// like "#7dd3fc" so the gradient stops can carry alpha.
+function makeStarTexture(tint: string, spikes: number): Texture {
+  const size = 160;
   const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 64;
+  canvas.width = size;
+  canvas.height = size;
   const context = canvas.getContext("2d");
   if (!context) {
     return Texture.WHITE;
   }
-  const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
-  gradient.addColorStop(0, "rgba(255,255,255,0.9)");
-  gradient.addColorStop(0.3, "rgba(255,255,255,0.25)");
-  gradient.addColorStop(1, "rgba(255,255,255,0)");
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, 64, 64);
+  const center = size / 2;
+
+  const halo = context.createRadialGradient(center, center, 0, center, center, center);
+  halo.addColorStop(0, `${tint}55`);
+  halo.addColorStop(0.4, `${tint}22`);
+  halo.addColorStop(1, `${tint}00`);
+  context.fillStyle = halo;
+  context.fillRect(0, 0, size, size);
+
+  const glow = context.createRadialGradient(center, center, 0, center, center, 26);
+  glow.addColorStop(0, `${tint}cc`);
+  glow.addColorStop(0.6, `${tint}55`);
+  glow.addColorStop(1, `${tint}00`);
+  context.fillStyle = glow;
+  context.beginPath();
+  context.arc(center, center, 26, 0, Math.PI * 2);
+  context.fill();
+
+  context.lineCap = "round";
+  for (let index = 0; index < 4; index++) {
+    const angle = (index * Math.PI) / 2;
+    const inner = 5;
+    const outer = index % 2 === 0 ? spikes : spikes * 0.55;
+    const gradient = context.createLinearGradient(
+      center + Math.cos(angle) * inner,
+      center + Math.sin(angle) * inner,
+      center + Math.cos(angle) * outer,
+      center + Math.sin(angle) * outer,
+    );
+    gradient.addColorStop(0, `${tint}dd`);
+    gradient.addColorStop(1, `${tint}00`);
+    context.strokeStyle = gradient;
+    context.lineWidth = 2.2;
+    context.beginPath();
+    context.moveTo(center + Math.cos(angle) * inner, center + Math.sin(angle) * inner);
+    context.lineTo(center + Math.cos(angle) * outer, center + Math.sin(angle) * outer);
+    context.stroke();
+  }
+
+  const core = context.createRadialGradient(center, center, 0, center, center, 7);
+  core.addColorStop(0, "#ffffff");
+  core.addColorStop(0.5, "#ffffffee");
+  core.addColorStop(1, "#ffffff00");
+  context.fillStyle = core;
+  context.beginPath();
+  context.arc(center, center, 7, 0, Math.PI * 2);
+  context.fill();
+
   return Texture.from(canvas);
 }
+
+const kindTint: Record<Kind, string> = {
+  client: "#7dd3fc",
+  profile: "#6ee7b7",
+  upstream: "#c4b5fd",
+};
 
 export default function Graph(props: Props) {
   let host: HTMLDivElement | undefined;
@@ -91,7 +143,7 @@ export default function Graph(props: Props) {
   let fxLayer: Graphics | undefined;
   let selection: Graphics | undefined;
   let camera = { x: 0, y: 0, scale: 1 };
-  let halo: Texture;
+  let starTextures: Map<Kind, Texture>;
 
   createEffect(
     () => [buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstream)] as const,
@@ -126,7 +178,6 @@ export default function Graph(props: Props) {
     if (app) {
       return app;
     }
-    halo = glowTexture();
     const instance = new Application();
     await instance.init({
       backgroundAlpha: 0,
@@ -136,12 +187,21 @@ export default function Graph(props: Props) {
     });
     host?.appendChild(instance.canvas);
 
+    starTextures = new Map<Kind, Texture>([
+      ["client", makeStarTexture(kindTint.client, 44)],
+      ["profile", makeStarTexture(kindTint.profile, 56)],
+      ["upstream", makeStarTexture(kindTint.upstream, 68)],
+    ]);
     world = new Container();
     haloLayer = new Container();
     edgeLayer = new Graphics();
     nodeLayer = new Container();
     fxLayer = new Graphics();
     selection = new Graphics();
+    for (let index = 0; index < 4; index++) {
+      selection.arc(0, 0, 17, (index * Math.PI) / 2 + 0.28, ((index + 1) * Math.PI) / 2 - 0.28);
+      selection.stroke({ width: 1.4, color: 0xffffff, alpha: 0.85 });
+    }
     world.addChild(edgeLayer, haloLayer, nodeLayer, fxLayer, selection);
     instance.stage.addChild(world);
     instance.stage.eventMode = "static";
@@ -212,20 +272,14 @@ export default function Graph(props: Props) {
     if (!haloLayer || !nodeLayer) {
       return;
     }
-    const size = node.kind === "upstream" ? 46 : node.kind === "profile" ? 38 : 34;
-    const glow = new Sprite(halo);
-    glow.anchor.set(0.5);
-    glow.x = node.x;
-    glow.y = node.y;
-    glow.width = size * 2.2;
-    glow.height = size * 2.2;
-    glow.tint = kindColor[node.kind];
-    glow.alpha = 0.55;
-    haloLayer.addChild(glow);
-
-    const core = new Graphics();
-    core.circle(node.x, node.y, node.kind === "upstream" ? 5.5 : 4).fill(0xffffff);
-    nodeLayer.addChild(core);
+    const size = node.kind === "upstream" ? 150 : node.kind === "profile" ? 124 : 108;
+    const star = new Sprite(starTextures.get(node.kind) ?? Texture.WHITE);
+    star.anchor.set(0.5);
+    star.x = node.x;
+    star.y = node.y;
+    star.width = size;
+    star.height = size;
+    haloLayer.addChild(star);
 
     const label = new Text({
       text: node.label,
@@ -271,17 +325,16 @@ export default function Graph(props: Props) {
     if (!selection) {
       return;
     }
-    selection.clear();
     const node = selected() ? placed.get(selected() ?? "") : undefined;
+    if (!selection) {
+      return;
+    }
+    selection.visible = node !== undefined;
     if (!node) {
       return;
     }
-    selection
-      .circle(node.x, node.y, 14)
-      .stroke({ width: 1.2, color: kindColor[node.kind], alpha: 0.9 });
-    selection
-      .circle(node.x, node.y, 19)
-      .stroke({ width: 1, color: kindColor[node.kind], alpha: 0.35 });
+    selection.position.set(node.x, node.y);
+    selection.tint = kindColor[node.kind];
   }
 
   // ── Live flow ─────────────────────────────────────────────────────────
@@ -404,25 +457,58 @@ export default function Graph(props: Props) {
       }
     });
     if (selection) {
-      selection.alpha = 0.7 + Math.sin(time * 2.4) * 0.3;
+      selection.alpha = 0.55 + Math.sin(time * 2.4) * 0.35;
+      selection.rotation += deltaSeconds * 0.7;
     }
   }
 
   // ── Pan, zoom, selection ──────────────────────────────────────────────
 
   function attachControls(instance: Application) {
-    let dragging = false;
     let moved = 0;
     let last = { x: 0, y: 0 };
+    const pointers = new Map<number, { x: number; y: number }>();
+    let pinch: { startDistance: number; startScale: number; midX: number; midY: number } | undefined;
+
+    const pinchState = () => {
+      const points = [...pointers.values()];
+      if (points.length < 2) {
+        return undefined;
+      }
+      const [a, b] = points;
+      return {
+        startDistance: Math.hypot(a.x - b.x, a.y - b.y),
+        startScale: camera.scale,
+        midX: (a.x + b.x) / 2,
+        midY: (a.y + b.y) / 2,
+      };
+    };
 
     instance.stage.on("pointerdown", (event) => {
-      dragging = true;
+      pointers.set(event.pointerId, { x: event.global.x, y: event.global.y });
       moved = 0;
       last = { x: event.global.x, y: event.global.y };
+      if (pointers.size === 2) {
+        pinch = pinchState();
+      }
     });
 
     instance.stage.on("pointermove", (event) => {
-      if (!dragging) {
+      if (!pointers.has(event.pointerId)) {
+        return;
+      }
+      pointers.set(event.pointerId, { x: event.global.x, y: event.global.y });
+      if (pointers.size >= 2 && pinch) {
+        const current = pinchState();
+        if (!current || current.startDistance === 0) {
+          return;
+        }
+        const next = Math.min(maxScale, Math.max(minScale, pinch.startScale * (current.startDistance / pinch.startDistance)));
+        const applied = next / camera.scale;
+        camera.x = pinch.midX - applied * (pinch.midX - camera.x);
+        camera.y = pinch.midY - applied * (pinch.midY - camera.y);
+        camera.scale = next;
+        applyCamera();
         return;
       }
       const dx = event.global.x - last.x;
@@ -434,13 +520,19 @@ export default function Graph(props: Props) {
       applyCamera();
     });
 
-    instance.stage.on("pointerup", (event) => {
-      dragging = false;
+    const release = (event: { pointerId: number; global: { x: number; y: number } }) => {
+      pointers.delete(event.pointerId);
+      if (pointers.size < 2) {
+        pinch = undefined;
+      }
       if (moved < 6) {
         setSelected(pick(event.global.x, event.global.y));
         drawSelection();
       }
-    });
+    };
+
+    instance.stage.on("pointerup", release);
+    instance.stage.on("pointerupoutside", release);
 
     const canvas = instance.canvas;
     canvas.addEventListener("wheel", (event) => {

@@ -76,3 +76,11 @@ export const IconSources = () =>
       <path d="M2.5 8 c0 1.2 2.5 2.2 5.5 2.2 s5.5-1 5.5-2.2" />
     </>,
   );
+
+export const IconGear = () =>
+  base(
+    <>
+      <circle cx="8" cy="8" r="2.4" />
+      <path d="M8 1.6v2 M8 12.4v2 M1.6 8h2 M12.4 8h2 M3.5 3.5l1.4 1.4 M11.1 11.1l1.4 1.4 M12.5 3.5l-1.4 1.4 M4.9 11.1l-1.4 1.4" />
+    </>,
+  );

@@ -28,17 +28,18 @@ import {
   type Source,
   type SourceInput,
 } from "./api";
-import { IconClients, IconDashboard, IconGraph, IconLog, IconRules, IconShield, IconSources } from "./Icons";
+import { IconClients, IconDashboard, IconGear, IconGraph, IconLog, IconRules, IconShield, IconSources } from "./Icons";
 import Clients from "./Clients";
 import Dashboard from "./Dashboard";
 import Graph from "./Graph";
 import QueryLog from "./QueryLog";
+import Settings from "./Settings";
 import { createQueryLog } from "./querylog";
 import Profiles from "./Profiles";
 import Rules from "./Rules";
 import Sources from "./Sources";
 
-type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "graph";
+type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "settings" | "graph";
 
 type NavItem = { id: Tab; label: string; icon: () => JSX.Element };
 
@@ -50,6 +51,7 @@ const NAV: NavItem[] = [
   { id: "profiles", label: "Profiles", icon: IconShield },
   { id: "rules", label: "Rules", icon: IconRules },
   { id: "sources", label: "Sources", icon: IconSources },
+  { id: "settings", label: "Settings", icon: IconGear },
 ];
 
 const TITLES: Record<Tab, string> = {
@@ -60,6 +62,7 @@ const TITLES: Record<Tab, string> = {
   profiles: "Profiles",
   rules: "Rules",
   sources: "Sources",
+  settings: "Settings",
 };
 
 export default function App() {
@@ -73,8 +76,11 @@ export default function App() {
   const [upstream, setUpstream] = createSignal("");
   const [ruleCount, setRuleCount] = createSignal(0);
   const [error, setError] = createSignal<string>();
+  const [windowMinutes, setWindowMinutes] = createSignal(Number(localStorage.getItem("aegis.window")) || 60);
+  const [live, setLive] = createSignal(localStorage.getItem("aegis.live") !== "0");
+  const [logFilter, setLogFilter] = createSignal<{ client?: string; name?: string }>({});
 
-  const log = createQueryLog();
+  const log = createQueryLog({ live: live() });
 
   async function refresh() {
     const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextDefault, nextStatus] =
@@ -194,14 +200,21 @@ export default function App() {
           </Show>
           <main class="screen">
             <Show when={tab() === "dashboard"}>
-              <Dashboard entries={log.entries()} onOpenLog={() => setTab("log")} />
+              <Dashboard
+                entries={log.entries()}
+                windowMinutes={windowMinutes()}
+                onSetWindow={setWindowMinutes}
+                onOpenLog={() => setTab("log")}
+                onFilter={(filter) => {
+                  setLogFilter(filter);
+                  setTab("log");
+                }}
+              />
             </Show>
             <Show when={tab() === "log"}>
               <QueryLog
-                entries={log.entries()}
-                live={log.live()}
-                onToggleLive={log.setLive}
-                onReload={() => log.load({ limit: 2000 })}
+                log={log}
+                filter={logFilter()}
                 onRuleAdded={async () => {
                   await refresh();
                 }}
@@ -248,6 +261,17 @@ export default function App() {
               <div class="screen-inner">
                 <Sources sources={sources()} catalog={catalog()} onSave={saveSource} onDelete={deleteSource} />
               </div>
+            </Show>
+            <Show when={tab() === "settings"}>
+              <Settings
+                profiles={profiles()}
+                defaultProfile={defaultProfile()}
+                onSetDefault={makeDefault}
+                windowMinutes={windowMinutes()}
+                onSetWindow={setWindowMinutes}
+                live={live()}
+                onSetLive={setLive}
+              />
             </Show>
           </main>
         </div>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { aggregate, windowMinutes } from "./stats";
+import { aggregate, window24Hours, windowMinutes } from "./stats";
 
 const NOW = Date.UTC(2026, 8, 15, 12, 0, 0);
 
@@ -76,5 +76,21 @@ describe("aggregate", () => {
     expect(stats.clients).toBe(0);
     expect(stats.topBlocked).toEqual([]);
     expect(stats.series).toHaveLength(windowMinutes);
+  });
+});
+
+describe("aggregate windows", () => {
+  test("the 24 hour window spreads the same entries across half hour buckets", () => {
+    const now = Date.UTC(2026, 8, 15, 12, 0, 0);
+    const hoursAgo = (hours: number) => new Date(now - hours * 3_600_000).toISOString();
+    const entries = [
+      { time: hoursAgo(23), client: "10.9.9.2", name: "old.example.com", type: "A", verdict: "allow" },
+      { time: hoursAgo(1), client: "10.9.9.2", name: "new.example.com", type: "A", verdict: "block" },
+    ];
+    const stats = aggregate(entries, now, window24Hours);
+    expect(stats.series).toHaveLength(60);
+    expect(stats.series[0].total).toBe(0);
+    expect(stats.series[1]).toEqual({ t: now - 1392 * 60_000, total: 1, blocked: 0 });
+    expect(stats.series[56]).toEqual({ t: now - 72 * 60_000, total: 1, blocked: 1 });
   });
 });

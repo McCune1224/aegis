@@ -14,15 +14,17 @@ export type Stats = {
 };
 
 export const windowMinutes = 60;
+export const window24Hours = 1440;
+const bucketCount = 60;
 
-// aggregate turns a recent query log slice into the dashboard's numbers: one
-// bucket per minute over the last hour, plus the top lists. now is passed in so
-// the result only depends on the entries and the clock handed to it.
-export function aggregate(entries: QueryEntry[], now: number): Stats {
-  const buckets = windowMinutes;
-  const bucketMs = 60_000;
-  const windowStart = now - (buckets - 1) * bucketMs;
-  const series: Bucket[] = Array.from({ length: buckets }, (_, index) => ({
+// aggregate turns a recent query log slice into the dashboard's numbers. The
+// window is divided into bucketCount equal buckets and now is passed in so the
+// result only depends on the entries and the clock handed to it.
+export function aggregate(entries: QueryEntry[], now: number, minutes = windowMinutes): Stats {
+  const windowMs = minutes * 60_000;
+  const bucketMs = windowMs / bucketCount;
+  const windowStart = now - windowMs + bucketMs;
+  const series: Bucket[] = Array.from({ length: bucketCount }, (_, index) => ({
     t: windowStart + index * bucketMs,
     total: 0,
     blocked: 0,
@@ -39,7 +41,7 @@ export function aggregate(entries: QueryEntry[], now: number): Stats {
       continue;
     }
     const index = Math.floor((time - windowStart) / bucketMs);
-    if (index >= 0 && index < buckets) {
+    if (index >= 0 && index < bucketCount) {
       series[index].total += 1;
       if (entry.verdict === "block") {
         series[index].blocked += 1;

@@ -11,9 +11,9 @@ export type QueryLog = {
 
 const cap = 5000;
 
-export function createQueryLog(): QueryLog {
+export function createQueryLog(options: { live?: boolean } = {}): QueryLog {
   const [entries, setEntries] = createSignal<QueryEntry[]>([]);
-  const [live, setLive] = createSignal(true);
+  const [live, setLive] = createSignal(options.live ?? true);
   const listeners = new Set<(decision: Decision) => void>();
 
   streamQueries((decision) => {
