@@ -81,7 +81,7 @@ export default function Clients(props: Props) {
   }
 
   return (
-    <section>
+    <section class="panel">
       <ul>
         <For each={props.clients}>
           {(client) => (

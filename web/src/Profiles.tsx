@@ -77,7 +77,7 @@ export default function Profiles(props: Props) {
   }
 
   return (
-    <section>
+    <section class="panel">
       <ul>
         <For each={props.profiles}>
           {(profile) => (
