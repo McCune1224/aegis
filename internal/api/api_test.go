@@ -1,0 +1,274 @@
+package api_test
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net"
+	"net/http"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	mdns "github.com/miekg/dns"
+	"github.com/stretchr/testify/require"
+
+	"aegis/internal/api"
+	"aegis/internal/dns"
+	"aegis/internal/filter"
+	"aegis/internal/runtime"
+	"aegis/internal/store"
+)
+
+type harness struct {
+	apiURL     string
+	dnsAddress string
+}
+
+// startHarness runs the store, runtime, DNS server, and API in process, the way
+// serve wires them, so a mutation travels the whole path to a wire answer.
+func startHarness(t *testing.T) *harness {
+	t.Helper()
+	ctx := t.Context()
+
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "aegis.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = database.Close() })
+
+	rt := runtime.New(database, []filter.RuleSpec{blockedAds()})
+	require.NoError(t, rt.Reload(ctx))
+
+	handler, err := dns.NewHandler(dns.Config{
+		Decider:  rt,
+		Upstream: dns.NewForwarder("127.0.0.1:1"),
+	})
+	require.NoError(t, err)
+	dnsServer, err := dns.Start(dns.ServerConfig{Handler: handler, Address: "127.0.0.1:0"})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = dnsServer.Shutdown(context.Background()) })
+
+	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Address: "127.0.0.1:0"})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = apiServer.Shutdown(context.Background()) })
+
+	return &harness{
+		apiURL:     "http://" + apiServer.Addr().String(),
+		dnsAddress: dnsServer.UDPAddr().String(),
+	}
+}
+
+func (h *harness) do(t *testing.T, method, path, body string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, h.apiURL+path, strings.NewReader(body))
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	payload, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp.StatusCode, string(payload)
+}
+
+// queryFrom asks from a chosen source address, so the server sees the client
+// the policy is keyed on.
+func queryFrom(t *testing.T, local, server, name string) *mdns.Msg {
+	t.Helper()
+	client := &mdns.Client{
+		Net:     "udp",
+		Timeout: 2 * time.Second,
+		Dialer:  &net.Dialer{LocalAddr: &net.UDPAddr{IP: net.ParseIP(local)}},
+	}
+	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion(name, mdns.TypeA), server)
+	require.NoError(t, err)
+	return resp
+}
+
+type profileJSON struct {
+	Name    string  `json:"name"`
+	Extends string  `json:"extends"`
+	Mode    *string `json:"mode"`
+	Custom  *string `json:"custom"`
+}
+
+type clientJSON struct {
+	Name      string   `json:"name"`
+	Profile   string   `json:"profile"`
+	Notes     string   `json:"notes"`
+	Addresses []string `json:"addresses"`
+	Prefixes  []string `json:"prefixes"`
+}
+
+func TestAProfileAndClientCreatedOverHTTPGovernARealQuery(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPut, "/api/profiles/kids", `{"mode":"refused"}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodPut, "/api/clients/tablet", `{"profile":"kids","addresses":["127.0.0.2"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
+	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.1", h.dnsAddress, "ads.example.com.").Rcode)
+}
+
+func TestReadingBackAProfileAndAClientReturnsWhatWasStored(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPut, "/api/profiles/kids", `{"extends":"default","mode":"refused"}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodPut, "/api/clients/tablet", `{"profile":"kids","notes":"the spare one","addresses":["10.9.9.2"],"prefixes":["10.9.8.0/24"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	status, body = h.do(t, http.MethodGet, "/api/profiles/kids", "")
+	require.Equal(t, http.StatusOK, status, body)
+	var profile profileJSON
+	require.NoError(t, json.Unmarshal([]byte(body), &profile))
+	require.Equal(t, "kids", profile.Name)
+	require.Equal(t, "default", profile.Extends)
+	require.NotNil(t, profile.Mode)
+	require.Equal(t, "refused", *profile.Mode)
+
+	status, body = h.do(t, http.MethodGet, "/api/clients/tablet", "")
+	require.Equal(t, http.StatusOK, status, body)
+	var client clientJSON
+	require.NoError(t, json.Unmarshal([]byte(body), &client))
+	require.Equal(t, "tablet", client.Name)
+	require.Equal(t, "kids", client.Profile)
+	require.Equal(t, "the spare one", client.Notes)
+	require.Equal(t, []string{"10.9.9.2"}, client.Addresses)
+	require.Equal(t, []string{"10.9.8.0/24"}, client.Prefixes)
+
+	status, body = h.do(t, http.MethodGet, "/api/clients", "")
+	require.Equal(t, http.StatusOK, status, body)
+	var clients []clientJSON
+	require.NoError(t, json.Unmarshal([]byte(body), &clients))
+	require.Len(t, clients, 1)
+}
+
+func TestMutationsRejectBadInputWithFourHundred(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		body string
+		want string
+	}{
+		{"unknown mode", "/api/profiles/kids", `{"mode":"drop"}`, "mode"},
+		{"custom mode without an address", "/api/profiles/kids", `{"mode":"custom-address"}`, "custom-address"},
+		{"address with a non-custom mode", "/api/profiles/kids", `{"mode":"refused","custom":"10.0.0.1"}`, "refused"},
+		{"bad address", "/api/clients/tablet", `{"profile":"default","addresses":["nope"]}`, "addresses"},
+		{"bad prefix", "/api/clients/tablet", `{"profile":"default","prefixes":["10.0.0.0/33"]}`, "prefixes"},
+		{"unknown profile", "/api/clients/tablet", `{"profile":"ghost"}`, "ghost"},
+		{"wrong field type", "/api/profiles/kids", `{"mode":5}`, "mode"},
+		{"malformed json", "/api/profiles/kids", `{`, "invalid JSON"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := startHarness(t)
+
+			status, body := h.do(t, http.MethodPut, tc.path, tc.body)
+
+			require.Equal(t, http.StatusBadRequest, status, body)
+			require.Contains(t, body, tc.want)
+		})
+	}
+}
+
+func TestAProfileCycleIsRejectedAndLeavesTheStoreAlone(t *testing.T) {
+	h := startHarness(t)
+	status, body := h.do(t, http.MethodPut, "/api/profiles/b", `{}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodPut, "/api/profiles/a", `{"extends":"b"}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	status, body = h.do(t, http.MethodPut, "/api/profiles/b", `{"extends":"a"}`)
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Contains(t, body, "extends itself")
+
+	status, body = h.do(t, http.MethodGet, "/api/profiles/b", "")
+	require.Equal(t, http.StatusOK, status, body)
+	var profile profileJSON
+	require.NoError(t, json.Unmarshal([]byte(body), &profile))
+	require.Empty(t, profile.Extends)
+}
+
+func TestTwoClientsCannotClaimOneAddress(t *testing.T) {
+	h := startHarness(t)
+	status, body := h.do(t, http.MethodPut, "/api/clients/a", `{"profile":"default","addresses":["10.9.9.2"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	status, body = h.do(t, http.MethodPut, "/api/clients/b", `{"profile":"default","addresses":["10.9.9.2"]}`)
+
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Contains(t, body, "10.9.9.2")
+	var apiError struct {
+		Error string `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &apiError))
+	require.Contains(t, apiError.Error, `"a"`)
+	require.Contains(t, apiError.Error, `"b"`)
+}
+
+func TestARejectedMutationDoesNotChangeWhatTheServerAnswers(t *testing.T) {
+	h := startHarness(t)
+	h.do(t, http.MethodPut, "/api/profiles/kids", `{"mode":"refused"}`)
+	h.do(t, http.MethodPut, "/api/clients/tablet", `{"profile":"kids","addresses":["127.0.0.2"]}`)
+	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
+
+	status, body := h.do(t, http.MethodPut, "/api/profiles/kids", `{"mode":"drop"}`)
+	require.Equal(t, http.StatusBadRequest, status, body)
+
+	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
+}
+
+func TestDeletingAClientReturnsItsAddressToTheDefaultProfile(t *testing.T) {
+	h := startHarness(t)
+	h.do(t, http.MethodPut, "/api/profiles/kids", `{"mode":"refused"}`)
+	h.do(t, http.MethodPut, "/api/clients/tablet", `{"profile":"kids","addresses":["127.0.0.2"]}`)
+	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
+
+	status, body := h.do(t, http.MethodDelete, "/api/clients/tablet", "")
+
+	require.Equal(t, http.StatusNoContent, status, body)
+	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
+}
+
+func TestDeletingTheDefaultProfileIsRefused(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodDelete, "/api/profiles/default", "")
+
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Contains(t, body, "default")
+}
+
+func TestUnknownProfilesAndClientsReturnNotFound(t *testing.T) {
+	h := startHarness(t)
+
+	for _, request := range []struct{ method, path string }{
+		{http.MethodGet, "/api/profiles/ghost"},
+		{http.MethodDelete, "/api/profiles/ghost"},
+		{http.MethodGet, "/api/clients/ghost"},
+		{http.MethodDelete, "/api/clients/ghost"},
+	} {
+		status, body := h.do(t, request.method, request.path, "")
+		require.Equal(t, http.StatusNotFound, status, "%s %s: %s", request.method, request.path, body)
+	}
+}
+
+var blockedName = func() filter.Domain {
+	domain, err := filter.ParseDomain("ads.example.com")
+	if err != nil {
+		panic(err)
+	}
+	return domain
+}()
+
+func blockedAds() filter.RuleSpec {
+	return filter.RuleSpec{
+		ID:     "block-ads",
+		Source: filter.Source{ID: "test", Name: "Test"},
+		Kind:   filter.MatchSubdomains,
+		Domain: blockedName,
+		Action: filter.ActionBlock,
+	}
+}
