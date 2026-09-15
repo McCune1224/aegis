@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/netip"
@@ -314,6 +315,28 @@ func (s *Store) SaveClient(ctx context.Context, record Client) error {
 func (s *Store) SetDefaultProfile(ctx context.Context, profile filter.ProfileID) error {
 	if err := s.queries.SetSetting(ctx, storedb.SetSettingParams{Key: "default_profile", Value: string(profile)}); err != nil {
 		return fmt.Errorf("store: default profile: %w", err)
+	}
+	return nil
+}
+
+// AdminPasswordHash returns the stored admin password hash. found is false
+// before one is set, which is how a first boot knows to create one.
+func (s *Store) AdminPasswordHash(ctx context.Context) (string, bool, error) {
+	hash, err := s.queries.GetSetting(ctx, "admin_password")
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("store: admin password: %w", err)
+	}
+	return hash, true, nil
+}
+
+// SetAdminPasswordHash stores the admin password hash. The plaintext never
+// reaches this package.
+func (s *Store) SetAdminPasswordHash(ctx context.Context, hash string) error {
+	if err := s.queries.SetSetting(ctx, storedb.SetSettingParams{Key: "admin_password", Value: hash}); err != nil {
+		return fmt.Errorf("store: admin password: %w", err)
 	}
 	return nil
 }
