@@ -36,6 +36,17 @@ func (f Format) String() string {
 	return formatNames[f]
 }
 
+// ParseFormat turns a configured name into a Format. The names table is the
+// single source, so a new format is one row and both directions keep working.
+func ParseFormat(name string) (Format, error) {
+	for format, candidate := range formatNames {
+		if candidate == name {
+			return Format(format), nil
+		}
+	}
+	return 0, fmt.Errorf("blocklist: unknown format %q", name)
+}
+
 // ParseResult is what one list file yielded. Skipped counts the lines that hold
 // nothing a DNS rule can express, such as an AdBlock cosmetic filter or a
 // malformed name, so an operator can see what the import dropped.
@@ -112,6 +123,11 @@ func parseHostsLine(text string) []entry {
 	}
 	if _, err := netip.ParseAddr(fields[0]); err == nil {
 		fields = fields[1:]
+	} else if len(fields) > 1 {
+		// A hosts line without an address carries one hostname. Several fields
+		// and no address is not a hosts line, so it is skipped rather than
+		// turning every word into a rule.
+		return nil
 	}
 	out := make([]entry, 0, len(fields))
 	for _, name := range fields {

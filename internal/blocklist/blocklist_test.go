@@ -146,3 +146,33 @@ func TestParsedListDecidesAQueryAndNamesTheLineThatDecidedIt(t *testing.T) {
 	require.NotNil(t, allowed.Match)
 	require.Equal(t, "test:3", allowed.Match.RuleID)
 }
+
+func TestParseFormatRoundTripsWithString(t *testing.T) {
+	for _, name := range []string{"hosts", "domains", "adblock"} {
+		format, err := blocklist.ParseFormat(name)
+		require.NoError(t, err, "name=%q", name)
+		require.Equal(t, name, format.String())
+	}
+}
+
+func TestParseFormatRejectsAnUnknownName(t *testing.T) {
+	_, err := blocklist.ParseFormat("csv")
+
+	require.Error(t, err)
+}
+
+func TestParseListRejectsAHostsLineWithNoAddressAndSeveralFields(t *testing.T) {
+	const fixture = `0.0.0.0 ads.example.com
+not a domain at all
+localhost
+`
+
+	got, err := blocklist.ParseList(strings.NewReader(fixture), source, blocklist.FormatHosts)
+
+	require.NoError(t, err)
+	require.Equal(t, []filter.RuleSpec{
+		rule("test:1", "ads.example.com", filter.ActionBlock),
+		rule("test:3", "localhost", filter.ActionBlock),
+	}, got.Rules)
+	require.Equal(t, 1, got.Skipped)
+}

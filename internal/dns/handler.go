@@ -36,6 +36,18 @@ func (m BlockingMode) String() string {
 	return blockingModeNames[m]
 }
 
+// ParseBlockingMode turns a configured name into a BlockingMode. The names
+// table is the single source, so a new mode is one row and both directions
+// keep working.
+func ParseBlockingMode(name string) (BlockingMode, error) {
+	for mode, candidate := range blockingModeNames {
+		if candidate == name {
+			return BlockingMode(mode), nil
+		}
+	}
+	return 0, fmt.Errorf("dns: unknown blocking mode %q", name)
+}
+
 // blockTTL is how long a client may cache a blocked answer. It stays short so
 // that unblocking a name takes effect without waiting out a long cache.
 const blockTTL = 60
@@ -118,6 +130,7 @@ func (h *Handler) forward(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error)
 	if err != nil {
 		return reply(req, mdns.RcodeServerFailure), fmt.Errorf("dns: upstream: %w", err)
 	}
+	resp.RecursionAvailable = true
 	return resp, nil
 }
 
@@ -138,6 +151,10 @@ func (h *Handler) blocked(req *mdns.Msg, question mdns.Question) *mdns.Msg {
 func reply(req *mdns.Msg, rcode int) *mdns.Msg {
 	resp := new(mdns.Msg)
 	resp.SetRcode(req, rcode)
+	// A client reads this bit to decide whether to keep using us or fall back to
+	// another resolver, so it belongs on the answers we build ourselves and not
+	// only on the ones we pass through from upstream.
+	resp.RecursionAvailable = true
 	return resp
 }
 
