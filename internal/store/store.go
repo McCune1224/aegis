@@ -25,13 +25,47 @@ type Client struct {
 	Prefixes  []netip.Prefix
 }
 
-// Config is the stored configuration in the shape the engine and the identity
-// resolver take.
+// Config is the stored configuration: the profiles, the client records with
+// their selectors, and the profile an unidentified client gets. The shapes the
+// engine and the identity resolver take are projections of it, so a client's
+// profile and its selectors cannot drift apart.
 type Config struct {
-	Profiles  []filter.ProfileSpec
-	Clients   []filter.ClientSpec
-	Selectors []client.Spec
-	Default   filter.ProfileID
+	Profiles []filter.ProfileSpec
+	Clients  []Client
+	Default  filter.ProfileID
+}
+
+// ClientSpecs is the client list in the shape filter.Compile takes.
+func (c Config) ClientSpecs() []filter.ClientSpec {
+	specs := make([]filter.ClientSpec, 0, len(c.Clients))
+	for _, record := range c.Clients {
+		specs = append(specs, filter.ClientSpec{Key: record.Key, Profile: record.Profile})
+	}
+	return specs
+}
+
+// Selectors is the client list in the shape client.New takes.
+func (c Config) Selectors() []client.Spec {
+	specs := make([]client.Spec, 0, len(c.Clients))
+	for _, record := range c.Clients {
+		specs = append(specs, client.Spec{Key: record.Key, Addresses: record.Addresses, Prefixes: record.Prefixes})
+	}
+	return specs
+}
+
+// Validate compiles the configuration without rules, the same check the runtime
+// makes on every reload. Rules do not affect profile or selector validity, so a
+// change that would fail to load is refused before it reaches the database.
+func (c Config) Validate() error {
+	if _, err := client.New(c.Selectors()); err != nil {
+		return err
+	}
+	_, err := filter.Compile(filter.Config{
+		Profiles: c.Profiles,
+		Clients:  c.ClientSpecs(),
+		Default:  c.Default,
+	})
+	return err
 }
 
 // Store is the configuration Aegis serves from. It owns the database handle and
@@ -92,37 +126,44 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 
-	rows, err := s.queries.ListClients(ctx)
-	if err != nil {
-		return Config{}, fmt.Errorf("store: clients: %w", err)
-	}
-	addresses, err := s.loadAddresses(ctx)
-	if err != nil {
-		return Config{}, err
-	}
-	prefixes, err := s.loadPrefixes(ctx)
+	clients, err := s.loadClients(ctx)
 	if err != nil {
 		return Config{}, err
 	}
 
-	clients := make([]filter.ClientSpec, 0, len(rows))
-	selectors := make([]client.Spec, 0, len(rows))
+	return Config{
+		Profiles: profiles,
+		Clients:  clients,
+		Default:  filter.ProfileID(defaultProfile),
+	}, nil
+}
+
+func (s *Store) loadClients(ctx context.Context) ([]Client, error) {
+	rows, err := s.queries.ListClients(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: clients: %w", err)
+	}
+	addresses, err := s.loadAddresses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	prefixes, err := s.loadPrefixes(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	clients := make([]Client, 0, len(rows))
 	for _, row := range rows {
 		key := filter.ClientKey(row.Name)
-		clients = append(clients, filter.ClientSpec{Key: key, Profile: filter.ProfileID(row.Profile)})
-		selectors = append(selectors, client.Spec{
+		clients = append(clients, Client{
 			Key:       key,
+			Profile:   filter.ProfileID(row.Profile),
+			Notes:     row.Notes,
 			Addresses: addresses[key],
 			Prefixes:  prefixes[key],
 		})
 	}
-
-	return Config{
-		Profiles:  profiles,
-		Clients:   clients,
-		Selectors: selectors,
-		Default:   filter.ProfileID(defaultProfile),
-	}, nil
+	return clients, nil
 }
 
 func (s *Store) loadProfiles(ctx context.Context) ([]filter.ProfileSpec, error) {
@@ -273,6 +314,25 @@ func (s *Store) SaveClient(ctx context.Context, record Client) error {
 func (s *Store) SetDefaultProfile(ctx context.Context, profile filter.ProfileID) error {
 	if err := s.queries.SetSetting(ctx, storedb.SetSettingParams{Key: "default_profile", Value: string(profile)}); err != nil {
 		return fmt.Errorf("store: default profile: %w", err)
+	}
+	return nil
+}
+
+// DeleteProfile removes one profile. A caller validates the resulting
+// configuration first, because a profile another profile extends or a client
+// names must be changed before this one can go.
+func (s *Store) DeleteProfile(ctx context.Context, id filter.ProfileID) error {
+	if err := s.queries.DeleteProfile(ctx, string(id)); err != nil {
+		return fmt.Errorf("store: delete profile %q: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteClient removes one client. Its selectors go with it through the
+// foreign key's cascade.
+func (s *Store) DeleteClient(ctx context.Context, key filter.ClientKey) error {
+	if err := s.queries.DeleteClient(ctx, string(key)); err != nil {
+		return fmt.Errorf("store: delete client %q: %w", key, err)
 	}
 	return nil
 }
