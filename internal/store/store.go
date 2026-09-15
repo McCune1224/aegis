@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/netip"
@@ -233,19 +234,27 @@ func (s *Store) loadPrefixes(ctx context.Context) (map[filter.ClientKey][]netip.
 	return byClient, nil
 }
 
-// Unconfigured reports whether nothing beyond the migration's default profile
-// has been stored. The serve command uses it to decide whether to seed from its
-// flags on first boot.
-func (s *Store) Unconfigured(ctx context.Context) (bool, error) {
-	profiles, err := s.queries.ListProfiles(ctx)
-	if err != nil {
-		return false, fmt.Errorf("store: profiles: %w", err)
+// FirstBoot reports whether the stored configuration has ever been seeded from
+// the flags. It reads an explicit marker rather than row counts, so an edit that
+// leaves one profile and no clients is not mistaken for an empty database.
+func (s *Store) FirstBoot(ctx context.Context) (bool, error) {
+	_, err := s.queries.GetSetting(ctx, "seeded")
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
 	}
-	clients, err := s.queries.ListClients(ctx)
 	if err != nil {
-		return false, fmt.Errorf("store: clients: %w", err)
+		return false, fmt.Errorf("store: seeded marker: %w", err)
 	}
-	return len(profiles) == 1 && len(clients) == 0, nil
+	return false, nil
+}
+
+// MarkSeeded records that the flags have been applied, so a later boot leaves
+// the database alone.
+func (s *Store) MarkSeeded(ctx context.Context) error {
+	if err := s.queries.SetSetting(ctx, storedb.SetSettingParams{Key: "seeded", Value: "1"}); err != nil {
+		return fmt.Errorf("store: seeded marker: %w", err)
+	}
+	return nil
 }
 
 // SaveProfile inserts or replaces one profile.
