@@ -20,6 +20,11 @@ profile.cov
 # Build output
 /bin/
 
+# Web app
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+
 # Local configuration database
 *.db
 *.db-shm

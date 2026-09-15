@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -26,6 +27,7 @@ type Config struct {
 	Store    *store.Store
 	Reloader Reloader
 	Hub      *Hub
+	Files    fs.FS
 	Address  string
 	Logger   *slog.Logger
 }
@@ -36,6 +38,7 @@ type Server struct {
 	store    *store.Store
 	reloader Reloader
 	hub      *Hub
+	files    fs.FS
 	http     *http.Server
 	listener net.Listener
 
@@ -68,7 +71,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, hub: cfg.Hub, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, hub: cfg.Hub, files: cfg.Files, listener: listener}
 	s.http = &http.Server{
 		Handler:  s.routes(),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
@@ -99,6 +102,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/clients/{name}", s.getClient)
 	mux.HandleFunc("DELETE /api/v1/clients/{name}", s.deleteClient)
 	mux.HandleFunc("GET /api/v1/stream/queries", s.streamQueries)
+	if s.files != nil {
+		mux.Handle("GET /", http.FileServerFS(s.files))
+	}
 	return mux
 }
 
