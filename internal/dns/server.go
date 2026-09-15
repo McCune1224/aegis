@@ -47,12 +47,12 @@ func Start(cfg ServerConfig) (*Server, error) {
 	var listen net.ListenConfig
 	packet, err := listen.ListenPacket(context.Background(), "udp", cfg.Address)
 	if err != nil {
-		return nil, fmt.Errorf("dns: listen udp %s: %w", cfg.Address, err)
+		return nil, fmt.Errorf("dns: %w", err)
 	}
 	stream, err := listen.Listen(context.Background(), "tcp", cfg.Address)
 	if err != nil {
 		_ = packet.Close()
-		return nil, fmt.Errorf("dns: listen tcp %s: %w", cfg.Address, err)
+		return nil, fmt.Errorf("dns: %w", err)
 	}
 
 	s := &Server{packet: packet, stream: stream}

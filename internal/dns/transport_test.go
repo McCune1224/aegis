@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,4 +198,21 @@ func TestStartReportsThePortItBound(t *testing.T) {
 	udpPort := server.UDPAddr().(*net.UDPAddr).Port
 	require.NotZero(t, udpPort)
 	require.Equal(t, fmt.Sprintf("127.0.0.1:%d", udpPort), server.UDPAddr().String())
+}
+
+func TestStartErrorNamesTheAddressOnce(t *testing.T) {
+	handler, err := dns.NewHandler(dns.Config{
+		Decider:  deciderFor(t, defaultPolicy),
+		Upstream: dns.NewForwarder("127.0.0.1:53"),
+	})
+	require.NoError(t, err)
+
+	var listen net.ListenConfig
+	held, err := listen.ListenPacket(t.Context(), "udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = held.Close() })
+
+	_, err = dns.Start(dns.ServerConfig{Handler: handler, Address: held.LocalAddr().String()})
+	require.Error(t, err)
+	require.Equal(t, 1, strings.Count(err.Error(), held.LocalAddr().String()), "the address should appear once in %q", err.Error())
 }

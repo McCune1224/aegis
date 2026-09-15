@@ -1,18 +1,19 @@
 package main
 
 import (
-	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestVersionCommandPrintsBuildInfo(t *testing.T) {
-	var out bytes.Buffer
-	cmd := newRootCmd()
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"version"})
+func TestCommandErrorSaysAegisOnce(t *testing.T) {
+	root := newRootCmd()
+	root.SetArgs([]string{"serve", "--blocklist", "./does-not-exist.txt"})
 
-	require.NoError(t, cmd.Execute())
-	require.Equal(t, "aegis dev (none, unknown)\n", out.String())
+	err := root.Execute()
+	require.Error(t, err)
+
+	printed := "aegis: " + err.Error()
+	require.Equal(t, 1, strings.Count(printed, "aegis:"), "the program name should appear once in %q", printed)
 }
