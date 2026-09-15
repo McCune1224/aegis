@@ -1,45 +1,94 @@
-import { createEffect, createSignal, For } from "solid-js";
+import { createEffect, createSignal } from "solid-js";
+import {
+  deleteClient as removeClient,
+  deleteProfile as removeProfile,
+  listClients,
+  listProfiles,
+  saveClient as putClient,
+  saveProfile as putProfile,
+  type Client,
+  type ClientInput,
+  type Profile,
+  type ProfileInput,
+} from "./api";
+import Clients from "./Clients";
+import Profiles from "./Profiles";
 
-type Profile = {
-  name: string;
-  mode?: string;
-};
+type Tab = "profiles" | "clients";
 
 export default function App() {
+  const [tab, setTab] = createSignal<Tab>("profiles");
   const [profiles, setProfiles] = createSignal<Profile[]>([]);
+  const [clients, setClients] = createSignal<Client[]>([]);
   const [error, setError] = createSignal<string>();
+
+  async function refresh() {
+    const [nextProfiles, nextClients] = await Promise.all([listProfiles(), listClients()]);
+    setProfiles(nextProfiles);
+    setClients(nextClients);
+  }
 
   createEffect(
     () => undefined,
     () => {
-      void (async () => {
-        try {
-          const response = await fetch("/api/v1/profiles");
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          setProfiles(await response.json());
-        } catch (cause) {
-          setError(String(cause));
-        }
-      })();
+      void refresh().catch((cause) => setError(String(cause)));
     },
   );
 
+  async function saveProfile(name: string, input: ProfileInput) {
+    await putProfile(name, input);
+    await refresh();
+  }
+
+  async function saveClient(name: string, input: ClientInput) {
+    await putClient(name, input);
+    await refresh();
+  }
+
+  async function deleteProfile(name: string) {
+    await removeProfile(name);
+    await refresh();
+  }
+
+  async function deleteClient(name: string) {
+    await removeClient(name);
+    await refresh();
+  }
+
   return (
     <main>
-      <h1>Aegis</h1>
-      {error() ? <p class="error">Could not load profiles: {error()}</p> : null}
-      <ul>
-        <For each={profiles()}>
-          {(profile) => (
-            <li>
-              <strong>{profile.name}</strong>
-              <span>{profile.mode ?? "inherited"}</span>
-            </li>
-          )}
-        </For>
-      </ul>
+      <header>
+        <h1>Aegis</h1>
+        <nav>
+          <button
+            type="button"
+            data-testid="tab-profiles"
+            class={tab() === "profiles" ? "active" : ""}
+            onClick={() => setTab("profiles")}
+          >
+            Profiles
+          </button>
+          <button
+            type="button"
+            data-testid="tab-clients"
+            class={tab() === "clients" ? "active" : ""}
+            onClick={() => setTab("clients")}
+          >
+            Clients
+          </button>
+        </nav>
+      </header>
+      {error() ? <p class="error">Could not load the configuration: {error()}</p> : null}
+      {tab() === "profiles" ? (
+        <Profiles profiles={profiles()} onSave={saveProfile} onDelete={deleteProfile} />
+      ) : (
+        <Clients
+          clients={clients()}
+          profiles={profiles()}
+          onSave={saveClient}
+          onDelete={deleteClient}
+        />
+      )}
     </main>
   );
 }
