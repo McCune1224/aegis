@@ -86,6 +86,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	lists := make([]runtime.ListFile, 0, len(cfg.Blocklists))
+	for _, path := range cfg.Blocklists {
+		lists = append(lists, runtime.ListFile{Path: path, Format: format})
+	}
+	if err := runtime.ValidateLists(lists); err != nil {
+		return err
+	}
+
 	database, err := store.Open(ctx, cfg.DB)
 	if err != nil {
 		return err
@@ -104,10 +112,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	if err := database.MarkSeeded(ctx); err != nil {
 		return err
-	}
-	lists := make([]runtime.ListFile, 0, len(cfg.Blocklists))
-	for _, path := range cfg.Blocklists {
-		lists = append(lists, runtime.ListFile{Path: path, Format: format})
 	}
 	engine := runtime.New(database, lists, logger)
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(sourceTimeout), engine, logger)
