@@ -128,10 +128,22 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/v1/rules/{id}", s.putRule)
 	mux.HandleFunc("DELETE /api/v1/rules/{id}", s.deleteRule)
 	mux.HandleFunc("GET /api/v1/stream/queries", s.streamQueries)
+	mux.HandleFunc("POST /api/v1/reload", s.reload)
 	if s.files != nil {
 		mux.Handle("GET /", http.FileServerFS(s.files))
 	}
 	return mux
+}
+
+// reload republishes the resolver from the current inputs: the stored
+// configuration, the blocklist files, and the enabled sources. The operator
+// calls it after editing a list file outside the API.
+func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
+	if err := s.reloader.Reload(r.Context()); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
 }
 
 // apply runs one configuration change as validate, write, then reload. A change

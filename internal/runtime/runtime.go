@@ -4,14 +4,27 @@ package runtime
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 
+	"aegis/internal/blocklist"
 	"aegis/internal/client"
 	"aegis/internal/filter"
 	"aegis/internal/store"
 )
+
+// ListFile is one blocklist file the operator named at boot. The runtime reads
+// it on every publish, so an edit reaches a running server on the next reload
+// without a restart.
+type ListFile struct {
+	Path   string
+	Format blocklist.Format
+}
 
 // snapshot is one generation of everything a query needs. The rule set and the
 // identity table are stored together and read with one load, so a query cannot
@@ -24,20 +37,25 @@ type snapshot struct {
 // Runtime owns the engine's contents and rebuilds them when the configuration
 // changes. It is the only writer.
 type Runtime struct {
-	store *store.Store
+	store  *store.Store
+	logger *slog.Logger
 
 	mu sync.Mutex
-	// staticRules come from the blocklist files given at boot and never change
-	// while running. sourceRules come from the enabled rows of the sources
-	// table and are replaced by SourceSync on every refresh.
-	staticRules []filter.RuleSpec
+	// lists are the blocklist files given at boot. publish reads them on every
+	// reload, so the file contents are inputs rather than frozen rules.
+	lists []ListFile
+	// sourceRules come from the enabled rows of the sources table and are
+	// replaced by SourceSync on every refresh.
 	sourceRules []filter.RuleSpec
 	current     atomic.Pointer[snapshot]
 }
 
 // New returns a Runtime that allows every query until Reload runs.
-func New(s *store.Store, staticRules []filter.RuleSpec) *Runtime {
-	return &Runtime{store: s, staticRules: staticRules}
+func New(s *store.Store, lists []ListFile, logger *slog.Logger) *Runtime {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Runtime{store: s, lists: lists, logger: logger}
 }
 
 // Reload reads the stored configuration, compiles it with the current rules,
@@ -72,9 +90,13 @@ func (r *Runtime) publish(ctx context.Context) error {
 	}
 	// Custom rules come first so they win the declaration-order tie-break
 	// against a list rule of the same tier and specificity.
-	rules := make([]filter.RuleSpec, 0, len(cfg.Rules)+len(r.staticRules)+len(r.sourceRules))
+	listRules, err := r.readLists()
+	if err != nil {
+		return err
+	}
+	rules := make([]filter.RuleSpec, 0, len(cfg.Rules)+len(listRules)+len(r.sourceRules))
 	rules = append(rules, cfg.Rules...)
-	rules = append(rules, r.staticRules...)
+	rules = append(rules, listRules...)
 	rules = append(rules, r.sourceRules...)
 	set, err := filter.Compile(filter.Config{
 		Rules:    rules,
@@ -97,6 +119,41 @@ func (r *Runtime) Decide(name filter.Domain, address netip.Addr) filter.Verdict 
 		return filter.Verdict{Action: filter.ActionAllow}
 	}
 	return current.set.Decide(name, current.identity.Key(address))
+}
+
+// readLists parses every blocklist file fresh. A file that cannot be read
+// fails the publish, so the previous generation keeps serving rather than the
+// resolver quietly dropping the rules the operator asked for.
+func (r *Runtime) readLists() ([]filter.RuleSpec, error) {
+	var rules []filter.RuleSpec
+	for _, list := range r.lists {
+		result, err := readListFile(list)
+		if err != nil {
+			return nil, err
+		}
+		r.logger.Info("blocklist loaded", "path", list.Path, "rules", len(result.Rules), "skipped", result.Skipped)
+		rules = append(rules, result.Rules...)
+	}
+	return rules, nil
+}
+
+func readListFile(list ListFile) (blocklist.ParseResult, error) {
+	file, err := os.Open(list.Path)
+	if err != nil {
+		return blocklist.ParseResult{}, fmt.Errorf("runtime: %w", err)
+	}
+
+	source := filter.Source{ID: list.Path, Name: filepath.Base(list.Path)}
+	result, parseErr := blocklist.ParseList(file, source, list.Format)
+	closeErr := file.Close()
+
+	if parseErr != nil {
+		return blocklist.ParseResult{}, parseErr
+	}
+	if closeErr != nil {
+		return blocklist.ParseResult{}, fmt.Errorf("runtime: %w", closeErr)
+	}
+	return result, nil
 }
 
 // Size reports how many rules the current generation holds, so a start line can

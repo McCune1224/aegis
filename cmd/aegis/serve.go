@@ -9,7 +9,6 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -85,10 +84,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	rules, err := loadBlocklists(cfg.Blocklists, format, logger)
-	if err != nil {
-		return err
-	}
 
 	database, err := store.Open(ctx, cfg.DB)
 	if err != nil {
@@ -109,7 +104,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := database.MarkSeeded(ctx); err != nil {
 		return err
 	}
-	engine := runtime.New(database, rules)
+	lists := make([]runtime.ListFile, 0, len(cfg.Blocklists))
+	for _, path := range cfg.Blocklists {
+		lists = append(lists, runtime.ListFile{Path: path, Format: format})
+	}
+	engine := runtime.New(database, lists, logger)
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(sourceTimeout), engine, logger)
 	if err := sync.RefreshSources(ctx); err != nil {
 		return err
@@ -220,7 +219,7 @@ func seedSources(ctx context.Context, database *store.Store, entries []string, f
 func parseSource(raw string, format blocklist.Format) (store.Source, error) {
 	name, url, found := strings.Cut(raw, "=")
 	if !found || name == "" || url == "" {
-		return store.Source{}, fmt.Errorf("aegis: source %q must be name=url", raw)
+		return store.Source{}, fmt.Errorf("source %q must be name=url", raw)
 	}
 	return store.Source{Name: name, URL: url, Format: format, Enabled: true}, nil
 }
@@ -257,7 +256,7 @@ func buildProfiles(cfg config.Config) ([]filter.ProfileSpec, error) {
 func parseProfile(raw string) (filter.ProfileSpec, error) {
 	parts := strings.Split(raw, "=")
 	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" {
-		return filter.ProfileSpec{}, fmt.Errorf("aegis: profile %q must be name=mode or name=mode=address", raw)
+		return filter.ProfileSpec{}, fmt.Errorf("profile %q must be name=mode or name=mode=address", raw)
 	}
 
 	mode, err := filter.ParseBlockingMode(parts[1])
@@ -269,7 +268,7 @@ func parseProfile(raw string) (filter.ProfileSpec, error) {
 	if len(parts) == 3 {
 		address, err := netip.ParseAddr(parts[2])
 		if err != nil {
-			return filter.ProfileSpec{}, fmt.Errorf("aegis: profile %q: %w", raw, err)
+			return filter.ProfileSpec{}, fmt.Errorf("profile %q: %w", raw, err)
 		}
 		profile.Custom = &address
 	}
@@ -283,11 +282,11 @@ func buildClients(entries []string) ([]store.Client, error) {
 	for _, raw := range entries {
 		addressText, profile, found := strings.Cut(raw, "=")
 		if !found || profile == "" {
-			return nil, fmt.Errorf("aegis: client %q must be address=profile", raw)
+			return nil, fmt.Errorf("client %q must be address=profile", raw)
 		}
 		address, err := netip.ParseAddr(addressText)
 		if err != nil {
-			return nil, fmt.Errorf("aegis: client %q: %w", raw, err)
+			return nil, fmt.Errorf("client %q: %w", raw, err)
 		}
 
 		records = append(records, store.Client{
@@ -299,49 +298,13 @@ func buildClients(entries []string) ([]store.Client, error) {
 	return records, nil
 }
 
-// loadBlocklists reads every configured file in one format and returns the
-// rules together. A file that cannot be read fails the start rather than
-// silently serving fewer rules than the operator asked for.
-func loadBlocklists(paths []string, format blocklist.Format, logger *slog.Logger) ([]filter.RuleSpec, error) {
-	var rules []filter.RuleSpec
-	for _, path := range paths {
-		result, err := readList(path, format)
-		if err != nil {
-			return nil, err
-		}
-
-		logger.Info("blocklist loaded", "path", path, "rules", len(result.Rules), "skipped", result.Skipped)
-		rules = append(rules, result.Rules...)
-	}
-	return rules, nil
-}
-
-func readList(path string, format blocklist.Format) (blocklist.ParseResult, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return blocklist.ParseResult{}, fmt.Errorf("aegis: %w", err)
-	}
-
-	source := filter.Source{ID: path, Name: filepath.Base(path)}
-	result, parseErr := blocklist.ParseList(file, source, format)
-	closeErr := file.Close()
-
-	if parseErr != nil {
-		return blocklist.ParseResult{}, parseErr
-	}
-	if closeErr != nil {
-		return blocklist.ParseResult{}, fmt.Errorf("aegis: %w", closeErr)
-	}
-	return result, nil
-}
-
 func parseOptionalAddress(raw string) (netip.Addr, error) {
 	if raw == "" {
 		return netip.Addr{}, nil
 	}
 	address, err := netip.ParseAddr(raw)
 	if err != nil {
-		return netip.Addr{}, fmt.Errorf("aegis: custom-address: %w", err)
+		return netip.Addr{}, fmt.Errorf("custom-address: %w", err)
 	}
 	return address, nil
 }
@@ -356,7 +319,7 @@ func customPointer(address netip.Addr) *netip.Addr {
 func newLogger(level string, out io.Writer) (*slog.Logger, error) {
 	var parsed slog.Level
 	if err := parsed.UnmarshalText([]byte(level)); err != nil {
-		return nil, fmt.Errorf("aegis: unknown log level %q", level)
+		return nil, fmt.Errorf("unknown log level %q", level)
 	}
 	return slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: parsed})), nil
 }
