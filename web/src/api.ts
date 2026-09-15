@@ -185,3 +185,53 @@ export function updateRule(id: number, input: RuleInput): Promise<Rule> {
 export function deleteRule(id: number): Promise<void> {
   return request<void>(`/api/v1/rules/${id}`, { method: "DELETE" });
 }
+
+export type QueryEntry = {
+  time: string;
+  client: string;
+  name: string;
+  type: string;
+  verdict: string;
+  rule?: string;
+};
+
+export type QueryFilterInput = {
+  client?: string;
+  name?: string;
+  verdict?: string;
+  limit?: number;
+};
+
+export function listQueries(filter: QueryFilterInput = {}): Promise<{ queries: QueryEntry[] }> {
+  const params = new URLSearchParams();
+  if (filter.client) params.set("client", filter.client);
+  if (filter.name) params.set("name", filter.name);
+  if (filter.verdict) params.set("verdict", filter.verdict);
+  if (filter.limit) params.set("limit", String(filter.limit));
+  const query = params.toString();
+  return request<{ queries: QueryEntry[] }>(`/api/v1/queries${query ? `?${query}` : ""}`);
+}
+
+export type Decision = {
+  time: string;
+  address: string;
+  name: string;
+  type: string;
+  action: string;
+  rule?: { id: string; source: string; pattern: string };
+};
+
+// streamQueries subscribes to the live decision stream and returns the
+// unsubscribe function. The browser's EventSource reconnects on its own, which
+// a long-lived dashboard wants.
+export function streamQueries(onEvent: (decision: Decision) => void): () => void {
+  const source = new EventSource("/api/v1/stream/queries");
+  source.onmessage = (message) => {
+    try {
+      onEvent(JSON.parse(message.data) as Decision);
+    } catch {
+      return;
+    }
+  };
+  return () => source.close();
+}
