@@ -144,3 +144,14 @@ button:disabled {
 .error {
   color: #ff7b72;
 }
+
+.badge {
+  align-self: center;
+  color: #6cb6ff;
+  border: 1px solid #1f6feb;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

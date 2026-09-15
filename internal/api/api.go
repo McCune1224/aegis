@@ -94,6 +94,8 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ct
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/profiles", s.listProfiles)
+	mux.HandleFunc("GET /api/v1/default-profile", s.getDefaultProfile)
+	mux.HandleFunc("PUT /api/v1/default-profile", s.putDefaultProfile)
 	mux.HandleFunc("PUT /api/v1/profiles/{name}", s.putProfile)
 	mux.HandleFunc("GET /api/v1/profiles/{name}", s.getProfile)
 	mux.HandleFunc("DELETE /api/v1/profiles/{name}", s.deleteProfile)
