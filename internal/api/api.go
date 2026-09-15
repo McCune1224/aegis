@@ -123,6 +123,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/v1/sources/{name}", s.putSource)
 	mux.HandleFunc("GET /api/v1/sources/{name}", s.getSource)
 	mux.HandleFunc("DELETE /api/v1/sources/{name}", s.deleteSource)
+	mux.HandleFunc("GET /api/v1/rules", s.listRules)
+	mux.HandleFunc("POST /api/v1/rules", s.postRule)
+	mux.HandleFunc("PUT /api/v1/rules/{id}", s.putRule)
+	mux.HandleFunc("DELETE /api/v1/rules/{id}", s.deleteRule)
 	mux.HandleFunc("GET /api/v1/stream/queries", s.streamQueries)
 	if s.files != nil {
 		mux.Handle("GET /", http.FileServerFS(s.files))

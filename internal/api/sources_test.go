@@ -11,10 +11,10 @@ import (
 )
 
 // startListServer serves a hosts list with one blocked name.
-func startListServer(t *testing.T, body string) string {
+func startListServer(t *testing.T) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, body)
+		_, _ = io.WriteString(w, "0.0.0.0 tracker.example.net\n")
 	}))
 	t.Cleanup(server.Close)
 	return server.URL
@@ -22,29 +22,29 @@ func startListServer(t *testing.T, body string) string {
 
 func TestASourceAddedOverHTTPBlocksARealQuery(t *testing.T) {
 	h := startHarness(t)
-	url := startListServer(t, "0.0.0.0 tracker.example.net\n")
+	url := startListServer(t)
 
 	status, body := h.do(t, http.MethodPut, "/api/v1/sources/trackers", `{"url":"`+url+`/list","format":"hosts","enabled":true}`)
 	require.Equal(t, http.StatusOK, status, body)
 
-	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress, "tracker.example.net.").Rcode)
+	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
 }
 
 func TestDisablingASourceStopsItBlocking(t *testing.T) {
 	h := startHarness(t)
-	url := startListServer(t, "0.0.0.0 tracker.example.net\n")
+	url := startListServer(t)
 	h.do(t, http.MethodPut, "/api/v1/sources/trackers", `{"url":"`+url+`/list","format":"hosts","enabled":true}`)
-	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress, "tracker.example.net.").Rcode)
+	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
 
 	status, body := h.do(t, http.MethodPut, "/api/v1/sources/trackers", `{"enabled":false}`)
 	require.Equal(t, http.StatusOK, status, body)
 
-	require.NotEqual(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress, "tracker.example.net.").Rcode)
+	require.NotEqual(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
 }
 
 func TestSourceCRUDReadsBackWhatWasStored(t *testing.T) {
 	h := startHarness(t)
-	url := startListServer(t, "0.0.0.0 tracker.example.net\n")
+	url := startListServer(t)
 
 	status, body := h.do(t, http.MethodPut, "/api/v1/sources/trackers", `{"url":"`+url+`/list","format":"hosts","enabled":true}`)
 	require.Equal(t, http.StatusOK, status, body)
@@ -80,7 +80,7 @@ func TestSourceCRUDReadsBackWhatWasStored(t *testing.T) {
 
 func TestAFailedFetchIsShownNotSwallowed(t *testing.T) {
 	h := startHarness(t)
-	url := startListServer(t, "0.0.0.0 tracker.example.net\n")
+	url := startListServer(t)
 
 	status, body := h.do(t, http.MethodPut, "/api/v1/sources/trackers", `{"url":"http://127.0.0.1:1/list","format":"hosts","enabled":true}`)
 	require.Equal(t, http.StatusOK, status, body)

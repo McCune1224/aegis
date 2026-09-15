@@ -61,6 +61,30 @@ const (
 	actionCount
 )
 
+var actionNames = [actionCount]string{
+	ActionBlock: "block",
+	ActionAllow: "allow",
+}
+
+func (a Action) String() string {
+	if int(a) >= len(actionNames) {
+		return fmt.Sprintf("action(%d)", uint8(a))
+	}
+	return actionNames[a]
+}
+
+// ParseAction turns a stored or requested name into an Action. The names table
+// is the single source, so a new action is one row and both directions keep
+// working.
+func ParseAction(name string) (Action, error) {
+	for action, candidate := range actionNames {
+		if candidate == name {
+			return Action(action), nil
+		}
+	}
+	return 0, fmt.Errorf("filter: unknown action %q", name)
+}
+
 // actionTier orders two matching rules. A rule in a lower tier beats one in a
 // higher tier before any other comparison, so an allow rule wins over a block
 // rule however specific the block is and whatever order the lists loaded in.
@@ -78,7 +102,32 @@ const (
 	// MatchSubdomains covers the rule's domain and every name under it, so a
 	// rule for example.com also covers ads.example.com.
 	MatchSubdomains
+
+	matchKindCount
 )
+
+var matchKindNames = [matchKindCount]string{
+	MatchExact:      "exact",
+	MatchSubdomains: "subdomains",
+}
+
+func (k MatchKind) String() string {
+	if int(k) >= len(matchKindNames) {
+		return fmt.Sprintf("kind(%d)", uint8(k))
+	}
+	return matchKindNames[k]
+}
+
+// ParseMatchKind turns a stored or requested name into a MatchKind, from the
+// same names table String answers from.
+func ParseMatchKind(name string) (MatchKind, error) {
+	for kind, candidate := range matchKindNames {
+		if candidate == name {
+			return MatchKind(kind), nil
+		}
+	}
+	return 0, fmt.Errorf("filter: unknown match kind %q", name)
+}
 
 // Source names the blocklist a rule came from.
 type Source struct {

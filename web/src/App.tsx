@@ -1,32 +1,39 @@
 import { createEffect, createSignal } from "solid-js";
 import {
+  createRule as postRule,
   deleteClient as removeClient,
   deleteProfile as removeProfile,
+  deleteRule as removeRule,
   deleteSource as removeSource,
   getDefaultProfile,
   getStatus,
   listCatalog,
   listClients,
   listProfiles,
+  listRules,
   listSources,
   saveClient as putClient,
   saveProfile as putProfile,
   saveSource as putSource,
   setDefaultProfile as putDefaultProfile,
+  updateRule as patchRule,
   type CatalogEntry,
   type Client,
   type ClientInput,
   type Profile,
   type ProfileInput,
+  type Rule,
+  type RuleInput,
   type Source,
   type SourceInput,
 } from "./api";
 import Clients from "./Clients";
 import Graph from "./Graph";
 import Profiles from "./Profiles";
+import Rules from "./Rules";
 import Sources from "./Sources";
 
-type Tab = "profiles" | "clients" | "sources" | "graph";
+type Tab = "profiles" | "clients" | "sources" | "rules" | "graph";
 
 export default function App() {
   const [tab, setTab] = createSignal<Tab>("profiles");
@@ -34,17 +41,19 @@ export default function App() {
   const [clients, setClients] = createSignal<Client[]>([]);
   const [sources, setSources] = createSignal<Source[]>([]);
   const [catalog, setCatalog] = createSignal<CatalogEntry[]>([]);
+  const [rules, setRules] = createSignal<Rule[]>([]);
   const [defaultProfile, setDefaultProfile] = createSignal("");
   const [upstream, setUpstream] = createSignal("");
   const [error, setError] = createSignal<string>();
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextDefault, nextStatus] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextDefault, nextStatus] =
       await Promise.all([
         listProfiles(),
         listClients(),
         listSources(),
         listCatalog(),
+        listRules(),
         getDefaultProfile(),
         getStatus(),
       ]);
@@ -52,6 +61,7 @@ export default function App() {
     setClients(nextClients);
     setSources(nextSources);
     setCatalog(nextCatalog);
+    setRules(nextRules);
     setDefaultProfile(nextDefault.profile);
     setUpstream(nextStatus.upstream);
   }
@@ -93,6 +103,21 @@ export default function App() {
     await refresh();
   }
 
+  async function addRule(input: RuleInput) {
+    await postRule(input);
+    await refresh();
+  }
+
+  async function changeRule(id: number, input: RuleInput) {
+    await patchRule(id, input);
+    await refresh();
+  }
+
+  async function deleteRule(id: number) {
+    await removeRule(id);
+    await refresh();
+  }
+
   async function makeDefault(name: string) {
     await putDefaultProfile(name);
     await refresh();
@@ -129,6 +154,14 @@ export default function App() {
           </button>
           <button
             type="button"
+            data-testid="tab-rules"
+            class={tab() === "rules" ? "active" : ""}
+            onClick={() => setTab("rules")}
+          >
+            Rules
+          </button>
+          <button
+            type="button"
             data-testid="tab-graph"
             class={tab() === "graph" ? "active" : ""}
             onClick={() => setTab("graph")}
@@ -160,6 +193,8 @@ export default function App() {
           onSave={saveSource}
           onDelete={deleteSource}
         />
+      ) : tab() === "rules" ? (
+        <Rules rules={rules()} onCreate={addRule} onUpdate={changeRule} onDelete={deleteRule} />
       ) : (
         <Graph
           profiles={profiles()}

@@ -1,0 +1,120 @@
+package api_test
+
+import (
+	"net/http"
+	"testing"
+	"time"
+
+	mdns "github.com/miekg/dns"
+	"github.com/stretchr/testify/require"
+
+	"aegis/internal/filter"
+)
+
+func TestARuleAddedOverHTTPBlocksARealQuery(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPost, "/api/v1/rules",
+		`{"domain":"tracker.example.net","kind":"subdomains","action":"block","notes":"seen in the wild"}`)
+	require.Equal(t, http.StatusCreated, status, body)
+	require.Contains(t, body, `"id":1`)
+	require.Contains(t, body, `"kind":"subdomains"`)
+	require.Contains(t, body, `"notes":"seen in the wild"`)
+	require.Contains(t, body, `"created":`)
+
+	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
+}
+
+func TestAnAllowRuleAddedOverHTTPUnblocksAListedName(t *testing.T) {
+	h := startHarness(t)
+	url := startListServer(t)
+	status, body := h.do(t, http.MethodPut, "/api/v1/sources/trackers",
+		`{"url":"`+url+`/list","format":"hosts","enabled":true}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
+
+	decisions, stop := h.hub.Subscribe()
+	defer stop()
+
+	status, body = h.do(t, http.MethodPost, "/api/v1/rules",
+		`{"domain":"tracker.example.net","kind":"exact","action":"allow"}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	require.NotEqual(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
+
+	select {
+	case got := <-decisions:
+		require.Equal(t, listedName, got.Name.String())
+		require.Equal(t, filter.ActionAllow, got.Action)
+		require.NotNil(t, got.Match)
+		require.Equal(t, "custom:1", got.Match.RuleID)
+		require.Equal(t, "custom", got.Match.Source.Name)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no decision reached the stream")
+	}
+}
+
+func TestRuleCRUDReadsBackWhatWasStored(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPost, "/api/v1/rules",
+		`{"domain":"games.example.com","kind":"exact","action":"allow"}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/rules", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"domain":"games.example.com"`)
+
+	// A one-field body patches: the stored domain and kind survive.
+	status, body = h.do(t, http.MethodPut, "/api/v1/rules/1", `{"action":"block"}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"action":"block"`)
+	require.Contains(t, body, `"kind":"exact"`)
+
+	status, body = h.do(t, http.MethodDelete, "/api/v1/rules/1", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/rules", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.NotContains(t, body, "games.example.com")
+
+	status, body = h.do(t, http.MethodDelete, "/api/v1/rules/1", "")
+	require.Equal(t, http.StatusNotFound, status, body)
+	status, body = h.do(t, http.MethodPut, "/api/v1/rules/1", `{"action":"block"}`)
+	require.Equal(t, http.StatusNotFound, status, body)
+}
+
+func TestRuleInputIsRejectedWithFourHundred(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"unknown kind", `{"domain":"example.com","kind":"suffix","action":"block"}`, "kind"},
+		{"unknown action", `{"domain":"example.com","kind":"exact","action":"drop"}`, "action"},
+		{"malformed domain", `{"domain":"example.com/path","kind":"exact","action":"block"}`, "domain"},
+		{"missing domain", `{"kind":"exact","action":"block"}`, "domain"},
+		{"missing kind", `{"domain":"example.com","action":"block"}`, "kind"},
+		{"missing action", `{"domain":"example.com","kind":"exact"}`, "action"},
+		{"malformed json", `{`, "invalid JSON"},
+		{"wrong field type", `{"domain":1}`, "domain"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := startHarness(t)
+
+			status, body := h.do(t, http.MethodPost, "/api/v1/rules", tc.body)
+
+			require.Equal(t, http.StatusBadRequest, status, body)
+			require.Contains(t, body, tc.want)
+		})
+	}
+}
+
+func TestARuleIDMustBeANumber(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/rules/games", `{"action":"block"}`)
+
+	require.Equal(t, http.StatusBadRequest, status, body)
+}

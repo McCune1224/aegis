@@ -27,6 +27,15 @@ type Profile struct {
 	Custom  *string
 }
 
+type Rule struct {
+	ID      int64
+	Domain  string
+	Kind    string
+	Action  string
+	Notes   string
+	Created int64
+}
+
 type Setting struct {
 	Key   string
 	Value string

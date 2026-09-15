@@ -52,6 +52,24 @@ export type CatalogEntry = {
   format: string;
 };
 
+export type Rule = {
+  id: number;
+  domain: string;
+  kind: string;
+  action: string;
+  notes?: string;
+  created?: string;
+};
+
+// A rule has no inherited fields, so every field the body names is replaced and
+// the rest survive.
+export type RuleInput = {
+  domain?: string;
+  kind?: string;
+  action?: string;
+  notes?: string;
+};
+
 export type Status = {
   upstream: string;
   rules?: number;
@@ -150,4 +168,20 @@ export function deleteSource(name: string): Promise<void> {
 
 export function listCatalog(): Promise<CatalogEntry[]> {
   return request<CatalogEntry[]>("/api/v1/sources/catalog");
+}
+
+export function listRules(): Promise<Rule[]> {
+  return request<Rule[]>("/api/v1/rules");
+}
+
+export function createRule(input: RuleInput): Promise<Rule> {
+  return request<Rule>("/api/v1/rules", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateRule(id: number, input: RuleInput): Promise<Rule> {
+  return request<Rule>(`/api/v1/rules/${id}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export function deleteRule(id: number): Promise<void> {
+  return request<void>(`/api/v1/rules/${id}`, { method: "DELETE" });
 }
