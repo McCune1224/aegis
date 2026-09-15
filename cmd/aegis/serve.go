@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"aegis/internal/api"
 	"aegis/internal/blocklist"
 	"aegis/internal/config"
 	"aegis/internal/dns"
@@ -38,6 +40,7 @@ func newServeCmd() *cobra.Command {
 	flags := cmd.Flags()
 	flags.String("dns-address", "127.0.0.1:53", "address to listen on, as host:port")
 	flags.String("upstream", "9.9.9.9:53", "upstream resolver, as host:port")
+	flags.String("api-address", "127.0.0.1:8080", "address for the HTTP API, as host:port")
 	flags.String("db", "aegis.db", "path to the configuration database")
 	flags.String("blocking-mode", "nxdomain", "nxdomain, null-address, custom-address, or refused, for the default profile")
 	flags.String("custom-address", "", "the address to answer with when the default profile blocks")
@@ -114,9 +117,21 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	apiServer, err := api.Start(api.Config{
+		Store:    database,
+		Reloader: engine,
+		Address:  cfg.APIAddress,
+		Logger:   logger,
+	})
+	if err != nil {
+		_ = server.Shutdown(context.Background())
+		return err
+	}
+
 	logger.Info("aegis is serving",
 		"udp", server.UDPAddr().String(),
 		"tcp", server.TCPAddr().String(),
+		"api", apiServer.Addr().String(),
 		"upstream", cfg.Upstream,
 		"database", cfg.DB,
 		"rules", engine.Size(),
@@ -129,7 +144,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	logger.Info("aegis is shutting down")
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
-	return server.Shutdown(shutdown)
+	return errors.Join(apiServer.Shutdown(shutdown), server.Shutdown(shutdown))
 }
 
 // seed writes the flag configuration into an empty database. Once anything is

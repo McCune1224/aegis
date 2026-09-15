@@ -61,7 +61,7 @@ func Start(cfg Config) (*Server, error) {
 		logger = slog.Default()
 	}
 
-	listener, err := net.Listen("tcp", cfg.Address)
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", cfg.Address)
 	if err != nil {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}

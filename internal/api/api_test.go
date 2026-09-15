@@ -72,14 +72,14 @@ func (h *harness) do(t *testing.T, method, path, body string) (int, string) {
 
 // queryFrom asks from a chosen source address, so the server sees the client
 // the policy is keyed on.
-func queryFrom(t *testing.T, local, server, name string) *mdns.Msg {
+func queryFrom(t *testing.T, local, server string) *mdns.Msg {
 	t.Helper()
 	client := &mdns.Client{
 		Net:     "udp",
 		Timeout: 2 * time.Second,
 		Dialer:  &net.Dialer{LocalAddr: &net.UDPAddr{IP: net.ParseIP(local)}},
 	}
-	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion(name, mdns.TypeA), server)
+	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion("ads.example.com.", mdns.TypeA), server)
 	require.NoError(t, err)
 	return resp
 }
@@ -107,8 +107,8 @@ func TestAProfileAndClientCreatedOverHTTPGovernARealQuery(t *testing.T) {
 	status, body = h.do(t, http.MethodPut, "/api/clients/tablet", `{"profile":"kids","addresses":["127.0.0.2"]}`)
 	require.Equal(t, http.StatusOK, status, body)
 
-	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
-	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.1", h.dnsAddress, "ads.example.com.").Rcode)
+	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress).Rcode)
+	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.1", h.dnsAddress).Rcode)
 }
 
 func TestReadingBackAProfileAndAClientReturnsWhatWasStored(t *testing.T) {
@@ -212,24 +212,24 @@ func TestARejectedMutationDoesNotChangeWhatTheServerAnswers(t *testing.T) {
 	h := startHarness(t)
 	h.do(t, http.MethodPut, "/api/profiles/kids", `{"mode":"refused"}`)
 	h.do(t, http.MethodPut, "/api/clients/tablet", `{"profile":"kids","addresses":["127.0.0.2"]}`)
-	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
+	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress).Rcode)
 
 	status, body := h.do(t, http.MethodPut, "/api/profiles/kids", `{"mode":"drop"}`)
 	require.Equal(t, http.StatusBadRequest, status, body)
 
-	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
+	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress).Rcode)
 }
 
 func TestDeletingAClientReturnsItsAddressToTheDefaultProfile(t *testing.T) {
 	h := startHarness(t)
 	h.do(t, http.MethodPut, "/api/profiles/kids", `{"mode":"refused"}`)
 	h.do(t, http.MethodPut, "/api/clients/tablet", `{"profile":"kids","addresses":["127.0.0.2"]}`)
-	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
+	require.Equal(t, mdns.RcodeRefused, queryFrom(t, "127.0.0.2", h.dnsAddress).Rcode)
 
 	status, body := h.do(t, http.MethodDelete, "/api/clients/tablet", "")
 
 	require.Equal(t, http.StatusNoContent, status, body)
-	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.2", h.dnsAddress, "ads.example.com.").Rcode)
+	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.2", h.dnsAddress).Rcode)
 }
 
 func TestDeletingTheDefaultProfileIsRefused(t *testing.T) {
