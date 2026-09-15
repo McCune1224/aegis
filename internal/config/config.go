@@ -19,6 +19,8 @@ type Config struct {
 	CustomAddress string   `mapstructure:"custom-address"`
 	Blocklists    []string `mapstructure:"blocklist"`
 	BlockFormat   string   `mapstructure:"block-format"`
+	Profiles      []string `mapstructure:"profile"`
+	Clients       []string `mapstructure:"client"`
 	LogLevel      string   `mapstructure:"log-level"`
 }
 

@@ -17,6 +17,8 @@ func serveFlags() *pflag.FlagSet {
 	flags.String("custom-address", "", "")
 	flags.StringArray("blocklist", nil, "")
 	flags.String("block-format", "hosts", "")
+	flags.StringArray("profile", nil, "")
+	flags.StringArray("client", nil, "")
 	flags.String("log-level", "info", "")
 	return flags
 }
@@ -31,6 +33,8 @@ func TestLoadReadsEveryFlagValue(t *testing.T) {
 		"--blocklist", "/lists/one.txt",
 		"--blocklist", "/lists/two.txt",
 		"--block-format", "adblock",
+		"--profile", "kids=nxdomain",
+		"--client", "10.0.0.5=kids",
 		"--log-level", "debug",
 	}))
 
@@ -44,6 +48,8 @@ func TestLoadReadsEveryFlagValue(t *testing.T) {
 		CustomAddress: "192.0.2.1",
 		Blocklists:    []string{"/lists/one.txt", "/lists/two.txt"},
 		BlockFormat:   "adblock",
+		Profiles:      []string{"kids=nxdomain"},
+		Clients:       []string{"10.0.0.5=kids"},
 		LogLevel:      "debug",
 	}, got)
 }

@@ -35,19 +35,37 @@ gives you a throwaway one, with no sudo:
 ```
 unshare -rn sh -c '
   ip link set lo up
+  ip addr add 10.9.9.1/24 dev lo
   ip addr add 10.9.9.2/24 dev lo
   ip addr add 10.9.9.3/24 dev lo
-  ip addr add 10.9.9.4/24 dev lo
   exec "$SHELL"
 '
 ```
 
-Inside that namespace, `10.9.9.2` through `10.9.9.4` stand in for separate
-devices, and `dig -b 10.9.9.2 @10.9.9.1 example.com` selects which one asks. The
-namespace disappears when the shell exits.
+Inside that namespace, `10.9.9.1` is the server and `10.9.9.2` through `10.9.9.4`
+stand in for separate devices. `dig -b 10.9.9.2 @10.9.9.1 -p 15353` selects which
+one asks. The namespace disappears when the shell exits. Add more addresses for
+more devices.
 
-Use this once profiles and client identity exist. It is the cheapest honest test
-of "the tablet gets the strict list and the laptop does not".
+This is the check that proves per-client policy end to end. Run aegis with two
+profiles and ask the same blocked name from two addresses:
+
+```
+./bin/aegis serve \
+  --dns-address 10.9.9.1:15353 \
+  --upstream 127.0.0.1:1 \
+  --blocklist ./list.txt \
+  --profile kids=refused \
+  --client 10.9.9.2=kids \
+  --log-level error &
+
+dig -b 10.9.9.2 @10.9.9.1 -p 15353 ads.example.com   # REFUSED, the kids profile
+dig -b 10.9.9.3 @10.9.9.1 -p 15353 ads.example.com   # NXDOMAIN, the default
+```
+
+The upstream is unreachable on purpose. A blocked name never reaches it, so the
+check needs no working resolver and no internet access, which is what makes it
+runnable inside the namespace.
 
 ## Tier 4. Cross-architecture build
 
@@ -104,4 +122,6 @@ distribution other than the development machine. Both are later than phase one.
 - Tier 5 has never run. Every performance number in the repository so far comes
   from a development machine.
 - `goreleaser` is not installed, so the release matrix itself has never been
-  built, only the raw Go cross-compile under it.
+  built, only the raw Go cross-compile under it. `make crossbuild` covers the
+  compiler and the linker flags but not the archive names, the checksums, or the
+  published artifacts.

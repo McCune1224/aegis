@@ -22,13 +22,13 @@ func BenchmarkDecide(b *testing.B) {
 					Action: filter.ActionBlock,
 				})
 			}
-			rs, err := filter.Compile(specs)
+			rs, err := filter.Compile(defaultConfig(specs))
 			require.NoError(b, err)
 
 			name := mustParse("x.ads.doubleclick.net")
 			b.ReportAllocs()
 			for b.Loop() {
-				if got := rs.Decide(name); got.Action != filter.ActionAllow {
+				if got := rs.Decide(name, ""); got.Action != filter.ActionAllow {
 					b.Fatalf("unexpected action %d", got.Action)
 				}
 			}
