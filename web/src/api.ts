@@ -28,6 +28,30 @@ export type ClientInput = {
   prefixes: string[];
 };
 
+export type Source = {
+  name: string;
+  url: string;
+  format: string;
+  enabled: boolean;
+  last_fetch?: string;
+  last_error?: string;
+  rule_count: number;
+};
+
+// Absent fields keep what is stored, so a one-field body toggles or repoints a
+// source without resending the rest.
+export type SourceInput = {
+  url?: string;
+  format?: string;
+  enabled?: boolean;
+};
+
+export type CatalogEntry = {
+  name: string;
+  url: string;
+  format: string;
+};
+
 export type Status = {
   upstream: string;
   rules?: number;
@@ -103,4 +127,27 @@ export function saveClient(name: string, input: ClientInput): Promise<Client> {
 
 export function deleteClient(name: string): Promise<void> {
   return request<void>(`/api/v1/clients/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+export function listSources(): Promise<Source[]> {
+  return request<Source[]>("/api/v1/sources");
+}
+
+export function saveSource(name: string, input: SourceInput): Promise<Source> {
+  const body: Record<string, unknown> = {};
+  if (input.url !== undefined) body.url = input.url;
+  if (input.format !== undefined) body.format = input.format;
+  if (input.enabled !== undefined) body.enabled = input.enabled;
+  return request<Source>(`/api/v1/sources/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteSource(name: string): Promise<void> {
+  return request<void>(`/api/v1/sources/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+export function listCatalog(): Promise<CatalogEntry[]> {
+  return request<CatalogEntry[]>("/api/v1/sources/catalog");
 }

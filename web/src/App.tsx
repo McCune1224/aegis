@@ -2,41 +2,56 @@ import { createEffect, createSignal } from "solid-js";
 import {
   deleteClient as removeClient,
   deleteProfile as removeProfile,
+  deleteSource as removeSource,
   getDefaultProfile,
   getStatus,
+  listCatalog,
   listClients,
   listProfiles,
+  listSources,
   saveClient as putClient,
   saveProfile as putProfile,
+  saveSource as putSource,
   setDefaultProfile as putDefaultProfile,
+  type CatalogEntry,
   type Client,
   type ClientInput,
   type Profile,
   type ProfileInput,
+  type Source,
+  type SourceInput,
 } from "./api";
 import Clients from "./Clients";
 import Graph from "./Graph";
 import Profiles from "./Profiles";
+import Sources from "./Sources";
 
-type Tab = "profiles" | "clients" | "graph";
+type Tab = "profiles" | "clients" | "sources" | "graph";
 
 export default function App() {
   const [tab, setTab] = createSignal<Tab>("profiles");
   const [profiles, setProfiles] = createSignal<Profile[]>([]);
   const [clients, setClients] = createSignal<Client[]>([]);
+  const [sources, setSources] = createSignal<Source[]>([]);
+  const [catalog, setCatalog] = createSignal<CatalogEntry[]>([]);
   const [defaultProfile, setDefaultProfile] = createSignal("");
   const [upstream, setUpstream] = createSignal("");
   const [error, setError] = createSignal<string>();
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextDefault, nextStatus] = await Promise.all([
-      listProfiles(),
-      listClients(),
-      getDefaultProfile(),
-      getStatus(),
-    ]);
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextDefault, nextStatus] =
+      await Promise.all([
+        listProfiles(),
+        listClients(),
+        listSources(),
+        listCatalog(),
+        getDefaultProfile(),
+        getStatus(),
+      ]);
     setProfiles(nextProfiles);
     setClients(nextClients);
+    setSources(nextSources);
+    setCatalog(nextCatalog);
     setDefaultProfile(nextDefault.profile);
     setUpstream(nextStatus.upstream);
   }
@@ -68,6 +83,16 @@ export default function App() {
     await refresh();
   }
 
+  async function saveSource(name: string, input: SourceInput) {
+    await putSource(name, input);
+    await refresh();
+  }
+
+  async function deleteSource(name: string) {
+    await removeSource(name);
+    await refresh();
+  }
+
   async function makeDefault(name: string) {
     await putDefaultProfile(name);
     await refresh();
@@ -96,6 +121,14 @@ export default function App() {
           </button>
           <button
             type="button"
+            data-testid="tab-sources"
+            class={tab() === "sources" ? "active" : ""}
+            onClick={() => setTab("sources")}
+          >
+            Sources
+          </button>
+          <button
+            type="button"
             data-testid="tab-graph"
             class={tab() === "graph" ? "active" : ""}
             onClick={() => setTab("graph")}
@@ -119,6 +152,13 @@ export default function App() {
           profiles={profiles()}
           onSave={saveClient}
           onDelete={deleteClient}
+        />
+      ) : tab() === "sources" ? (
+        <Sources
+          sources={sources()}
+          catalog={catalog()}
+          onSave={saveSource}
+          onDelete={deleteSource}
         />
       ) : (
         <Graph
