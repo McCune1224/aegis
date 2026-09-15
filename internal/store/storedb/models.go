@@ -27,6 +27,16 @@ type Profile struct {
 	Custom  *string
 }
 
+type Query struct {
+	ID      int64
+	Time    int64
+	Client  string
+	Name    string
+	Type    string
+	Verdict string
+	Rule    string
+}
+
 type Rule struct {
 	ID      int64
 	Domain  string
