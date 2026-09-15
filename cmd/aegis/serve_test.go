@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -14,7 +17,9 @@ import (
 	mdns "github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
 
+	"aegis/internal/blocklist"
 	"aegis/internal/config"
+	"aegis/internal/store"
 )
 
 func freeAddress(t *testing.T) string {
@@ -159,6 +164,73 @@ func TestServeCommandServesTheAPI(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not return after its context was cancelled")
 	}
+}
+
+func TestServeCommandLoadsRulesFromASourceAndSurvivesABadOne(t *testing.T) {
+	upstream := startUpstream(t, "203.0.113.60")
+	list := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "0.0.0.0 ads.example.com\n")
+	}))
+	t.Cleanup(list.Close)
+
+	address := freeAddress(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"serve",
+		"--dns-address", address,
+		"--api-address", freeTCPAddress(t),
+		"--upstream", upstream,
+		"--db", filepath.Join(t.TempDir(), "aegis.db"),
+		"--source", "good=" + list.URL,
+		"--source", "broken=http://127.0.0.1:1/list",
+		"--log-level", "error",
+	})
+	cmd.SetContext(ctx)
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	require.Eventually(t, func() bool {
+		client := &mdns.Client{Net: "udp", Timeout: 200 * time.Millisecond}
+		_, _, err := client.Exchange(new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA), address)
+		return err == nil
+	}, 5*time.Second, 25*time.Millisecond, "serve never began answering")
+
+	blocked := ask(t, address, "ads.example.com.")
+	require.Equal(t, mdns.RcodeNameError, blocked.Rcode)
+	require.Empty(t, blocked.Answer)
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after its context was cancelled")
+	}
+}
+
+func TestFetchSourceRulesFallsBackToTheCachedBody(t *testing.T) {
+	database, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "aegis.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = database.Close() })
+	ctx := t.Context()
+
+	require.NoError(t, database.SaveSource(ctx, store.Source{
+		Name:    "cached",
+		URL:     "http://127.0.0.1:1/list",
+		Format:  blocklist.FormatHosts,
+		Enabled: true,
+	}))
+	require.NoError(t, database.RecordSourceFetch(ctx, "cached", "etag", time.Now(), nil, 1, []byte("0.0.0.0 ads.example.com\n")))
+
+	rules, err := fetchSourceRules(ctx, database, blocklist.NewFetcher(2*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	require.Equal(t, "ads.example.com", rules[0].Domain.String())
 }
 
 func TestServeCommandReportsWhatItCannotParse(t *testing.T) {

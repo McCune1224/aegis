@@ -23,6 +23,7 @@ type Config struct {
 	BlockFormat   string   `mapstructure:"block-format"`
 	Profiles      []string `mapstructure:"profile"`
 	Clients       []string `mapstructure:"client"`
+	Sources       []string `mapstructure:"source"`
 	LogLevel      string   `mapstructure:"log-level"`
 }
 
