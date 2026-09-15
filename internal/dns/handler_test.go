@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"sync"
 	"testing"
 
 	mdns "github.com/miekg/dns"
@@ -300,6 +301,47 @@ func TestHandleSetsRecursionAvailableOnEveryAnswer(t *testing.T) {
 	allowed, err := handler.Handle(context.Background(), req, netip.Addr{})
 	require.NoError(t, err)
 	require.True(t, allowed.RecursionAvailable, "a forwarded answer must tell the client we recurse")
+}
+
+func TestHandlePublishesEachDecisionToTheObserver(t *testing.T) {
+	observer := &captureObserver{}
+	upstream := &stubResolver{}
+	handler, err := dns.NewHandler(dns.Config{
+		Decider:  deciderFor(t, defaultPolicy, blockedAds()),
+		Upstream: upstream,
+		Observer: observer,
+	})
+	require.NoError(t, err)
+
+	_, err = handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), netip.MustParseAddr("10.9.9.2"))
+	require.NoError(t, err)
+
+	allowed := query("example.com.", mdns.TypeA)
+	upstream.answer = upstreamA(allowed, "203.0.113.60")
+	_, err = handler.Handle(context.Background(), allowed, netip.MustParseAddr("10.9.9.3"))
+	require.NoError(t, err)
+
+	require.Len(t, observer.decisions, 2)
+	blocked := observer.decisions[0]
+	require.Equal(t, filter.ActionBlock, blocked.Action)
+	require.Equal(t, "ads.example.com", blocked.Name.String())
+	require.Equal(t, netip.MustParseAddr("10.9.9.2"), blocked.Address)
+	require.NotNil(t, blocked.Match)
+	require.Equal(t, "block-ads", blocked.Match.RuleID)
+
+	require.Equal(t, filter.ActionAllow, observer.decisions[1].Action)
+	require.Nil(t, observer.decisions[1].Match)
+}
+
+type captureObserver struct {
+	mu        sync.Mutex
+	decisions []dns.Decision
+}
+
+func (c *captureObserver) Observe(decision dns.Decision) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.decisions = append(c.decisions, decision)
 }
 
 func TestNewHandlerRejectsAnIncompleteConfig(t *testing.T) {

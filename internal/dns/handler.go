@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"time"
 
 	mdns "github.com/miekg/dns"
 
@@ -30,10 +31,29 @@ type Decider interface {
 	Decide(name filter.Domain, address netip.Addr) filter.Verdict
 }
 
+// Decision is one resolved query, as the live stream and the query log consume
+// it. The handler publishes it for a blocked name and for an allowed one, so the
+// stream shows the whole pipeline rather than only what it stopped.
+type Decision struct {
+	Time    time.Time
+	Address netip.Addr
+	Name    filter.Domain
+	Action  filter.Action
+	Match   *filter.Provenance
+}
+
+// Observer receives every decision the handler makes. It runs on the resolver's
+// worker, so an implementation must not block. A consumer that cannot keep up
+// drops rather than waits.
+type Observer interface {
+	Observe(Decision)
+}
+
 // Config is what a Handler needs to answer queries.
 type Config struct {
 	Decider  Decider
 	Upstream Resolver
+	Observer Observer
 }
 
 // Handler answers one DNS message. It holds no mutable state, so one Handler
@@ -41,6 +61,7 @@ type Config struct {
 type Handler struct {
 	decider  Decider
 	upstream Resolver
+	observer Observer
 }
 
 // NewHandler checks the config and returns a Handler.
@@ -51,7 +72,7 @@ func NewHandler(cfg Config) (*Handler, error) {
 	if cfg.Upstream == nil {
 		return nil, errors.New("dns: Config.Upstream is required")
 	}
-	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream}, nil
+	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream, observer: cfg.Observer}, nil
 }
 
 // Handle answers one query for the client at address. A blocked name never
@@ -71,6 +92,15 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 	}
 
 	verdict := h.decider.Decide(name, address)
+	if h.observer != nil {
+		h.observer.Observe(Decision{
+			Time:    time.Now(),
+			Address: address,
+			Name:    name,
+			Action:  verdict.Action,
+			Match:   verdict.Match,
+		})
+	}
 	if verdict.Action == filter.ActionBlock {
 		return blocked(req, question, verdict.Policy), nil
 	}

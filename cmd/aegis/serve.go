@@ -100,9 +100,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	hub := api.NewHub(logger)
+
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:  engine,
 		Upstream: dns.NewForwarder(cfg.Upstream),
+		Observer: hub,
 	})
 	if err != nil {
 		return err
@@ -120,6 +123,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiServer, err := api.Start(api.Config{
 		Store:    database,
 		Reloader: engine,
+		Hub:      hub,
 		Address:  cfg.APIAddress,
 		Logger:   logger,
 	})

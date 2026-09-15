@@ -25,6 +25,7 @@ type Reloader interface {
 type Config struct {
 	Store    *store.Store
 	Reloader Reloader
+	Hub      *Hub
 	Address  string
 	Logger   *slog.Logger
 }
@@ -34,6 +35,7 @@ type Config struct {
 type Server struct {
 	store    *store.Store
 	reloader Reloader
+	hub      *Hub
 	http     *http.Server
 	listener net.Listener
 
@@ -66,7 +68,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, hub: cfg.Hub, listener: listener}
 	s.http = &http.Server{
 		Handler:  s.routes(),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
@@ -88,14 +90,15 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ct
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/profiles", s.listProfiles)
-	mux.HandleFunc("PUT /api/profiles/{name}", s.putProfile)
-	mux.HandleFunc("GET /api/profiles/{name}", s.getProfile)
-	mux.HandleFunc("DELETE /api/profiles/{name}", s.deleteProfile)
-	mux.HandleFunc("GET /api/clients", s.listClients)
-	mux.HandleFunc("PUT /api/clients/{name}", s.putClient)
-	mux.HandleFunc("GET /api/clients/{name}", s.getClient)
-	mux.HandleFunc("DELETE /api/clients/{name}", s.deleteClient)
+	mux.HandleFunc("GET /api/v1/profiles", s.listProfiles)
+	mux.HandleFunc("PUT /api/v1/profiles/{name}", s.putProfile)
+	mux.HandleFunc("GET /api/v1/profiles/{name}", s.getProfile)
+	mux.HandleFunc("DELETE /api/v1/profiles/{name}", s.deleteProfile)
+	mux.HandleFunc("GET /api/v1/clients", s.listClients)
+	mux.HandleFunc("PUT /api/v1/clients/{name}", s.putClient)
+	mux.HandleFunc("GET /api/v1/clients/{name}", s.getClient)
+	mux.HandleFunc("DELETE /api/v1/clients/{name}", s.deleteClient)
+	mux.HandleFunc("GET /api/v1/stream/queries", s.streamQueries)
 	return mux
 }
 
