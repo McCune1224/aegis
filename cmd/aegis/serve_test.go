@@ -140,7 +140,7 @@ func TestServeCommandServesTheAPI(t *testing.T) {
 	go func() { done <- cmd.Execute() }()
 
 	require.Eventually(t, func() bool {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+apiAddress+"/api/profiles", nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+apiAddress+"/api/v1/profiles", nil)
 		if err != nil {
 			return false
 		}
