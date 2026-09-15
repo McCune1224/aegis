@@ -240,3 +240,24 @@ func TestParseDomainAcceptsTheUnderscoreLabelsDnsActuallyUses(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "_dmarc.example.com", got.String())
 }
+
+func TestActionAndMatchKindRoundTripWithStrings(t *testing.T) {
+	for _, name := range []string{"block", "allow"} {
+		action, err := filter.ParseAction(name)
+		require.NoError(t, err, "name=%q", name)
+		require.Equal(t, name, action.String(), "name=%q", name)
+	}
+	for _, name := range []string{"exact", "subdomains"} {
+		kind, err := filter.ParseMatchKind(name)
+		require.NoError(t, err, "name=%q", name)
+		require.Equal(t, name, kind.String(), "name=%q", name)
+	}
+}
+
+func TestParseActionAndMatchKindRejectAnUnknownName(t *testing.T) {
+	_, err := filter.ParseAction("drop")
+	require.Error(t, err)
+
+	_, err = filter.ParseMatchKind("suffix")
+	require.Error(t, err)
+}
