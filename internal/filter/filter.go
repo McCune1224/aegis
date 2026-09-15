@@ -36,7 +36,18 @@ type Action uint8
 const (
 	ActionBlock Action = iota
 	ActionAllow
+
+	actionCount
 )
+
+// actionTier orders two matching rules. A rule in a lower tier beats one in a
+// higher tier before any other comparison, so an allow rule wins over a block
+// rule however specific the block is and whatever order the lists loaded in.
+// Adding a tier later, for rewrites or client overrides, is one more row.
+var actionTier = [actionCount]int{
+	ActionBlock: 1,
+	ActionAllow: 0,
+}
 
 // MatchKind is how a rule's domain is compared against a query name.
 type MatchKind uint8
@@ -84,12 +95,12 @@ type RuleSet struct {
 }
 
 type entry struct {
-	allow *candidate
-	block *candidate
+	best *candidate
 }
 
 type candidate struct {
 	provenance Provenance
+	action     Action
 	labels     int
 	exact      bool
 	order      int
@@ -128,8 +139,9 @@ func Compile(specs []RuleSpec) (*RuleSet, error) {
 			e = &entry{}
 			table[spec.Domain.name] = e
 		}
-		e.add(spec.Action, &candidate{
+		e.best = better(e.best, &candidate{
 			provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Domain.name},
+			action:     spec.Action,
 			labels:     countLabels(spec.Domain.name),
 			exact:      exact,
 			order:      order,
@@ -138,29 +150,19 @@ func Compile(specs []RuleSpec) (*RuleSet, error) {
 	return rs, nil
 }
 
-func (e *entry) add(action Action, c *candidate) {
-	if action == ActionAllow {
-		e.allow = better(e.allow, c)
-		return
-	}
-	e.block = better(e.block, c)
-}
-
 // Decide returns the verdict for one name. It looks up the whole name and then
 // each parent, so its cost follows the label count and not the rule count.
 func (rs *RuleSet) Decide(name Domain) Verdict {
-	var allow, block *candidate
+	var best *candidate
 
 	if e := rs.exact[name.name]; e != nil {
-		allow = better(allow, e.allow)
-		block = better(block, e.block)
+		best = better(best, e.best)
 	}
 
 	for start := 0; ; {
 		label := name.name[start:]
 		if e := rs.subdomains[label]; e != nil {
-			allow = better(allow, e.allow)
-			block = better(block, e.block)
+			best = better(best, e.best)
 		}
 		dot := strings.IndexByte(label, '.')
 		if dot < 0 {
@@ -169,23 +171,26 @@ func (rs *RuleSet) Decide(name Domain) Verdict {
 		start += dot + 1
 	}
 
-	if allow != nil {
-		return Verdict{Action: ActionAllow, Match: &allow.provenance}
+	if best == nil {
+		return Verdict{Action: ActionAllow}
 	}
-	if block != nil {
-		return Verdict{Action: ActionBlock, Match: &block.provenance}
-	}
-	return Verdict{Action: ActionAllow}
+	return Verdict{Action: best.action, Match: &best.provenance}
 }
 
-// better picks between two candidates for the same action. Tie-breaking is by
-// specificity, then exact over subdomain, then declaration order, so the result
-// never depends on map iteration.
+// better picks between two candidates for the same name. Tie-breaking is by
+// tier, then specificity, then exact over subdomain, then declaration order, so
+// the result never depends on map iteration.
 func better(current, next *candidate) *candidate {
 	if current == nil {
 		return next
 	}
 	if next == nil {
+		return current
+	}
+	if actionTier[next.action] != actionTier[current.action] {
+		if actionTier[next.action] < actionTier[current.action] {
+			return next
+		}
 		return current
 	}
 	if next.labels != current.labels {
