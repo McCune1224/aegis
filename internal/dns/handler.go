@@ -33,11 +33,13 @@ type Decider interface {
 
 // Decision is one resolved query, as the live stream and the query log consume
 // it. The handler publishes it for a blocked name and for an allowed one, so the
-// stream shows the whole pipeline rather than only what it stopped.
+// stream shows the whole pipeline rather than only what it stopped. Type is the
+// question's record type as its mnemonic, such as A or AAAA.
 type Decision struct {
 	Time    time.Time
 	Address netip.Addr
 	Name    filter.Domain
+	Type    string
 	Action  filter.Action
 	Match   *filter.Provenance
 }
@@ -49,19 +51,20 @@ type Observer interface {
 	Observe(Decision)
 }
 
-// Config is what a Handler needs to answer queries.
+// Config is what a Handler needs to answer queries. Every observer sees every
+// decision, so the stream and the query log can consume them independently.
 type Config struct {
-	Decider  Decider
-	Upstream Resolver
-	Observer Observer
+	Decider   Decider
+	Upstream  Resolver
+	Observers []Observer
 }
 
 // Handler answers one DNS message. It holds no mutable state, so one Handler
 // serves every worker.
 type Handler struct {
-	decider  Decider
-	upstream Resolver
-	observer Observer
+	decider   Decider
+	upstream  Resolver
+	observers []Observer
 }
 
 // NewHandler checks the config and returns a Handler.
@@ -72,7 +75,7 @@ func NewHandler(cfg Config) (*Handler, error) {
 	if cfg.Upstream == nil {
 		return nil, errors.New("dns: Config.Upstream is required")
 	}
-	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream, observer: cfg.Observer}, nil
+	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream, observers: cfg.Observers}, nil
 }
 
 // Handle answers one query for the client at address. A blocked name never
@@ -92,14 +95,18 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 	}
 
 	verdict := h.decider.Decide(name, address)
-	if h.observer != nil {
-		h.observer.Observe(Decision{
+	if len(h.observers) > 0 {
+		decision := Decision{
 			Time:    time.Now(),
 			Address: address,
 			Name:    name,
+			Type:    mdns.TypeToString[question.Qtype],
 			Action:  verdict.Action,
 			Match:   verdict.Match,
-		})
+		}
+		for _, observer := range h.observers {
+			observer.Observe(decision)
+		}
 	}
 	if verdict.Action == filter.ActionBlock {
 		return blocked(req, question, verdict.Policy), nil

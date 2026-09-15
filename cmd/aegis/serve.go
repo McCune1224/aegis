@@ -20,6 +20,7 @@ import (
 	"aegis/internal/config"
 	"aegis/internal/dns"
 	"aegis/internal/filter"
+	"aegis/internal/querylog"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 	"aegis/web"
@@ -115,11 +116,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	hub := api.NewHub(logger)
+	log := querylog.New(database, logger)
 
 	handler, err := dns.NewHandler(dns.Config{
-		Decider:  engine,
-		Upstream: dns.NewForwarder(cfg.Upstream),
-		Observer: hub,
+		Decider:   engine,
+		Upstream:  dns.NewForwarder(cfg.Upstream),
+		Observers: []dns.Observer{hub, log},
 	})
 	if err != nil {
 		return err
@@ -163,6 +165,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	<-stop.Done()
 
 	logger.Info("aegis is shutting down")
+	if err := log.Close(); err != nil {
+		logger.Warn("querylog: final flush failed", "error", err)
+	}
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	return errors.Join(apiServer.Shutdown(shutdown), server.Shutdown(shutdown))

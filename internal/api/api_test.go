@@ -20,6 +20,7 @@ import (
 	"aegis/internal/api"
 	"aegis/internal/blocklist"
 	"aegis/internal/dns"
+	"aegis/internal/querylog"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 )
@@ -29,6 +30,7 @@ type harness struct {
 	dnsAddress string
 	hub        *api.Hub
 	listPath   string
+	log        *querylog.QueryLog
 }
 
 // startHarness runs the store, runtime, DNS server, and API in process, the way
@@ -47,10 +49,11 @@ func startHarness(t *testing.T) *harness {
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(2*time.Second), rt, quietLogger())
 
 	hub := api.NewHub(nil)
+	log := querylog.New(database, quietLogger())
 	handler, err := dns.NewHandler(dns.Config{
-		Decider:  rt,
-		Upstream: dns.NewForwarder("127.0.0.1:1"),
-		Observer: hub,
+		Decider:   rt,
+		Upstream:  dns.NewForwarder("127.0.0.1:1"),
+		Observers: []dns.Observer{hub, log},
 	})
 	require.NoError(t, err)
 	dnsServer, err := dns.Start(dns.ServerConfig{Handler: handler, Address: "127.0.0.1:0"})
@@ -66,6 +69,7 @@ func startHarness(t *testing.T) *harness {
 		dnsAddress: dnsServer.UDPAddr().String(),
 		hub:        hub,
 		listPath:   lists[0].Path,
+		log:        log,
 	}
 }
 
@@ -385,4 +389,25 @@ func TestAReloadEndpointPicksUpBlocklistEdits(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, body)
 
 	require.Equal(t, mdns.RcodeServerFailure, queryFrom(t, "127.0.0.1", h.dnsAddress).Rcode)
+}
+
+func TestAQueriedNameAppearsInTheQueryLogEndpoint(t *testing.T) {
+	h := startHarness(t)
+
+	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.1", h.dnsAddress).Rcode)
+
+	var body string
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		require.Less(t, time.Now().UnixNano(), deadline.UnixNano(), "the query never reached the log")
+		time.Sleep(20 * time.Millisecond)
+		status, got := h.do(t, http.MethodGet, "/api/v1/queries?name=ads.example.com&verdict=block", "")
+		require.Equal(t, http.StatusOK, status, got)
+		if got != "{\"queries\":[]}\n" {
+			body = got
+			break
+		}
+	}
+	require.Contains(t, body, "ads.example.com")
+	require.Contains(t, body, "127.0.0.1")
 }

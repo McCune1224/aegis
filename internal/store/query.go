@@ -33,7 +33,7 @@ type QueryFilter struct {
 // RecordQueries writes one batch of entries in a single transaction, so a
 // flush costs one commit however many queries it holds.
 func (s *Store) RecordQueries(ctx context.Context, entries []QueryEntry) error {
-	err := s.inTx(ctx, func(q *storedb.Queries) error {
+	err := s.inLogTx(ctx, func(q *storedb.Queries) error {
 		for _, entry := range entries {
 			params := storedb.InsertQueriesParams{
 				Time:    entry.Time.UnixMilli(),
@@ -72,7 +72,7 @@ func (s *Store) Queries(ctx context.Context, filter QueryFilter) ([]QueryEntry, 
 		params.Verdict = filter.Verdict.String()
 	}
 
-	rows, err := s.queries.ListQueries(ctx, params)
+	rows, err := s.logQuer.ListQueries(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("store: queries: %w", err)
 	}
@@ -91,7 +91,7 @@ func (s *Store) Queries(ctx context.Context, filter QueryFilter) ([]QueryEntry, 
 // TrimQueries keeps only the newest keep rows. It runs after a flush, so the
 // retention bound is enforced by the same writer that fills the table.
 func (s *Store) TrimQueries(ctx context.Context, keep int) error {
-	if err := s.queries.TrimQueries(ctx, int64(keep)); err != nil {
+	if err := s.logQuer.TrimQueries(ctx, int64(keep)); err != nil {
 		return fmt.Errorf("store: trim queries: %w", err)
 	}
 	return nil
@@ -128,4 +128,3 @@ func parseQueryRow(millis int64, client, name, typ, verdict, rule string) (Query
 		Rule:    rule,
 	}, nil
 }
-

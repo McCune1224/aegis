@@ -72,18 +72,23 @@ func (c Config) Validate() error {
 	return err
 }
 
-// Store is the configuration Aegis serves from. It owns the database handle and
-// is the only place a text column becomes a typed value.
+// Store is the configuration Aegis serves from. It owns two handles to the
+// same database: one for configuration, whose writes stay serialized so SQLite
+// never returns SQLITE_BUSY under a burst of administrative writes, and one
+// for the query log, whose recurring flushes must never queue configuration
+// work behind them or vice versa. WAL mode lets the log's reads and writes
+// overlap inside the log handle.
 type Store struct {
 	db      *sql.DB
+	logDB   *sql.DB
 	queries *storedb.Queries
+	logQuer *storedb.Queries
 }
 
 // Open opens the database at path and applies every pending migration.
 func Open(ctx context.Context, path string) (*Store, error) {
-	// One connection serializes writers, which keeps SQLite from returning
-	// SQLITE_BUSY under a burst of configuration writes. The DNS path never
-	// touches the database, so this only queues administrative work.
+	// WAL lets reads run beside a write, and busy_timeout absorbs the moment
+	// two writes collide.
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -91,11 +96,19 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 
+	logDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("store: open %s: %w", path, err)
+	}
+	logDB.SetMaxOpenConns(2)
+
 	if err := migrate(ctx, sqlDB); err != nil {
 		_ = sqlDB.Close()
+		_ = logDB.Close()
 		return nil, err
 	}
-	return &Store{db: sqlDB, queries: storedb.New(sqlDB)}, nil
+	return &Store{db: sqlDB, logDB: logDB, queries: storedb.New(sqlDB), logQuer: storedb.New(logDB)}, nil
 }
 
 func migrate(ctx context.Context, sqlDB *sql.DB) error {
@@ -113,8 +126,10 @@ func migrate(ctx context.Context, sqlDB *sql.DB) error {
 	return nil
 }
 
-// Close releases the database handle.
-func (s *Store) Close() error { return s.db.Close() }
+// Close releases both database handles.
+func (s *Store) Close() error {
+	return errors.Join(s.db.Close(), s.logDB.Close())
+}
 
 // Load reads the configuration, parsing every text column into the typed value
 // the layers above take. Nothing above this point sees a string where it should
@@ -366,6 +381,20 @@ func (s *Store) inTx(ctx context.Context, fn func(*storedb.Queries) error) error
 		return fmt.Errorf("store: %w", err)
 	}
 	if err := fn(s.queries.WithTx(tx)); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// inLogTx runs one transaction against the query log's handle, so a log batch
+// commits on its own connection and never holds the configuration handle.
+func (s *Store) inLogTx(ctx context.Context, fn func(*storedb.Queries) error) error {
+	tx, err := s.logDB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: log tx: %w", err)
+	}
+	if err := fn(s.logQuer.WithTx(tx)); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

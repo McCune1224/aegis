@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"net/netip"
+	"strconv"
 	"testing"
 	"time"
 
@@ -86,4 +87,46 @@ func TestQueriesTrimToTheRetentionBound(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 3)
 	require.Equal(t, base.Add(4*time.Second), got[0].Time, "the newest rows survive")
+}
+
+func TestReadsRunBesideTheLogWriter(t *testing.T) {
+	s := open(t)
+	ctx := t.Context()
+
+	const batches = 100
+	const perBatch = 20
+	written := make(chan struct{})
+	go func() {
+		defer close(written)
+		for i := range batches {
+			batch := make([]store.QueryEntry, 0, perBatch)
+			for j := range perBatch {
+				batch = append(batch, store.QueryEntry{
+					Time:    time.Now(),
+					Client:  netip.MustParseAddr("10.9.9.2"),
+					Name:    mustDomain(t, "ads.example.com"),
+					Type:    "A",
+					Verdict: filter.ActionBlock,
+					Rule:    strconv.Itoa(i*perBatch + j),
+				})
+			}
+			if err := s.RecordQueries(ctx, batch); err != nil {
+				t.Errorf("record batch %d: %v", i, err)
+				return
+			}
+		}
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		entries, err := s.Queries(ctx, store.QueryFilter{Limit: 10})
+		require.NoError(t, err)
+		require.LessOrEqual(t, len(entries), 10)
+		select {
+		case <-written:
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+		require.Less(t, time.Now().UnixNano(), deadline.UnixNano(), "the writer never finished")
+	}
 }
