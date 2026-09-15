@@ -230,3 +230,37 @@ func TestNewHandlerRejectsAnIncompleteConfig(t *testing.T) {
 		require.Error(t, err, "case=%q", name)
 	}
 }
+
+func TestParseBlockingModeRoundTripsWithString(t *testing.T) {
+	for _, name := range []string{"nxdomain", "null-address", "custom-address", "refused"} {
+		mode, err := dns.ParseBlockingMode(name)
+		require.NoError(t, err, "name=%q", name)
+		require.Equal(t, name, mode.String())
+	}
+}
+
+func TestParseBlockingModeRejectsAnUnknownName(t *testing.T) {
+	_, err := dns.ParseBlockingMode("drop")
+
+	require.Error(t, err)
+}
+
+func TestHandleSetsRecursionAvailableOnEveryAnswer(t *testing.T) {
+	upstream := &stubResolver{}
+	handler, err := dns.NewHandler(dns.Config{
+		Engine:   engineFor(t, blockedAds()),
+		Upstream: upstream,
+		Mode:     dns.NXDomain,
+	})
+	require.NoError(t, err)
+
+	blocked, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA))
+	require.NoError(t, err)
+	require.True(t, blocked.RecursionAvailable, "a blocked answer must tell the client we recurse")
+
+	req := query("example.com.", mdns.TypeA)
+	upstream.answer = upstreamA(req, "203.0.113.50")
+	allowed, err := handler.Handle(context.Background(), req)
+	require.NoError(t, err)
+	require.True(t, allowed.RecursionAvailable, "a forwarded answer must tell the client we recurse")
+}
