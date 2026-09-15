@@ -1,3 +1,13 @@
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export type Profile = {
   name: string;
   extends?: string;
@@ -28,13 +38,24 @@ export type ClientInput = {
   prefixes: string[];
 };
 
+export type Session = {
+  authenticated: boolean;
+  csrf?: string;
+};
+
+// The CSRF token lives in memory only, so a reload asks the session endpoint for
+// a fresh copy before it mutates anything.
+let csrfToken = "";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+  if (csrfToken) {
+    headers.set("X-CSRF-Token", csrfToken);
+  }
+  const response = await fetch(path, { ...init, headers });
   if (!response.ok) {
-    throw new Error(await errorMessage(response));
+    throw new ApiError(response.status, await errorMessage(response));
   }
   if (response.status === 204) {
     return undefined as T;
@@ -49,6 +70,25 @@ async function errorMessage(response: Response): Promise<string> {
   } catch {
     return `HTTP ${response.status}`;
   }
+}
+
+export async function session(): Promise<Session> {
+  const status = await request<Session>("/api/v1/session");
+  csrfToken = status.csrf ?? "";
+  return status;
+}
+
+export async function login(password: string): Promise<void> {
+  const result = await request<{ csrf: string }>("/api/v1/session", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+  csrfToken = result.csrf;
+}
+
+export async function logout(): Promise<void> {
+  await request<void>("/api/v1/session", { method: "DELETE" });
+  csrfToken = "";
 }
 
 export function listProfiles(): Promise<Profile[]> {
