@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -23,6 +24,16 @@ func freeAddress(t *testing.T) string {
 	require.NoError(t, err)
 	address := packet.LocalAddr().String()
 	require.NoError(t, packet.Close())
+	return address
+}
+
+func freeTCPAddress(t *testing.T) string {
+	t.Helper()
+	var listen net.ListenConfig
+	ln, err := listen.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	address := ln.Addr().String()
+	require.NoError(t, ln.Close())
 	return address
 }
 
@@ -96,6 +107,50 @@ func TestServeCommandBlocksByRuleAndForwardsTheRest(t *testing.T) {
 	require.Equal(t, mdns.RcodeSuccess, allowed.Rcode)
 	require.Len(t, allowed.Answer, 1)
 	require.Equal(t, netip.MustParseAddr("203.0.113.40").AsSlice(), []byte(allowed.Answer[0].(*mdns.A).A))
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after its context was cancelled")
+	}
+}
+
+func TestServeCommandServesTheAPI(t *testing.T) {
+	upstream := startUpstream(t, "203.0.113.50")
+	address := freeAddress(t)
+	apiAddress := freeTCPAddress(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"serve",
+		"--dns-address", address,
+		"--upstream", upstream,
+		"--db", filepath.Join(t.TempDir(), "aegis.db"),
+		"--api-address", apiAddress,
+		"--log-level", "error",
+	})
+	cmd.SetContext(ctx)
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	require.Eventually(t, func() bool {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+apiAddress+"/api/profiles", nil)
+		if err != nil {
+			return false
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return false
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return resp.StatusCode == http.StatusOK
+	}, 5*time.Second, 25*time.Millisecond, "serve never served the API")
 
 	cancel()
 	select {

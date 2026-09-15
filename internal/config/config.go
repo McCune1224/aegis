@@ -15,6 +15,7 @@ import (
 type Config struct {
 	DNSAddress    string   `mapstructure:"dns-address"`
 	Upstream      string   `mapstructure:"upstream"`
+	APIAddress    string   `mapstructure:"api-address"`
 	DB            string   `mapstructure:"db"`
 	BlockingMode  string   `mapstructure:"blocking-mode"`
 	CustomAddress string   `mapstructure:"custom-address"`

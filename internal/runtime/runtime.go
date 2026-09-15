@@ -48,14 +48,14 @@ func (r *Runtime) Reload(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	identity, err := client.New(cfg.Selectors)
+	identity, err := client.New(cfg.Selectors())
 	if err != nil {
 		return err
 	}
 	set, err := filter.Compile(filter.Config{
 		Rules:    r.rules,
 		Profiles: cfg.Profiles,
-		Clients:  cfg.Clients,
+		Clients:  cfg.ClientSpecs(),
 		Default:  cfg.Default,
 	})
 	if err != nil {
