@@ -1,4 +1,5 @@
-import { createEffect, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { createEffect, createSignal, Show } from "solid-js";
 import {
   createRule as postRule,
   deleteClient as removeClient,
@@ -27,16 +28,45 @@ import {
   type Source,
   type SourceInput,
 } from "./api";
+import { IconClients, IconDashboard, IconGear, IconGraph, IconLog, IconRules, IconShield, IconSources } from "./Icons";
 import Clients from "./Clients";
+import Dashboard from "./Dashboard";
 import Graph from "./Graph";
+import QueryLog from "./QueryLog";
+import Settings from "./Settings";
+import { createQueryLog } from "./querylog";
 import Profiles from "./Profiles";
 import Rules from "./Rules";
 import Sources from "./Sources";
 
-type Tab = "profiles" | "clients" | "sources" | "rules" | "graph";
+type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "settings" | "graph";
+
+type NavItem = { id: Tab; label: string; icon: () => JSX.Element };
+
+const NAV: NavItem[] = [
+  { id: "dashboard", label: "Dashboard", icon: IconDashboard },
+  { id: "log", label: "Query Log", icon: IconLog },
+  { id: "graph", label: "Constellation", icon: IconGraph },
+  { id: "clients", label: "Clients", icon: IconClients },
+  { id: "profiles", label: "Profiles", icon: IconShield },
+  { id: "rules", label: "Rules", icon: IconRules },
+  { id: "sources", label: "Sources", icon: IconSources },
+  { id: "settings", label: "Settings", icon: IconGear },
+];
+
+const TITLES: Record<Tab, string> = {
+  dashboard: "Dashboard",
+  log: "Query Log",
+  graph: "Constellation",
+  clients: "Clients",
+  profiles: "Profiles",
+  rules: "Rules",
+  sources: "Sources",
+  settings: "Settings",
+};
 
 export default function App() {
-  const [tab, setTab] = createSignal<Tab>("profiles");
+  const [tab, setTab] = createSignal<Tab>("dashboard");
   const [profiles, setProfiles] = createSignal<Profile[]>([]);
   const [clients, setClients] = createSignal<Client[]>([]);
   const [sources, setSources] = createSignal<Source[]>([]);
@@ -44,7 +74,13 @@ export default function App() {
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [defaultProfile, setDefaultProfile] = createSignal("");
   const [upstream, setUpstream] = createSignal("");
+  const [ruleCount, setRuleCount] = createSignal(0);
   const [error, setError] = createSignal<string>();
+  const [windowMinutes, setWindowMinutes] = createSignal(Number(localStorage.getItem("aegis.window")) || 60);
+  const [live, setLive] = createSignal(localStorage.getItem("aegis.live") !== "0");
+  const [logFilter, setLogFilter] = createSignal<{ client?: string; name?: string }>({});
+
+  const log = createQueryLog({ live: live() });
 
   async function refresh() {
     const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextDefault, nextStatus] =
@@ -64,12 +100,14 @@ export default function App() {
     setRules(nextRules);
     setDefaultProfile(nextDefault.profile);
     setUpstream(nextStatus.upstream);
+    setRuleCount(nextStatus.rules ?? 0);
   }
 
   createEffect(
     () => undefined,
     () => {
       void refresh().catch((cause) => setError(String(cause)));
+      void log.load({ limit: 2000 }).catch((cause) => setError(String(cause)));
     },
   );
 
@@ -124,85 +162,120 @@ export default function App() {
   }
 
   return (
-    <main>
-      <header>
-        <h1>Aegis</h1>
-        <nav>
-          <button
-            type="button"
-            data-testid="tab-profiles"
-            class={tab() === "profiles" ? "active" : ""}
-            onClick={() => setTab("profiles")}
-          >
-            Profiles
-          </button>
-          <button
-            type="button"
-            data-testid="tab-clients"
-            class={tab() === "clients" ? "active" : ""}
-            onClick={() => setTab("clients")}
-          >
-            Clients
-          </button>
-          <button
-            type="button"
-            data-testid="tab-sources"
-            class={tab() === "sources" ? "active" : ""}
-            onClick={() => setTab("sources")}
-          >
-            Sources
-          </button>
-          <button
-            type="button"
-            data-testid="tab-rules"
-            class={tab() === "rules" ? "active" : ""}
-            onClick={() => setTab("rules")}
-          >
-            Rules
-          </button>
-          <button
-            type="button"
-            data-testid="tab-graph"
-            class={tab() === "graph" ? "active" : ""}
-            onClick={() => setTab("graph")}
-          >
-            Graph
-          </button>
-        </nav>
-      </header>
-      {error() ? <p class="error">Could not load the configuration: {error()}</p> : null}
-      {tab() === "profiles" ? (
-        <Profiles
-          profiles={profiles()}
-          defaultProfile={defaultProfile()}
-          onSave={saveProfile}
-          onDelete={deleteProfile}
-          onSetDefault={makeDefault}
-        />
-      ) : tab() === "clients" ? (
-        <Clients
-          clients={clients()}
-          profiles={profiles()}
-          onSave={saveClient}
-          onDelete={deleteClient}
-        />
-      ) : tab() === "sources" ? (
-        <Sources
-          sources={sources()}
-          catalog={catalog()}
-          onSave={saveSource}
-          onDelete={deleteSource}
-        />
-      ) : tab() === "rules" ? (
-        <Rules rules={rules()} onCreate={addRule} onUpdate={changeRule} onDelete={deleteRule} />
-      ) : (
-        <Graph
-          profiles={profiles()}
-          clients={clients()}
-          defaultProfile={defaultProfile()}
-          upstream={upstream()}
-        />
-      )}
-    </main>
+    <>
+      <div class="sky" />
+      <div class="shell">
+        <aside class="sidebar">
+          <div class="brand">
+            <strong>Aegis</strong>
+            <span>sinkhole</span>
+          </div>
+          <nav class="nav">
+            {NAV.map((item) => (
+              <button
+                type="button"
+                data-testid={`tab-${item.id}`}
+                class={tab() === item.id ? "nav-item active" : "nav-item"}
+                onClick={() => setTab(item.id)}
+              >
+                {item.icon()}
+                {item.label}
+              </button>
+            ))}
+          </nav>
+          <div class="foot">
+            {rules().length} custom · {ruleCount()} list rules
+          </div>
+        </aside>
+        <div class="content">
+          <header class="topbar">
+            <h1 class="page-title">{TITLES[tab()]}</h1>
+            <div class="pill" data-testid="status">
+              <span class="dot" />
+              {upstream() || "no upstream"} · {ruleCount()} rules
+            </div>
+          </header>
+          <Show when={error()}>
+            <p class="error-banner">Could not load the configuration: {error()}</p>
+          </Show>
+          <main class="screen">
+            <Show when={tab() === "dashboard"}>
+              <Dashboard
+                entries={log.entries()}
+                windowMinutes={windowMinutes()}
+                onSetWindow={setWindowMinutes}
+                onOpenLog={() => setTab("log")}
+                onFilter={(filter) => {
+                  setLogFilter(filter);
+                  setTab("log");
+                }}
+              />
+            </Show>
+            <Show when={tab() === "log"}>
+              <QueryLog
+                log={log}
+                filter={logFilter()}
+                onRuleAdded={async () => {
+                  await refresh();
+                }}
+              />
+            </Show>
+            <Show when={tab() === "graph"}>
+              <Graph
+                profiles={profiles()}
+                clients={clients()}
+                defaultProfile={defaultProfile()}
+                upstream={upstream()}
+                log={log}
+                onSaveClient={saveClient}
+                onSetDefault={makeDefault}
+              />
+            </Show>
+            <Show when={tab() === "clients"}>
+              <div class="screen-inner">
+                <Clients
+                  clients={clients()}
+                  profiles={profiles()}
+                  onSave={saveClient}
+                  onDelete={deleteClient}
+                />
+              </div>
+            </Show>
+            <Show when={tab() === "profiles"}>
+              <div class="screen-inner">
+                <Profiles
+                  profiles={profiles()}
+                  defaultProfile={defaultProfile()}
+                  onSave={saveProfile}
+                  onDelete={deleteProfile}
+                  onSetDefault={makeDefault}
+                />
+              </div>
+            </Show>
+            <Show when={tab() === "rules"}>
+              <div class="screen-inner">
+                <Rules rules={rules()} onCreate={addRule} onUpdate={changeRule} onDelete={deleteRule} />
+              </div>
+            </Show>
+            <Show when={tab() === "sources"}>
+              <div class="screen-inner">
+                <Sources sources={sources()} catalog={catalog()} onSave={saveSource} onDelete={deleteSource} />
+              </div>
+            </Show>
+            <Show when={tab() === "settings"}>
+              <Settings
+                profiles={profiles()}
+                defaultProfile={defaultProfile()}
+                onSetDefault={makeDefault}
+                windowMinutes={windowMinutes()}
+                onSetWindow={setWindowMinutes}
+                live={live()}
+                onSetLive={setLive}
+              />
+            </Show>
+          </main>
+        </div>
+      </div>
+    </>
   );
 }

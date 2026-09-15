@@ -54,7 +54,7 @@ export function buildTopology(
   }
 
   if (defaultProfile) {
-    nodes.push({ id: defaultClientID, label: "unidentified", detail: `default ${defaultProfile}`, kind: "client" });
+    nodes.push({ id: defaultClientID, label: "unidentified", detail: "default policy", kind: "client" });
     edges.push({ id: "policy:unidentified", from: defaultClientID, to: `profile:${defaultProfile}` });
   }
 
@@ -69,4 +69,92 @@ export function buildTopology(
   }
 
   return { nodes, edges };
+}
+
+// matchClient resolves a query's source address to a client node id, the way
+// the identity resolver does: exact address first, then the first prefix that
+// contains it. Undefined means the query came from an unknown device.
+export function matchClient(clients: Client[], address: string): string | undefined {
+  for (const client of clients) {
+    if (client.addresses.some((candidate) => candidate === address)) {
+      return `client:${client.name}`;
+    }
+  }
+  for (const client of clients) {
+    if (client.prefixes.some((prefix) => withinPrefix(address, prefix))) {
+      return `client:${client.name}`;
+    }
+  }
+  return undefined;
+}
+
+function withinPrefix(address: string, prefix: string): boolean {
+  const [base, bitsText] = prefix.split("/");
+  const bits = Number(bitsText);
+  if (!base || !Number.isFinite(bits) || bits < 0) {
+    return false;
+  }
+  const addressBytes = parseBytes(address);
+  const baseBytes = parseBytes(base);
+  if (!addressBytes || !baseBytes || addressBytes.length !== baseBytes.length) {
+    return false;
+  }
+  const whole = Math.floor(bits / 8);
+  if (whole > addressBytes.length) {
+    return false;
+  }
+  for (let index = 0; index < whole; index++) {
+    if (addressBytes[index] !== baseBytes[index]) {
+      return false;
+    }
+  }
+  const remainder = bits % 8;
+  if (remainder === 0 || whole >= addressBytes.length) {
+    return true;
+  }
+  const mask = 0xff << (8 - remainder);
+  return (addressBytes[whole] & mask) === (baseBytes[whole] & mask);
+}
+
+function parseBytes(text: string): number[] | undefined {
+  if (text.includes(":")) {
+    const hextets = expandIpv6(text);
+    return hextets ? hextetsToBytes(hextets) : undefined;
+  }
+  const parts = text.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return undefined;
+  }
+  return parts;
+}
+
+function expandIpv6(text: string): string[] | undefined {
+  const halves = text.split("::");
+  if (halves.length > 2) {
+    return undefined;
+  }
+  const groups = (half: string) => (half === "" ? [] : half.split(":"));
+  const head = groups(halves[0]);
+  const tail = halves.length === 2 ? groups(halves[1]) : [];
+  const missing = 8 - head.length - tail.length;
+  if (missing < 0 || (halves.length === 1 && missing !== 0)) {
+    return undefined;
+  }
+  const all = [...head, ...Array(missing).fill("0"), ...tail];
+  if (all.length !== 8) {
+    return undefined;
+  }
+  return all;
+}
+
+function hextetsToBytes(hextets: string[]): number[] | undefined {
+  const bytes: number[] = [];
+  for (const hextet of hextets) {
+    const value = parseInt(hextet, 16);
+    if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+      return undefined;
+    }
+    bytes.push(value >> 8, value & 0xff);
+  }
+  return bytes;
 }

@@ -78,7 +78,7 @@ export default function Sources(props: Props) {
   }
 
   return (
-    <section>
+    <section class="panel">
       <ul>
         <For each={props.sources}>
           {(source) => (
