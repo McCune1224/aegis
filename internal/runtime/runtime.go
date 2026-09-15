@@ -26,15 +26,19 @@ type snapshot struct {
 type Runtime struct {
 	store *store.Store
 
-	mu    sync.Mutex
-	rules []filter.RuleSpec
+	mu sync.Mutex
+	// staticRules come from the blocklist files given at boot and never change
+	// while running. sourceRules come from the enabled rows of the sources
+	// table and are replaced by SourceSync on every refresh.
+	staticRules []filter.RuleSpec
+	sourceRules []filter.RuleSpec
 
 	current atomic.Pointer[snapshot]
 }
 
 // New returns a Runtime that allows every query until Reload runs.
-func New(s *store.Store, rules []filter.RuleSpec) *Runtime {
-	return &Runtime{store: s, rules: rules}
+func New(s *store.Store, staticRules []filter.RuleSpec) *Runtime {
+	return &Runtime{store: s, staticRules: staticRules}
 }
 
 // Reload reads the stored configuration, compiles it with the current rules,
@@ -44,6 +48,21 @@ func New(s *store.Store, rules []filter.RuleSpec) *Runtime {
 // A failure leaves the previous generation serving. A bad configuration must
 // not take the resolver down.
 func (r *Runtime) Reload(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.publish(ctx)
+}
+
+// replaceSourceRules swaps the source rules and republishes under the same
+// lock, so a query never pairs new source rules with an old snapshot.
+func (r *Runtime) replaceSourceRules(ctx context.Context, rules []filter.RuleSpec) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sourceRules = rules
+	return r.publish(ctx)
+}
+
+func (r *Runtime) publish(ctx context.Context) error {
 	cfg, err := r.store.Load(ctx)
 	if err != nil {
 		return err
@@ -52,8 +71,11 @@ func (r *Runtime) Reload(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	rules := make([]filter.RuleSpec, 0, len(r.staticRules)+len(r.sourceRules))
+	rules = append(rules, r.staticRules...)
+	rules = append(rules, r.sourceRules...)
 	set, err := filter.Compile(filter.Config{
-		Rules:    r.rules,
+		Rules:    rules,
 		Profiles: cfg.Profiles,
 		Clients:  cfg.ClientSpecs(),
 		Default:  cfg.Default,
@@ -62,8 +84,6 @@ func (r *Runtime) Reload(ctx context.Context) error {
 		return err
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.current.Store(&snapshot{set: set, identity: identity})
 	return nil
 }
@@ -75,14 +95,6 @@ func (r *Runtime) Decide(name filter.Domain, address netip.Addr) filter.Verdict 
 		return filter.Verdict{Action: filter.ActionAllow}
 	}
 	return current.set.Decide(name, current.identity.Key(address))
-}
-
-// SetRules replaces the rules the next reload compiles with. It is for the
-// blocklist refresh, which lands after the stored configuration.
-func (r *Runtime) SetRules(rules []filter.RuleSpec) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.rules = rules
 }
 
 // Size reports how many rules the current generation holds, so a start line can

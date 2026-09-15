@@ -17,7 +17,6 @@ import (
 	mdns "github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
 
-	"aegis/internal/blocklist"
 	"aegis/internal/config"
 	"aegis/internal/filter"
 	"aegis/internal/store"
@@ -241,27 +240,6 @@ func TestServeCommandLoadsRulesFromASourceAndSurvivesABadOne(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not return after its context was cancelled")
 	}
-}
-
-func TestFetchSourceRulesFallsBackToTheCachedBody(t *testing.T) {
-	database, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "aegis.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = database.Close() })
-	ctx := t.Context()
-
-	require.NoError(t, database.SaveSource(ctx, store.Source{
-		Name:    "cached",
-		URL:     "http://127.0.0.1:1/list",
-		Format:  blocklist.FormatHosts,
-		Enabled: true,
-	}))
-	require.NoError(t, database.RecordSourceFetch(ctx, "cached", "etag", time.Now(), nil, 1, []byte("0.0.0.0 ads.example.com\n")))
-
-	rules, err := fetchSourceRules(ctx, database, blocklist.NewFetcher(2*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	require.NoError(t, err)
-	require.Len(t, rules, 1)
-	require.Equal(t, "ads.example.com", rules[0].Domain.String())
 }
 
 func TestServeCommandReportsWhatItCannotParse(t *testing.T) {

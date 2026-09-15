@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"aegis/internal/api"
+	"aegis/internal/blocklist"
 	"aegis/internal/dns"
 	"aegis/internal/filter"
 	"aegis/internal/runtime"
@@ -40,6 +42,7 @@ func startHarness(t *testing.T) *harness {
 
 	rt := runtime.New(database, []filter.RuleSpec{blockedAds()})
 	require.NoError(t, rt.Reload(ctx))
+	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(2*time.Second), rt, quietLogger())
 
 	hub := api.NewHub(nil)
 	handler, err := dns.NewHandler(dns.Config{
@@ -52,7 +55,7 @@ func startHarness(t *testing.T) *harness {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = dnsServer.Shutdown(context.Background()) })
 
-	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Hub: hub, Upstream: "9.9.9.9:53", Address: "127.0.0.1:0"})
+	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Sources: sync, Hub: hub, Upstream: "9.9.9.9:53", Address: "127.0.0.1:0"})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = apiServer.Shutdown(context.Background()) })
 
@@ -73,6 +76,20 @@ func (h *harness) do(t *testing.T, method, path, body string) (int, string) {
 	payload, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	return resp.StatusCode, string(payload)
+}
+
+func quietLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// queryFor asks the harness DNS server for name from the loopback address the
+// policy defaults to.
+func queryFor(t *testing.T, server, name string) *mdns.Msg {
+	t.Helper()
+	client := &mdns.Client{Net: "udp", Timeout: 2 * time.Second}
+	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion(name, mdns.TypeA), server)
+	require.NoError(t, err)
+	return resp
 }
 
 // queryFrom asks from a chosen source address, so the server sees the client
