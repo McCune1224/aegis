@@ -42,37 +42,37 @@ The graph candidate also made a product point worth keeping. The compiled spec
 is the same structure the node graph dashboard renders, so the operator edits
 the graph the compiler consumes and there is no second representation.
 
-## What phase one ships
+## The units and their checks
 
-Each unit ends in a check and lands as its own commit.
+This is the design record for the order the engine work builds in. The tracker
+owns what is done; this list says what each unit is and the check that proves it.
 
 1. **Rule matching.** Exact and subdomain rules, allow beats block, provenance on
-   the verdict. Done. 30 ns per decision against 10 rules and 34 ns against
-   100000, both at zero allocations.
-2. **Rule set swap.** An `Engine` holding one atomic pointer with `Publish`. Done.
-   The check is a test that a query in flight sees one consistent set.
+   the verdict. The check is a benchmark: 30 ns per decision against 10 rules and
+   34 ns against 100000, both at zero allocations.
+2. **Rule set swap.** An `Engine` holding one atomic pointer with `Publish`. The
+   check is a test that a query in flight sees one consistent set.
 3. **Blocklist parsing.** Parse hosts files, AdBlock syntax, and domains-only
-   lists into `RuleSpec`. Done. The check is one fixture per format with a
-   literal expected `[]RuleSpec`.
+   lists into `RuleSpec`. The check is one fixture per format with a literal
+   expected `[]RuleSpec`.
 4. **DNS handler.** Turn a verdict into a wire response and apply the blocking
-   modes, with the upstream behind a `Resolver` seam. Done.
+   modes, with the upstream behind a `Resolver` seam.
 5. **DNS server and forwarder.** Bind UDP and TCP, and forward allowed queries to
-   a configured upstream. Done.
+   a configured upstream.
 6. **Profiles and client identity.** Inheritance resolved at compile time, with
    cycles rejected, and an address resolved to an identity outside the filter
-   package. Done. The check is that two addresses asking the same blocked name
-   get two different answers, proven in a rootless namespace per
-   `docs/testing.md` tier 3.
+   package. The check is that two addresses asking the same blocked name get two
+   different answers, proven in a rootless namespace per `docs/testing.md` tier 3.
 7. **Store.** SQLite through sqlc and goose, holding profiles, clients, and the
-   selectors that identify them. Done. The check is a round trip through a real
-   file that ends in a verdict and a resolved identity.
+   selectors that identify them. The check is a round trip through a real file
+   that ends in a verdict and a resolved identity.
 8. **Runtime.** One owner that rebuilds the engine from the store and publishes,
-   so a stored change reaches a running server without a restart. Done. The rule
-   set and the identity table live in one snapshot, because holding them in two
-   would let a query pair the new rules with the old selectors during a reload.
-9. **HTTP API.** chi routes over the store, plus SSE for the live query stream.
-10. **Web app.** The Solid 2 shell, then the configuration screens, then the
-    node graph.
+   so a stored change reaches a running server without a restart. The rule set
+   and the identity table live in one snapshot, because holding them in two would
+   let a query pair the new rules with the old selectors during a reload.
+9. **HTTP API.** Routes over the store, plus SSE for the live query stream.
+10. **Web app.** The Solid 2 shell, then the configuration screens, then the node
+    graph.
 11. **Query log.** Persist each decision and serve it to the dashboard.
 12. **More matchers.** Wildcard, regular expression, and CIDR rules.
 13. **Schedules.** Compile windows into a minute-of-week table.
