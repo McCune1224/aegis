@@ -117,6 +117,49 @@ func TestABadConfigurationLeavesThePreviousGenerationServing(t *testing.T) {
 		"a failed reload must not take the resolver down")
 }
 
+func TestACustomAllowRuleUnblocksAStaticRule(t *testing.T) {
+	ctx := t.Context()
+	s := openStore(t)
+	_, err := s.SaveRule(ctx, store.Rule{
+		Domain: blockedName,
+		Kind:   filter.MatchExact,
+		Action: filter.ActionAllow,
+	})
+	require.NoError(t, err)
+	rt := runtime.New(s, []filter.RuleSpec{blockedAds()})
+	require.NoError(t, rt.Reload(ctx))
+
+	got := rt.Decide(blockedName, tablet)
+
+	require.Equal(t, filter.ActionAllow, got.Action)
+	require.NotNil(t, got.Match)
+	require.Equal(t, "custom:1", got.Match.RuleID)
+	require.Equal(t, "custom", got.Match.Source.ID)
+}
+
+// A custom rule and a list rule that tie on tier, specificity, and exactness
+// are separated by declaration order, where custom rules come first.
+func TestACustomRuleBeatsAListRuleOfEqualSpecificity(t *testing.T) {
+	ctx := t.Context()
+	s := openStore(t)
+	_, err := s.SaveRule(ctx, store.Rule{
+		Domain: blockedName,
+		Kind:   filter.MatchExact,
+		Action: filter.ActionBlock,
+	})
+	require.NoError(t, err)
+	listRule := blockedAds()
+	listRule.Kind = filter.MatchExact
+	rt := runtime.New(s, []filter.RuleSpec{listRule})
+	require.NoError(t, rt.Reload(ctx))
+
+	got := rt.Decide(blockedName, tablet)
+
+	require.Equal(t, filter.ActionBlock, got.Action)
+	require.NotNil(t, got.Match)
+	require.Equal(t, "custom:1", got.Match.RuleID)
+}
+
 func TestAReloadIsSafeWhileQueriesRun(t *testing.T) {
 	ctx := t.Context()
 	s := configuredStore(t)

@@ -32,8 +32,7 @@ type Runtime struct {
 	// table and are replaced by SourceSync on every refresh.
 	staticRules []filter.RuleSpec
 	sourceRules []filter.RuleSpec
-
-	current atomic.Pointer[snapshot]
+	current     atomic.Pointer[snapshot]
 }
 
 // New returns a Runtime that allows every query until Reload runs.
@@ -71,7 +70,10 @@ func (r *Runtime) publish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	rules := make([]filter.RuleSpec, 0, len(r.staticRules)+len(r.sourceRules))
+	// Custom rules come first so they win the declaration-order tie-break
+	// against a list rule of the same tier and specificity.
+	rules := make([]filter.RuleSpec, 0, len(cfg.Rules)+len(r.staticRules)+len(r.sourceRules))
+	rules = append(rules, cfg.Rules...)
 	rules = append(rules, r.staticRules...)
 	rules = append(rules, r.sourceRules...)
 	set, err := filter.Compile(filter.Config{

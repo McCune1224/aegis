@@ -27,12 +27,14 @@ type Client struct {
 }
 
 // Config is the stored configuration: the profiles, the client records with
-// their selectors, and the profile an unidentified client gets. The shapes the
-// engine and the identity resolver take are projections of it, so a client's
-// profile and its selectors cannot drift apart.
+// their selectors, the user-created rules, and the profile an unidentified
+// client gets. The shapes the engine and the identity resolver take are
+// projections of it, so a client's profile and its selectors cannot drift
+// apart.
 type Config struct {
 	Profiles []filter.ProfileSpec
 	Clients  []Client
+	Rules    []filter.RuleSpec
 	Default  filter.ProfileID
 }
 
@@ -54,14 +56,15 @@ func (c Config) Selectors() []client.Spec {
 	return specs
 }
 
-// Validate compiles the configuration without rules, the same check the runtime
-// makes on every reload. Rules do not affect profile or selector validity, so a
-// change that would fail to load is refused before it reaches the database.
+// Validate compiles the configuration, the same check the runtime makes on
+// every reload. A change that would fail to load is refused before it reaches
+// the database.
 func (c Config) Validate() error {
 	if _, err := client.New(c.Selectors()); err != nil {
 		return err
 	}
 	_, err := filter.Compile(filter.Config{
+		Rules:    c.Rules,
 		Profiles: c.Profiles,
 		Clients:  c.ClientSpecs(),
 		Default:  c.Default,
@@ -132,9 +135,20 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 
+	rules, err := s.loadRules(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+
+	specs := make([]filter.RuleSpec, 0, len(rules))
+	for _, rule := range rules {
+		specs = append(specs, rule.Spec())
+	}
+
 	return Config{
 		Profiles: profiles,
 		Clients:  clients,
+		Rules:    specs,
 		Default:  filter.ProfileID(defaultProfile),
 	}, nil
 }
