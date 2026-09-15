@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -110,14 +109,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := database.MarkSeeded(ctx); err != nil {
 		return err
 	}
-	sourceRules, err := fetchSourceRules(ctx, database, blocklist.NewFetcher(sourceTimeout), logger)
-	if err != nil {
-		return err
-	}
-	rules = append(rules, sourceRules...)
-
 	engine := runtime.New(database, rules)
-	if err := engine.Reload(ctx); err != nil {
+	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(sourceTimeout), engine, logger)
+	if err := sync.RefreshSources(ctx); err != nil {
 		return err
 	}
 
@@ -144,6 +138,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiServer, err := api.Start(api.Config{
 		Store:    database,
 		Reloader: engine,
+		Sources:  sync,
 		Hub:      hub,
 		Files:    web.Files(),
 		Upstream: cfg.Upstream,
@@ -228,48 +223,6 @@ func parseSource(raw string, format blocklist.Format) (store.Source, error) {
 		return store.Source{}, fmt.Errorf("aegis: source %q must be name=url", raw)
 	}
 	return store.Source{Name: name, URL: url, Format: format, Enabled: true}, nil
-}
-
-// fetchSourceRules downloads every enabled source and returns its rules. A
-// source that fails still contributes its cached body and its error is recorded,
-// so one broken list cannot take the resolver down or quietly empty it.
-func fetchSourceRules(ctx context.Context, database *store.Store, fetcher *blocklist.Fetcher, logger *slog.Logger) ([]filter.RuleSpec, error) {
-	sources, err := database.EnabledSources(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var rules []filter.RuleSpec
-	for _, source := range sources {
-		fetched, fetchErr := fetcher.Fetch(ctx, source.URL, source.ETag)
-		body := source.Body
-		etag := source.ETag
-		if fetchErr == nil && !fetched.NotModified {
-			body = fetched.Body
-			etag = fetched.ETag
-		}
-
-		ruleCount := 0
-		if len(body) > 0 {
-			result, parseErr := blocklist.ParseList(bytes.NewReader(body), filter.Source{ID: source.Name, Name: source.Name}, source.Format)
-			switch {
-			case parseErr != nil && fetchErr == nil:
-				fetchErr = parseErr
-			case parseErr == nil:
-				rules = append(rules, result.Rules...)
-				ruleCount = len(result.Rules)
-				logger.Info("blocklist source loaded", "source", source.Name, "rules", ruleCount, "skipped", result.Skipped)
-			}
-		}
-
-		if fetchErr != nil {
-			logger.Warn("blocklist source failed", "source", source.Name, "url", source.URL, "error", fetchErr)
-		}
-		if err := database.RecordSourceFetch(ctx, source.Name, etag, time.Now(), fetchErr, ruleCount, body); err != nil {
-			return nil, err
-		}
-	}
-	return rules, nil
 }
 
 // buildProfiles turns the default settings and any configured profiles into the

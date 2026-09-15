@@ -22,10 +22,18 @@ type Reloader interface {
 	Reload(ctx context.Context) error
 }
 
+// SourceRefresher fetches the enabled blocklist sources and republishes the
+// resolver with their rules. Runtime's SourceSync implements it, and the API
+// calls it after every source write.
+type SourceRefresher interface {
+	RefreshSources(ctx context.Context) error
+}
+
 // Config is what Start needs.
 type Config struct {
 	Store    *store.Store
 	Reloader Reloader
+	Sources  SourceRefresher
 	Hub      *Hub
 	Files    fs.FS
 	Upstream string
@@ -38,6 +46,7 @@ type Config struct {
 type Server struct {
 	store    *store.Store
 	reloader Reloader
+	sources  SourceRefresher
 	hub      *Hub
 	files    fs.FS
 	upstream string
@@ -59,6 +68,9 @@ func Start(cfg Config) (*Server, error) {
 	if cfg.Reloader == nil {
 		return nil, errors.New("api: Config.Reloader is required")
 	}
+	if cfg.Sources == nil {
+		return nil, errors.New("api: Config.Sources is required")
+	}
 	if cfg.Address == "" {
 		return nil, errors.New("api: Config.Address is required")
 	}
@@ -73,7 +85,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, hub: cfg.Hub, files: cfg.Files, upstream: cfg.Upstream, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, hub: cfg.Hub, files: cfg.Files, upstream: cfg.Upstream, listener: listener}
 	s.http = &http.Server{
 		Handler:  s.routes(),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
@@ -106,6 +118,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/v1/clients/{name}", s.putClient)
 	mux.HandleFunc("GET /api/v1/clients/{name}", s.getClient)
 	mux.HandleFunc("DELETE /api/v1/clients/{name}", s.deleteClient)
+	mux.HandleFunc("GET /api/v1/sources", s.listSources)
+	mux.HandleFunc("GET /api/v1/sources/catalog", s.getCatalog)
+	mux.HandleFunc("PUT /api/v1/sources/{name}", s.putSource)
+	mux.HandleFunc("GET /api/v1/sources/{name}", s.getSource)
+	mux.HandleFunc("DELETE /api/v1/sources/{name}", s.deleteSource)
 	mux.HandleFunc("GET /api/v1/stream/queries", s.streamQueries)
 	if s.files != nil {
 		mux.Handle("GET /", http.FileServerFS(s.files))
