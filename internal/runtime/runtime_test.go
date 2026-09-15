@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"aegis/internal/blocklist"
 	"aegis/internal/filter"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
@@ -37,16 +38,6 @@ var blockedName = func() filter.Domain {
 	return domain
 }()
 
-func blockedAds() filter.RuleSpec {
-	return filter.RuleSpec{
-		ID:     "block-ads",
-		Source: filter.Source{ID: "test", Name: "Test"},
-		Kind:   filter.MatchSubdomains,
-		Domain: blockedName,
-		Action: filter.ActionBlock,
-	}
-}
-
 // configuredStore returns a store holding one profile and one client bound to
 // the tablet address. The profile starts as refused, which the tests that change
 // it override.
@@ -65,8 +56,15 @@ func configuredStore(t *testing.T) *store.Store {
 	return s
 }
 
+// blockedLists returns one blocklist file blocking ads.example.com, the name
+// the tests ask about.
+func blockedLists(t *testing.T) []runtime.ListFile {
+	t.Helper()
+	return []runtime.ListFile{{Path: writeList(t, "ads.example.com"), Format: blocklist.FormatHosts}}
+}
+
 func TestNothingIsBlockedBeforeTheFirstReload(t *testing.T) {
-	rt := runtime.New(openStore(t), []filter.RuleSpec{blockedAds()})
+	rt := runtime.New(openStore(t), blockedLists(t), quietLogger())
 
 	got := rt.Decide(blockedName, tablet)
 
@@ -74,7 +72,7 @@ func TestNothingIsBlockedBeforeTheFirstReload(t *testing.T) {
 }
 
 func TestReloadPublishesTheStoredConfiguration(t *testing.T) {
-	rt := runtime.New(configuredStore(t), []filter.RuleSpec{blockedAds()})
+	rt := runtime.New(configuredStore(t), blockedLists(t), quietLogger())
 	require.NoError(t, rt.Reload(t.Context()))
 
 	got := rt.Decide(blockedName, tablet)
@@ -87,7 +85,7 @@ func TestReloadPublishesTheStoredConfiguration(t *testing.T) {
 func TestAStoredChangeReachesARunningRuntime(t *testing.T) {
 	ctx := t.Context()
 	s := configuredStore(t)
-	rt := runtime.New(s, []filter.RuleSpec{blockedAds()})
+	rt := runtime.New(s, blockedLists(t), quietLogger())
 	require.NoError(t, rt.Reload(ctx))
 	require.Equal(t, filter.Refused, rt.Decide(blockedName, tablet).Policy.Mode)
 
@@ -100,7 +98,7 @@ func TestAStoredChangeReachesARunningRuntime(t *testing.T) {
 func TestABadConfigurationLeavesThePreviousGenerationServing(t *testing.T) {
 	ctx := t.Context()
 	s := configuredStore(t)
-	rt := runtime.New(s, []filter.RuleSpec{blockedAds()})
+	rt := runtime.New(s, blockedLists(t), quietLogger())
 	require.NoError(t, rt.Reload(ctx))
 
 	// A cycle between two stored profiles compiles to nothing. The database
@@ -126,7 +124,7 @@ func TestACustomAllowRuleUnblocksAStaticRule(t *testing.T) {
 		Action: filter.ActionAllow,
 	})
 	require.NoError(t, err)
-	rt := runtime.New(s, []filter.RuleSpec{blockedAds()})
+	rt := runtime.New(s, blockedLists(t), quietLogger())
 	require.NoError(t, rt.Reload(ctx))
 
 	got := rt.Decide(blockedName, tablet)
@@ -137,20 +135,19 @@ func TestACustomAllowRuleUnblocksAStaticRule(t *testing.T) {
 	require.Equal(t, "custom", got.Match.Source.ID)
 }
 
-// A custom rule and a list rule that tie on tier, specificity, and exactness
-// are separated by declaration order, where custom rules come first.
+// A custom rule and a list rule that tie on tier, kind, and specificity are
+// separated by declaration order, where custom rules come first. A hosts file
+// always parses to subdomains rules, so the custom rule ties at subdomains.
 func TestACustomRuleBeatsAListRuleOfEqualSpecificity(t *testing.T) {
 	ctx := t.Context()
 	s := openStore(t)
 	_, err := s.SaveRule(ctx, store.Rule{
 		Domain: blockedName,
-		Kind:   filter.MatchExact,
+		Kind:   filter.MatchSubdomains,
 		Action: filter.ActionBlock,
 	})
 	require.NoError(t, err)
-	listRule := blockedAds()
-	listRule.Kind = filter.MatchExact
-	rt := runtime.New(s, []filter.RuleSpec{listRule})
+	rt := runtime.New(s, blockedLists(t), quietLogger())
 	require.NoError(t, rt.Reload(ctx))
 
 	got := rt.Decide(blockedName, tablet)
@@ -163,7 +160,7 @@ func TestACustomRuleBeatsAListRuleOfEqualSpecificity(t *testing.T) {
 func TestAReloadIsSafeWhileQueriesRun(t *testing.T) {
 	ctx := t.Context()
 	s := configuredStore(t)
-	rt := runtime.New(s, []filter.RuleSpec{blockedAds()})
+	rt := runtime.New(s, blockedLists(t), quietLogger())
 	require.NoError(t, rt.Reload(ctx))
 
 	name := blockedName

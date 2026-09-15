@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +20,6 @@ import (
 	"aegis/internal/api"
 	"aegis/internal/blocklist"
 	"aegis/internal/dns"
-	"aegis/internal/filter"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 )
@@ -28,6 +28,7 @@ type harness struct {
 	apiURL     string
 	dnsAddress string
 	hub        *api.Hub
+	listPath   string
 }
 
 // startHarness runs the store, runtime, DNS server, and API in process, the way
@@ -40,7 +41,8 @@ func startHarness(t *testing.T) *harness {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = database.Close() })
 
-	rt := runtime.New(database, []filter.RuleSpec{blockedAds()})
+	lists := []runtime.ListFile{listFileWith(t, "ads.example.com\n")}
+	rt := runtime.New(database, lists, quietLogger())
 	require.NoError(t, rt.Reload(ctx))
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(2*time.Second), rt, quietLogger())
 
@@ -63,6 +65,7 @@ func startHarness(t *testing.T) *harness {
 		apiURL:     "http://" + apiServer.Addr().String(),
 		dnsAddress: dnsServer.UDPAddr().String(),
 		hub:        hub,
+		listPath:   lists[0].Path,
 	}
 }
 
@@ -80,6 +83,13 @@ func (h *harness) do(t *testing.T, method, path, body string) (int, string) {
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func listFileWith(t *testing.T, content string) runtime.ListFile {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "list.txt")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return runtime.ListFile{Path: path, Format: blocklist.FormatHosts}
 }
 
 // listedName is the name the harness's list server blocks, and the name every
@@ -288,7 +298,7 @@ func TestTheQueryStreamCarriesADecisionFromARealQuery(t *testing.T) {
 	require.Equal(t, "ads.example.com", event.Name)
 	require.Equal(t, "block", event.Action)
 	require.NotNil(t, event.Rule)
-	require.Equal(t, "block-ads", event.Rule.ID)
+	require.Equal(t, "ads.example.com", event.Rule.Pattern)
 }
 
 func TestAStalledConsumerCannotBlockAQuery(t *testing.T) {
@@ -312,7 +322,8 @@ type decisionEventJSON struct {
 	Name   string `json:"name"`
 	Action string `json:"action"`
 	Rule   *struct {
-		ID string `json:"id"`
+		ID      string `json:"id"`
+		Pattern string `json:"pattern"`
 	} `json:"rule"`
 }
 
@@ -364,20 +375,14 @@ func TestUnknownProfilesAndClientsReturnNotFound(t *testing.T) {
 	}
 }
 
-var blockedName = func() filter.Domain {
-	domain, err := filter.ParseDomain("ads.example.com")
-	if err != nil {
-		panic(err)
-	}
-	return domain
-}()
+func TestAReloadEndpointPicksUpBlocklistEdits(t *testing.T) {
+	h := startHarness(t)
 
-func blockedAds() filter.RuleSpec {
-	return filter.RuleSpec{
-		ID:     "block-ads",
-		Source: filter.Source{ID: "test", Name: "Test"},
-		Kind:   filter.MatchSubdomains,
-		Domain: blockedName,
-		Action: filter.ActionBlock,
-	}
+	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.1", h.dnsAddress).Rcode)
+
+	require.NoError(t, os.WriteFile(h.listPath, []byte("other.example.com\n"), 0o600))
+	status, body := h.do(t, http.MethodPost, "/api/v1/reload", "")
+	require.Equal(t, http.StatusOK, status, body)
+
+	require.Equal(t, mdns.RcodeServerFailure, queryFrom(t, "127.0.0.1", h.dnsAddress).Rcode)
 }

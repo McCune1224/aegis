@@ -33,7 +33,7 @@ func TestRefreshFallsBackToTheCachedBody(t *testing.T) {
 	}))
 	require.NoError(t, database.RecordSourceFetch(ctx, "cached", "etag", time.Now(), nil, 1, []byte("0.0.0.0 ads.example.com\n")))
 
-	engine := runtime.New(database, nil)
+	engine := runtime.New(database, nil, quietLogger())
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(2*time.Second), engine, quietLogger())
 
 	require.NoError(t, sync.RefreshSources(ctx))
@@ -62,7 +62,7 @@ func TestRefreshSkipsDisabledSources(t *testing.T) {
 	}))
 	require.NoError(t, database.RecordSourceFetch(ctx, "off", "", time.Now(), nil, 1, []byte("0.0.0.0 ads.example.com\n")))
 
-	engine := runtime.New(database, nil)
+	engine := runtime.New(database, nil, quietLogger())
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(2*time.Second), engine, quietLogger())
 
 	require.NoError(t, sync.RefreshSources(ctx))

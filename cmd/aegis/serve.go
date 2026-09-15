@@ -9,7 +9,6 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -85,10 +84,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	rules, err := loadBlocklists(cfg.Blocklists, format, logger)
-	if err != nil {
-		return err
-	}
 
 	database, err := store.Open(ctx, cfg.DB)
 	if err != nil {
@@ -109,7 +104,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := database.MarkSeeded(ctx); err != nil {
 		return err
 	}
-	engine := runtime.New(database, rules)
+	lists := make([]runtime.ListFile, 0, len(cfg.Blocklists))
+	for _, path := range cfg.Blocklists {
+		lists = append(lists, runtime.ListFile{Path: path, Format: format})
+	}
+	engine := runtime.New(database, lists, logger)
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(sourceTimeout), engine, logger)
 	if err := sync.RefreshSources(ctx); err != nil {
 		return err
@@ -297,42 +296,6 @@ func buildClients(entries []string) ([]store.Client, error) {
 		})
 	}
 	return records, nil
-}
-
-// loadBlocklists reads every configured file in one format and returns the
-// rules together. A file that cannot be read fails the start rather than
-// silently serving fewer rules than the operator asked for.
-func loadBlocklists(paths []string, format blocklist.Format, logger *slog.Logger) ([]filter.RuleSpec, error) {
-	var rules []filter.RuleSpec
-	for _, path := range paths {
-		result, err := readList(path, format)
-		if err != nil {
-			return nil, err
-		}
-
-		logger.Info("blocklist loaded", "path", path, "rules", len(result.Rules), "skipped", result.Skipped)
-		rules = append(rules, result.Rules...)
-	}
-	return rules, nil
-}
-
-func readList(path string, format blocklist.Format) (blocklist.ParseResult, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return blocklist.ParseResult{}, fmt.Errorf("%w", err)
-	}
-
-	source := filter.Source{ID: path, Name: filepath.Base(path)}
-	result, parseErr := blocklist.ParseList(file, source, format)
-	closeErr := file.Close()
-
-	if parseErr != nil {
-		return blocklist.ParseResult{}, parseErr
-	}
-	if closeErr != nil {
-		return blocklist.ParseResult{}, fmt.Errorf("%w", closeErr)
-	}
-	return result, nil
 }
 
 func parseOptionalAddress(raw string) (netip.Addr, error) {
