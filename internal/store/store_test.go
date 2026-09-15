@@ -53,19 +53,19 @@ func TestOpeningAnExistingDatabaseKeepsWhatIsInIt(t *testing.T) {
 	require.Len(t, cfg.Profiles, 2)
 }
 
-func TestUnconfiguredIsTrueOnlyBeforeAnythingIsStored(t *testing.T) {
+func TestFirstBootIsRecordedOnce(t *testing.T) {
 	s := open(t)
 	ctx := t.Context()
 
-	empty, err := s.Unconfigured(ctx)
+	first, err := s.FirstBoot(ctx)
 	require.NoError(t, err)
-	require.True(t, empty)
+	require.True(t, first)
 
-	require.NoError(t, s.SaveClient(ctx, store.Client{Key: "tablet", Profile: "default"}))
+	require.NoError(t, s.MarkSeeded(ctx))
 
-	empty, err = s.Unconfigured(ctx)
+	first, err = s.FirstBoot(ctx)
 	require.NoError(t, err)
-	require.False(t, empty)
+	require.False(t, first, "a seeded store must not look empty just because it has one profile")
 }
 
 func TestLoadRoundTripsAProfileAndAClientsSelectors(t *testing.T) {

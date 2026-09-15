@@ -97,7 +97,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = database.Close() }()
 
-	firstBoot, err := database.Unconfigured(ctx)
+	firstBoot, err := database.FirstBoot(ctx)
 	if err != nil {
 		return err
 	}
@@ -105,6 +105,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := seedSources(ctx, database, cfg.Sources, format, firstBoot, logger); err != nil {
+		return err
+	}
+	if err := database.MarkSeeded(ctx); err != nil {
 		return err
 	}
 	sourceRules, err := fetchSourceRules(ctx, database, blocklist.NewFetcher(sourceTimeout), logger)

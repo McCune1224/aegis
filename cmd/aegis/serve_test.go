@@ -19,6 +19,7 @@ import (
 
 	"aegis/internal/blocklist"
 	"aegis/internal/config"
+	"aegis/internal/filter"
 	"aegis/internal/store"
 )
 
@@ -164,6 +165,36 @@ func TestServeCommandServesTheAPI(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not return after its context was cancelled")
 	}
+}
+
+func modePtr(mode filter.BlockingMode) *filter.BlockingMode { return &mode }
+
+func TestASecondBootLeavesTheStoredConfigurationAlone(t *testing.T) {
+	database, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "aegis.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = database.Close() })
+	ctx := t.Context()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	first, err := database.FirstBoot(ctx)
+	require.NoError(t, err)
+	require.True(t, first)
+
+	// The operator changes the default profile in the UI, leaving one profile and
+	// no clients, which used to look like an empty database again.
+	require.NoError(t, database.SaveProfile(ctx, filter.ProfileSpec{ID: "default", Mode: modePtr(filter.Refused)}))
+	require.NoError(t, database.MarkSeeded(ctx))
+
+	first, err = database.FirstBoot(ctx)
+	require.NoError(t, err)
+	require.False(t, first)
+	require.NoError(t, seed(ctx, database, []filter.ProfileSpec{{ID: "default", Mode: modePtr(filter.NullAddress)}}, nil, first, logger))
+
+	cfg, err := database.Load(ctx)
+	require.NoError(t, err)
+	require.Len(t, cfg.Profiles, 1)
+	require.NotNil(t, cfg.Profiles[0].Mode)
+	require.Equal(t, filter.Refused, *cfg.Profiles[0].Mode)
 }
 
 func TestServeCommandLoadsRulesFromASourceAndSurvivesABadOne(t *testing.T) {
