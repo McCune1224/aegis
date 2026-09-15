@@ -52,7 +52,7 @@ func startHarness(t *testing.T) *harness {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = dnsServer.Shutdown(context.Background()) })
 
-	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Hub: hub, Address: "127.0.0.1:0"})
+	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Hub: hub, Upstream: "9.9.9.9:53", Address: "127.0.0.1:0"})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = apiServer.Shutdown(context.Background()) })
 
@@ -293,6 +293,16 @@ type decisionEventJSON struct {
 	Rule   *struct {
 		ID string `json:"id"`
 	} `json:"rule"`
+}
+
+func TestStatusReportsTheUpstreamAndRuleCount(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodGet, "/api/v1/status", "")
+
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, "9.9.9.9:53")
+	require.Contains(t, body, `"rules":1`)
 }
 
 func TestTheDefaultProfileCanBeChangedOverHTTP(t *testing.T) {
