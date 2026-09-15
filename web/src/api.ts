@@ -28,6 +28,11 @@ export type ClientInput = {
   prefixes: string[];
 };
 
+export type Status = {
+  upstream: string;
+  rules?: number;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -49,6 +54,10 @@ async function errorMessage(response: Response): Promise<string> {
   } catch {
     return `HTTP ${response.status}`;
   }
+}
+
+export function getStatus(): Promise<Status> {
+  return request<Status>("/api/v1/status");
 }
 
 export function listProfiles(): Promise<Profile[]> {

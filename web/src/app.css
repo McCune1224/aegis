@@ -155,3 +155,10 @@ button:disabled {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+.graph {
+  height: 28rem;
+  border: 1px solid #232b33;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
