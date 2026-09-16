@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	mdns "github.com/miekg/dns"
@@ -127,4 +128,51 @@ func TestTheCatalogListsKnownSources(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, body)
 	require.Contains(t, body, `"name":"stevenblack"`)
 	require.Contains(t, body, `"format":"hosts"`)
+}
+
+// startMutableListServer serves a hosts list the test can rewrite between
+// requests, so a preview and a refresh see different content.
+func startMutableListServer(t *testing.T, body string) (*httptest.Server, func(string)) {
+	t.Helper()
+	var mu sync.Mutex
+	current := body
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		_, _ = io.WriteString(w, current)
+	}))
+	t.Cleanup(server.Close)
+	return server, func(next string) {
+		mu.Lock()
+		current = next
+		mu.Unlock()
+	}
+}
+
+func TestSourcePreviewAndRefreshEndpoints(t *testing.T) {
+	h := startHarness(t)
+	mutable, setBody := startMutableListServer(t, "0.0.0.0 tracker.example.net\n")
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/sources/trackers", `{"url":"`+mutable.URL+`/list","format":"hosts","enabled":true}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode)
+
+	setBody("0.0.0.0 ads.example.com\n")
+	status, body = h.do(t, http.MethodGet, "/api/v1/sources/trackers/preview", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"added":["ads.example.com"]`)
+	require.Contains(t, body, `"removed":["tracker.example.net"]`)
+
+	require.Equal(t, mdns.RcodeNameError, queryFor(t, h.dnsAddress).Rcode,
+		"a preview must not change what the resolver answers")
+
+	status, body = h.do(t, http.MethodPost, "/api/v1/sources/trackers/refresh", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, mdns.RcodeServerFailure, queryFor(t, h.dnsAddress).Rcode,
+		"the removed name now flows to the unreachable upstream")
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/sources/trackers/preview", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"added":[]`)
+	require.Contains(t, body, `"removed":[]`)
 }

@@ -33,6 +33,10 @@ const defaultProfile filter.ProfileID = "default"
 // sourceTimeout bounds one blocklist fetch, redirects included.
 const sourceTimeout = 30 * time.Second
 
+// sourceRefreshTick is how often the background loop looks for sources whose
+// refresh schedule has elapsed.
+const sourceRefreshTick = time.Minute
+
 func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -53,6 +57,7 @@ func newServeCmd() *cobra.Command {
 	flags.String("block-format", "hosts", "hosts, domains, or adblock, applied to every blocklist")
 	flags.StringArray("profile", nil, "extra profile as name=mode or name=mode=address, repeatable")
 	flags.StringArray("client", nil, "bind an address to a profile as address=profile, repeatable")
+	flags.String("source-refresh", "6h", "how often to fetch blocklist sources for updates, as a duration")
 	flags.String("log-level", "info", "debug, info, warn, or error")
 
 	return cmd
@@ -144,6 +149,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Store:    database,
 		Reloader: engine,
 		Sources:  sync,
+		Preview:  sync,
 		Hub:      hub,
 		Files:    web.Files(),
 		Upstream: cfg.Upstream,
@@ -166,6 +172,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	stop, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	refreshInterval, err := time.ParseDuration(cfg.SourceRefresh)
+	if err != nil {
+		return fmt.Errorf("source-refresh: %w", err)
+	}
+	refreshCtx, refreshCancel := context.WithCancel(stop)
+	defer refreshCancel()
+	go runSourceRefreshLoop(refreshCtx, sync, refreshInterval, logger)
+
 	<-stop.Done()
 
 	logger.Info("aegis is shutting down")
@@ -175,6 +190,29 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	return errors.Join(apiServer.Shutdown(shutdown), server.Shutdown(shutdown))
+}
+
+// runSourceRefreshLoop fetches every enabled source whose own schedule has
+// elapsed, checking once a minute. A source without an override uses the
+// configured default interval, and the ETag makes a check cheap.
+func runSourceRefreshLoop(ctx context.Context, sync *runtime.SourceSync, defaultInterval time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(sourceRefreshTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			fetched, err := sync.RefreshDue(ctx, time.Now(), defaultInterval)
+			if err != nil {
+				logger.Warn("source refresh failed", "error", err)
+				continue
+			}
+			if fetched > 0 {
+				logger.Info("refreshed blocklist sources", "count", fetched)
+			}
+		}
+	}
 }
 
 // seed writes the flag configuration into an empty database. Once anything is

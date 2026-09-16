@@ -29,11 +29,19 @@ type SourceRefresher interface {
 	RefreshSources(ctx context.Context) error
 }
 
+// SourcePreviewer previews what a refresh would change without applying it and
+// refreshes one source on demand. Runtime's SourceSync implements both.
+type SourcePreviewer interface {
+	PreviewSource(ctx context.Context, name string) (added, removed []string, notModified bool, err error)
+	RefreshOne(ctx context.Context, name string) error
+}
+
 // Config is what Start needs.
 type Config struct {
 	Store    *store.Store
 	Reloader Reloader
 	Sources  SourceRefresher
+	Preview  SourcePreviewer
 	Hub      *Hub
 	Files    fs.FS
 	Upstream string
@@ -47,6 +55,7 @@ type Server struct {
 	store    *store.Store
 	reloader Reloader
 	sources  SourceRefresher
+	preview  SourcePreviewer
 	hub      *Hub
 	files    fs.FS
 	upstream string
@@ -71,6 +80,9 @@ func Start(cfg Config) (*Server, error) {
 	if cfg.Sources == nil {
 		return nil, errors.New("api: Config.Sources is required")
 	}
+	if cfg.Preview == nil {
+		return nil, errors.New("api: Config.Preview is required")
+	}
 	if cfg.Address == "" {
 		return nil, errors.New("api: Config.Address is required")
 	}
@@ -85,7 +97,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, hub: cfg.Hub, files: cfg.Files, upstream: cfg.Upstream, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, preview: cfg.Preview, hub: cfg.Hub, files: cfg.Files, upstream: cfg.Upstream, listener: listener}
 	s.http = &http.Server{
 		Handler:  s.routes(),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
@@ -123,6 +135,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/v1/sources/{name}", s.putSource)
 	mux.HandleFunc("GET /api/v1/sources/{name}", s.getSource)
 	mux.HandleFunc("DELETE /api/v1/sources/{name}", s.deleteSource)
+	mux.HandleFunc("POST /api/v1/sources/{name}/refresh", s.refreshSource)
+	mux.HandleFunc("GET /api/v1/sources/{name}/preview", s.previewSource)
 	mux.HandleFunc("GET /api/v1/rules", s.listRules)
 	mux.HandleFunc("POST /api/v1/rules", s.postRule)
 	mux.HandleFunc("PUT /api/v1/rules/{id}", s.putRule)
@@ -134,6 +148,36 @@ func (s *Server) routes() http.Handler {
 		mux.Handle("GET /", http.FileServerFS(s.files))
 	}
 	return mux
+}
+
+// refreshSource fetches one source now and republishes the resolver.
+func (s *Server) refreshSource(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := s.preview.RefreshOne(r.Context(), name); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "refreshed", "source": name})
+}
+
+// previewSource reports the domains a refresh would add and remove, without
+// applying anything.
+func (s *Server) previewSource(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	added, removed, notModified, err := s.preview.PreviewSource(r.Context(), name)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if added == nil {
+		added = []string{}
+	}
+	if removed == nil {
+		removed = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name": name, "added": added, "removed": removed, "notModified": notModified,
+	})
 }
 
 // reload republishes the resolver from the current inputs: the stored

@@ -16,22 +16,26 @@ import (
 // sourceRequest is one source as it arrives over HTTP. A nil field means keep
 // what is stored, which is what makes a one-field body an enable toggle.
 type sourceRequest struct {
-	URL     *string `json:"url"`
-	Format  *string `json:"format"`
-	Enabled *bool   `json:"enabled"`
+	URL            *string `json:"url"`
+	Format         *string `json:"format"`
+	Enabled        *bool   `json:"enabled"`
+	RefreshSeconds *int    `json:"refresh_seconds"`
 }
 
 // sourceResponse is one source as it leaves over HTTP. LastFetch, LastError,
 // and RuleCount are the fetch record, so the panel shows health without a
 // second route.
 type sourceResponse struct {
-	Name      string `json:"name"`
-	URL       string `json:"url"`
-	Format    string `json:"format"`
-	Enabled   bool   `json:"enabled"`
-	LastFetch string `json:"last_fetch,omitempty"`
-	LastError string `json:"last_error,omitempty"`
-	RuleCount int    `json:"rule_count"`
+	Name           string `json:"name"`
+	URL            string `json:"url"`
+	Format         string `json:"format"`
+	Enabled        bool   `json:"enabled"`
+	LastFetch      string `json:"last_fetch,omitempty"`
+	LastError      string `json:"last_error,omitempty"`
+	RuleCount      int    `json:"rule_count"`
+	Skipped        int    `json:"skipped"`
+	Failures       int    `json:"failures"`
+	RefreshSeconds int    `json:"refresh_seconds"`
 }
 
 func sourceResponseFrom(source store.Source) sourceResponse {
@@ -42,6 +46,10 @@ func sourceResponseFrom(source store.Source) sourceResponse {
 		Enabled:   source.Enabled,
 		LastError: source.LastError,
 		RuleCount: source.RuleCount,
+		Skipped:   source.Skipped,
+		Failures:  source.Failures,
+
+		RefreshSeconds: source.RefreshSeconds,
 	}
 	if !source.LastFetch.IsZero() {
 		response.LastFetch = source.LastFetch.Format(time.RFC3339)
@@ -119,6 +127,8 @@ func (s *Server) putSource(w http.ResponseWriter, r *http.Request) {
 			source.LastFetch = time.Time{}
 			source.LastError = ""
 			source.RuleCount = 0
+			source.Skipped = 0
+			source.Failures = 0
 		}
 		source.URL = *request.URL
 	}
@@ -132,6 +142,13 @@ func (s *Server) putSource(w http.ResponseWriter, r *http.Request) {
 	}
 	if request.Enabled != nil {
 		source.Enabled = *request.Enabled
+	}
+	if request.RefreshSeconds != nil {
+		if *request.RefreshSeconds < 0 {
+			writeError(w, badRequest{errors.New("refresh_seconds cannot be negative")})
+			return
+		}
+		source.RefreshSeconds = *request.RefreshSeconds
 	}
 	if source.URL == "" {
 		writeError(w, badRequest{errors.New("a source needs a url")})

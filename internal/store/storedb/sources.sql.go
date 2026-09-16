@@ -19,19 +19,34 @@ func (q *Queries) DeleteSource(ctx context.Context, name string) error {
 }
 
 const listEnabledSources = `-- name: ListEnabledSources :many
-SELECT name, url, format, enabled, etag, last_fetch, last_error, rule_count, body
+SELECT name, url, format, enabled, etag, last_fetch, last_error, rule_count, skipped, failures, refresh_seconds, body
 FROM sources WHERE enabled = 1 ORDER BY name
 `
 
-func (q *Queries) ListEnabledSources(ctx context.Context) ([]Source, error) {
+type ListEnabledSourcesRow struct {
+	Name           string
+	Url            string
+	Format         string
+	Enabled        int64
+	Etag           string
+	LastFetch      int64
+	LastError      string
+	RuleCount      int64
+	Skipped        int64
+	Failures       int64
+	RefreshSeconds int64
+	Body           []byte
+}
+
+func (q *Queries) ListEnabledSources(ctx context.Context) ([]ListEnabledSourcesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEnabledSources)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Source
+	var items []ListEnabledSourcesRow
 	for rows.Next() {
-		var i Source
+		var i ListEnabledSourcesRow
 		if err := rows.Scan(
 			&i.Name,
 			&i.Url,
@@ -41,6 +56,9 @@ func (q *Queries) ListEnabledSources(ctx context.Context) ([]Source, error) {
 			&i.LastFetch,
 			&i.LastError,
 			&i.RuleCount,
+			&i.Skipped,
+			&i.Failures,
+			&i.RefreshSeconds,
 			&i.Body,
 		); err != nil {
 			return nil, err
@@ -57,19 +75,34 @@ func (q *Queries) ListEnabledSources(ctx context.Context) ([]Source, error) {
 }
 
 const listSources = `-- name: ListSources :many
-SELECT name, url, format, enabled, etag, last_fetch, last_error, rule_count, body
+SELECT name, url, format, enabled, etag, last_fetch, last_error, rule_count, skipped, failures, refresh_seconds, body
 FROM sources ORDER BY name
 `
 
-func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
+type ListSourcesRow struct {
+	Name           string
+	Url            string
+	Format         string
+	Enabled        int64
+	Etag           string
+	LastFetch      int64
+	LastError      string
+	RuleCount      int64
+	Skipped        int64
+	Failures       int64
+	RefreshSeconds int64
+	Body           []byte
+}
+
+func (q *Queries) ListSources(ctx context.Context) ([]ListSourcesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSources)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Source
+	var items []ListSourcesRow
 	for rows.Next() {
-		var i Source
+		var i ListSourcesRow
 		if err := rows.Scan(
 			&i.Name,
 			&i.Url,
@@ -79,6 +112,9 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 			&i.LastFetch,
 			&i.LastError,
 			&i.RuleCount,
+			&i.Skipped,
+			&i.Failures,
+			&i.RefreshSeconds,
 			&i.Body,
 		); err != nil {
 			return nil, err
@@ -96,8 +132,10 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 
 const recordSourceFetch = `-- name: RecordSourceFetch :exec
 UPDATE sources
-SET etag = ?, last_fetch = ?, last_error = ?, rule_count = ?, body = ?
-WHERE name = ?
+SET etag = ?1, last_fetch = ?2, last_error = ?3, rule_count = ?4,
+    skipped = ?5, body = ?6,
+    failures = CASE WHEN ?3 = '' THEN 0 ELSE failures + 1 END
+WHERE name = ?7
 `
 
 type RecordSourceFetchParams struct {
@@ -105,6 +143,7 @@ type RecordSourceFetchParams struct {
 	LastFetch int64
 	LastError string
 	RuleCount int64
+	Skipped   int64
 	Body      []byte
 	Name      string
 }
@@ -115,6 +154,7 @@ func (q *Queries) RecordSourceFetch(ctx context.Context, arg RecordSourceFetchPa
 		arg.LastFetch,
 		arg.LastError,
 		arg.RuleCount,
+		arg.Skipped,
 		arg.Body,
 		arg.Name,
 	)
@@ -122,18 +162,20 @@ func (q *Queries) RecordSourceFetch(ctx context.Context, arg RecordSourceFetchPa
 }
 
 const upsertSource = `-- name: UpsertSource :exec
-INSERT INTO sources (name, url, format, enabled) VALUES (?, ?, ?, ?)
+INSERT INTO sources (name, url, format, enabled, refresh_seconds) VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (name) DO UPDATE SET
     url = excluded.url,
     format = excluded.format,
-    enabled = excluded.enabled
+    enabled = excluded.enabled,
+    refresh_seconds = excluded.refresh_seconds
 `
 
 type UpsertSourceParams struct {
-	Name    string
-	Url     string
-	Format  string
-	Enabled int64
+	Name           string
+	Url            string
+	Format         string
+	Enabled        int64
+	RefreshSeconds int64
 }
 
 func (q *Queries) UpsertSource(ctx context.Context, arg UpsertSourceParams) error {
@@ -142,6 +184,7 @@ func (q *Queries) UpsertSource(ctx context.Context, arg UpsertSourceParams) erro
 		arg.Url,
 		arg.Format,
 		arg.Enabled,
+		arg.RefreshSeconds,
 	)
 	return err
 }
