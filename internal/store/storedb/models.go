@@ -52,13 +52,16 @@ type Setting struct {
 }
 
 type Source struct {
-	Name      string
-	Url       string
-	Format    string
-	Enabled   int64
-	Etag      string
-	LastFetch int64
-	LastError string
-	RuleCount int64
-	Body      []byte
+	Name           string
+	Url            string
+	Format         string
+	Enabled        int64
+	Etag           string
+	LastFetch      int64
+	LastError      string
+	RuleCount      int64
+	Body           []byte
+	Skipped        int64
+	Failures       int64
+	RefreshSeconds int64
 }

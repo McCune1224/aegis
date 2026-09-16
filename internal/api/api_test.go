@@ -60,7 +60,7 @@ func startHarness(t *testing.T) *harness {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = dnsServer.Shutdown(context.Background()) })
 
-	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Sources: sync, Hub: hub, Upstream: "9.9.9.9:53", Address: "127.0.0.1:0"})
+	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Sources: sync, Preview: sync, Hub: hub, Upstream: "9.9.9.9:53", Address: "127.0.0.1:0"})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = apiServer.Shutdown(context.Background()) })
 

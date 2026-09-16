@@ -24,6 +24,7 @@ type Config struct {
 	Profiles      []string `mapstructure:"profile"`
 	Clients       []string `mapstructure:"client"`
 	Sources       []string `mapstructure:"source"`
+	SourceRefresh string   `mapstructure:"source-refresh"`
 	LogLevel      string   `mapstructure:"log-level"`
 }
 

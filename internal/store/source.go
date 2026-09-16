@@ -13,15 +13,27 @@ import (
 // successful response, kept so a restart while the URL is down still serves the
 // list.
 type Source struct {
-	Name      string
-	URL       string
-	Format    blocklist.Format
-	Enabled   bool
-	ETag      string
-	LastFetch time.Time
-	LastError string
-	RuleCount int
-	Body      []byte
+	Name           string
+	URL            string
+	Format         blocklist.Format
+	Enabled        bool
+	ETag           string
+	LastFetch      time.Time
+	LastError      string
+	RuleCount      int
+	Skipped        int
+	Failures       int
+	RefreshSeconds int
+	Body           []byte
+}
+
+// Fresh reports whether the source was fetched within maxAge. A source that
+// has never been fetched is not stale, it is new.
+func (s Source) Fresh(now time.Time, maxAge time.Duration) bool {
+	if s.LastFetch.IsZero() {
+		return true
+	}
+	return now.Sub(s.LastFetch) < maxAge
 }
 
 // Sources returns every configured source.
@@ -39,10 +51,16 @@ func (s *Store) EnabledSources(ctx context.Context) ([]Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: sources: %w", err)
 	}
-	return parseSources(rows)
+	// The enabled and unfiltered queries return identical columns, so the rows
+	// convert one to one.
+	uniform := make([]storedb.ListSourcesRow, len(rows))
+	for index, row := range rows {
+		uniform[index] = storedb.ListSourcesRow(row)
+	}
+	return parseSources(uniform)
 }
 
-func parseSources(rows []storedb.Source) ([]Source, error) {
+func parseSources(rows []storedb.ListSourcesRow) ([]Source, error) {
 	sources := make([]Source, 0, len(rows))
 	for _, row := range rows {
 		format, err := blocklist.ParseFormat(row.Format)
@@ -50,15 +68,18 @@ func parseSources(rows []storedb.Source) ([]Source, error) {
 			return nil, fmt.Errorf("store: source %q: %w", row.Name, err)
 		}
 		sources = append(sources, Source{
-			Name:      row.Name,
-			URL:       row.Url,
-			Format:    format,
-			Enabled:   row.Enabled != 0,
-			ETag:      row.Etag,
-			LastFetch: unixSeconds(row.LastFetch),
-			LastError: row.LastError,
-			RuleCount: int(row.RuleCount),
-			Body:      row.Body,
+			Name:           row.Name,
+			URL:            row.Url,
+			Format:         format,
+			Enabled:        row.Enabled != 0,
+			ETag:           row.Etag,
+			LastFetch:      unixSeconds(row.LastFetch),
+			LastError:      row.LastError,
+			RuleCount:      int(row.RuleCount),
+			Skipped:        int(row.Skipped),
+			Failures:       int(row.Failures),
+			RefreshSeconds: int(row.RefreshSeconds),
+			Body:           row.Body,
 		})
 	}
 	return sources, nil
@@ -80,10 +101,11 @@ func (s *Store) SaveSource(ctx context.Context, source Source) error {
 		enabled = 1
 	}
 	if err := s.queries.UpsertSource(ctx, storedb.UpsertSourceParams{
-		Name:    source.Name,
-		Url:     source.URL,
-		Format:  source.Format.String(),
-		Enabled: enabled,
+		Name:           source.Name,
+		Url:            source.URL,
+		Format:         source.Format.String(),
+		Enabled:        enabled,
+		RefreshSeconds: int64(source.RefreshSeconds),
 	}); err != nil {
 		return fmt.Errorf("store: save source %q: %w", source.Name, err)
 	}
@@ -100,7 +122,7 @@ func (s *Store) DeleteSource(ctx context.Context, name string) error {
 
 // RecordSourceFetch stores the outcome of one fetch, so health, the ETag, and
 // the last good body survive a restart.
-func (s *Store) RecordSourceFetch(ctx context.Context, name, etag string, fetched time.Time, fetchErr error, ruleCount int, body []byte) error {
+func (s *Store) RecordSourceFetch(ctx context.Context, name, etag string, fetched time.Time, fetchErr error, ruleCount, skipped int, body []byte) error {
 	message := ""
 	if fetchErr != nil {
 		message = fetchErr.Error()
@@ -117,6 +139,7 @@ func (s *Store) RecordSourceFetch(ctx context.Context, name, etag string, fetche
 		LastFetch: seconds,
 		LastError: message,
 		RuleCount: int64(ruleCount),
+		Skipped:   int64(skipped),
 		Body:      body,
 		Name:      name,
 	}); err != nil {
