@@ -259,7 +259,13 @@ export default function App() {
             </Show>
             <Show when={tab() === "sources"}>
               <div class="screen-inner">
-                <Sources sources={sources()} catalog={catalog()} onSave={saveSource} onDelete={deleteSource} />
+                <Sources
+                  sources={sources()}
+                  catalog={catalog()}
+                  onSave={saveSource}
+                  onDelete={deleteSource}
+                  onReload={refresh}
+                />
               </div>
             </Show>
             <Show when={tab() === "settings"}>

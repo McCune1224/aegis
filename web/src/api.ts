@@ -36,6 +36,9 @@ export type Source = {
   last_fetch?: string;
   last_error?: string;
   rule_count: number;
+  skipped: number;
+  failures: number;
+  refresh_seconds: number;
 };
 
 // Absent fields keep what is stored, so a one-field body toggles or repoints a
@@ -44,6 +47,7 @@ export type SourceInput = {
   url?: string;
   format?: string;
   enabled?: boolean;
+  refresh_seconds?: number;
 };
 
 export type CatalogEntry = {
@@ -168,6 +172,23 @@ export function deleteSource(name: string): Promise<void> {
 
 export function listCatalog(): Promise<CatalogEntry[]> {
   return request<CatalogEntry[]>("/api/v1/sources/catalog");
+}
+
+export type SourcePreview = {
+  name: string;
+  added: string[];
+  removed: string[];
+  notModified: boolean;
+};
+
+// previewSource fetches the remote list and reports the domains a refresh
+// would add and remove, without applying anything.
+export function previewSource(name: string): Promise<SourcePreview> {
+  return request<SourcePreview>(`/api/v1/sources/${encodeURIComponent(name)}/preview`);
+}
+
+export function refreshSource(name: string): Promise<void> {
+  return request<void>(`/api/v1/sources/${encodeURIComponent(name)}/refresh`, { method: "POST" });
 }
 
 export function listRules(): Promise<Rule[]> {
