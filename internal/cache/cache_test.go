@@ -334,6 +334,37 @@ func TestResolveDoesNotCacheAnEmptyAnswerWithoutASOA(t *testing.T) {
 	require.Equal(t, 2, upstream.saw(), "no answer records and no SOA is no guidance, so nothing is cached")
 }
 
+func TestResolveKeysOnClass(t *testing.T) {
+	upstream := &stubUpstream{}
+	resolver := newResolver(t, upstream, nil)
+
+	ch := query("chaos.example.net.", mdns.TypeA)
+	ch.Question[0].Qclass = mdns.ClassCHAOS
+
+	_, err := resolver.Resolve(context.Background(), query("chaos.example.net.", mdns.TypeA))
+	require.NoError(t, err)
+	_, err = resolver.Resolve(context.Background(), ch)
+	require.NoError(t, err)
+	require.Equal(t, 2, upstream.saw(), "each class holds its own entry")
+}
+
+func TestResolveKeepsTheSlotWhenTheUpstreamEchoesAnotherName(t *testing.T) {
+	upstream := &stubUpstream{answer: func(req *mdns.Msg) *mdns.Msg {
+		resp := aAnswer(req, 1, 300)
+		resp.Question[0].Name = "wrong.example.net."
+		return resp
+	}}
+	resolver := newResolver(t, upstream, func(cfg *cache.Config) { cfg.MaxEntries = 1 })
+
+	_, err := resolver.Resolve(context.Background(), query("right.example.net.", mdns.TypeA))
+	require.NoError(t, err)
+	_, err = resolver.Resolve(context.Background(), query("other.example.net.", mdns.TypeA))
+	require.NoError(t, err)
+	_, err = resolver.Resolve(context.Background(), query("right.example.net.", mdns.TypeA))
+	require.NoError(t, err)
+	require.Equal(t, 3, upstream.saw(), "the evicted slot must not survive under its request key")
+}
+
 func TestNewRejectsAConfigWithoutAnUpstream(t *testing.T) {
 	_, err := cache.New(cache.Config{})
 	require.Error(t, err)
