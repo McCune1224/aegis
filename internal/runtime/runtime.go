@@ -137,6 +137,17 @@ func (r *Runtime) Decide(name filter.Domain, address netip.Addr) filter.Verdict 
 	return current.set.Decide(name, current.identity.Key(address), address, r.now())
 }
 
+// ClientKey names the identity policy keys on for one address, from the same
+// generation Decide reads, so the rate limiter and the filter never disagree
+// about who is asking.
+func (r *Runtime) ClientKey(address netip.Addr) filter.ClientKey {
+	current := r.current.Load()
+	if current == nil {
+		return ""
+	}
+	return current.identity.Key(address)
+}
+
 // ValidateLists reads and parses every list file the way publish will, so a
 // bad file fails the start before the database is created.
 func ValidateLists(lists []ListFile) error {

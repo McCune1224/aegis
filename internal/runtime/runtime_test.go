@@ -82,6 +82,14 @@ func TestReloadPublishesTheStoredConfiguration(t *testing.T) {
 	require.Equal(t, 1, rt.Size())
 }
 
+func TestClientKeyReadsTheTableTheFilterDecidesWith(t *testing.T) {
+	rt := runtime.New(configuredStore(t), blockedLists(t), quietLogger())
+	require.NoError(t, rt.Reload(t.Context()))
+
+	require.Equal(t, filter.ClientKey("tablet"), rt.ClientKey(tablet))
+	require.Equal(t, filter.ClientKey(""), rt.ClientKey(netip.MustParseAddr("192.168.9.9")), "an unclaimed address takes the default bucket")
+}
+
 func TestAStoredChangeReachesARunningRuntime(t *testing.T) {
 	ctx := t.Context()
 	s := configuredStore(t)
