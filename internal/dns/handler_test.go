@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"sync"
 	"testing"
+	"time"
 
 	mdns "github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
@@ -62,7 +63,7 @@ type stubDecider struct {
 }
 
 func (d stubDecider) Decide(name filter.Domain, address netip.Addr) filter.Verdict {
-	return d.set.Decide(name, d.clients.Key(address), address)
+	return d.set.Decide(name, d.clients.Key(address), address, time.Now())
 }
 
 // deciderFor builds a decider whose default profile answers blocked names with

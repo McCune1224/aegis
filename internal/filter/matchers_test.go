@@ -44,14 +44,14 @@ var noAddress netip.Addr
 func TestWildcardMatchesExactlyOneLabel(t *testing.T) {
 	rs := compile(t, ruleSpec("wild-ads", filter.MatchWildcard, filter.ActionBlock, "*.ads.example"))
 
-	blocked := rs.Decide(domain(t, "srv.ads.example"), "", netip.MustParseAddr("192.168.1.50"))
+	blocked := rs.Decide(domain(t, "srv.ads.example"), "", netip.MustParseAddr("192.168.1.50"), testNow)
 	require.Equal(t, filter.ActionBlock, blocked.Action)
 	require.NotNil(t, blocked.Match)
 	require.Equal(t, "wild-ads", blocked.Match.RuleID)
 	require.Equal(t, "*.ads.example", blocked.Match.Pattern)
 
 	for _, miss := range []string{"ads.example", "a.b.ads.example", "example.com"} {
-		got := rs.Decide(domain(t, miss), "", noAddress)
+		got := rs.Decide(domain(t, miss), "", noAddress, testNow)
 		require.Equal(t, filter.ActionAllow, got.Action, "name=%q", miss)
 		require.Nil(t, got.Match, "name=%q", miss)
 	}
@@ -60,9 +60,9 @@ func TestWildcardMatchesExactlyOneLabel(t *testing.T) {
 func TestWildcardStarMaySitInTheMiddle(t *testing.T) {
 	rs := compile(t, ruleSpec("wild-mid", filter.MatchWildcard, filter.ActionBlock, "ads.*.example"))
 
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "ads.cdn.example"), "", noAddress).Action)
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "ads.example"), "", noAddress).Action)
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "ads.cdn.host.example"), "", noAddress).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "ads.cdn.example"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "ads.example"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "ads.cdn.host.example"), "", noAddress, testNow).Action)
 }
 
 func TestWildcardAllowBeatsBlockList(t *testing.T) {
@@ -71,44 +71,44 @@ func TestWildcardAllowBeatsBlockList(t *testing.T) {
 		ruleSpec("wild-allow", filter.MatchWildcard, filter.ActionAllow, "*.mirror.example"),
 	)
 
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "eu.mirror.example"), "", noAddress).Action)
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "mirror.example"), "", noAddress).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "eu.mirror.example"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "mirror.example"), "", noAddress, testNow).Action)
 }
 
 func TestRegexMatchesUnanchoredAndCaseInsensitive(t *testing.T) {
 	rs := compile(t, ruleSpec("re-track", filter.MatchRegex, filter.ActionBlock, "tracking"))
 
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "tracking.example"), "", noAddress).Action)
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "news.tracking.example"), "", noAddress).Action)
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "example.com"), "", noAddress).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "tracking.example"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "news.tracking.example"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "example.com"), "", noAddress, testNow).Action)
 }
 
 func TestRegexAnchorsAreTheAuthorsJob(t *testing.T) {
 	rs := compile(t, ruleSpec("re-cache", filter.MatchRegex, filter.ActionBlock, `^cache-[0-9]+\.cdn\.example$`))
 
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "cache-12.cdn.example"), "", noAddress).Action)
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "xcache-1.cdn.example"), "", noAddress).Action)
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "cache-1.cdn.example.com"), "", noAddress).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "cache-12.cdn.example"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "xcache-1.cdn.example"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "cache-1.cdn.example.com"), "", noAddress, testNow).Action)
 }
 
 func TestCIDRRuleMatchesTheClientNetwork(t *testing.T) {
 	rs := compile(t, ruleSpec("net-guests", filter.MatchCIDR, filter.ActionBlock, "192.168.8.0/22"))
 
-	blocked := rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("192.168.9.40"))
+	blocked := rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("192.168.9.40"), testNow)
 	require.Equal(t, filter.ActionBlock, blocked.Action)
 	require.NotNil(t, blocked.Match)
 	require.Equal(t, "net-guests", blocked.Match.RuleID)
 	require.Equal(t, "192.168.8.0/22", blocked.Match.Pattern)
 
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("192.168.12.1")).Action)
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("::ffff:192.168.9.40")).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("192.168.12.1"), testNow).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("::ffff:192.168.9.40"), testNow).Action)
 }
 
 func TestCIDRRuleMatchesIPv6Networks(t *testing.T) {
 	rs := compile(t, ruleSpec("net-v6", filter.MatchCIDR, filter.ActionBlock, "2001:db8::/32"))
 
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("2001:db8::1")).Action)
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("2001:db9::1")).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("2001:db8::1"), testNow).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("2001:db9::1"), testNow).Action)
 }
 
 func TestNetworkRuleBeatsNameRules(t *testing.T) {
@@ -117,8 +117,8 @@ func TestNetworkRuleBeatsNameRules(t *testing.T) {
 		ruleSpec("net-exempt", filter.MatchCIDR, filter.ActionAllow, "10.0.0.0/8"),
 	)
 
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "ads.example"), "", netip.MustParseAddr("10.1.2.3")).Action)
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "ads.example"), "", netip.MustParseAddr("192.168.1.1")).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "ads.example"), "", netip.MustParseAddr("10.1.2.3"), testNow).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "ads.example"), "", netip.MustParseAddr("192.168.1.1"), testNow).Action)
 }
 
 func TestNetworkBlockBeatsADomainAllow(t *testing.T) {
@@ -127,8 +127,8 @@ func TestNetworkBlockBeatsADomainAllow(t *testing.T) {
 		ruleSpec("net-lock", filter.MatchCIDR, filter.ActionBlock, "10.9.0.0/16"),
 	)
 
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "docs.example"), "", netip.MustParseAddr("10.9.1.2")).Action)
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "docs.example"), "", netip.MustParseAddr("10.8.0.1")).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "docs.example"), "", netip.MustParseAddr("10.9.1.2"), testNow).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "docs.example"), "", netip.MustParseAddr("10.8.0.1"), testNow).Action)
 }
 
 func TestLongestNetworkPrefixWins(t *testing.T) {
@@ -137,8 +137,8 @@ func TestLongestNetworkPrefixWins(t *testing.T) {
 		ruleSpec("net-narrow", filter.MatchCIDR, filter.ActionAllow, "10.9.0.0/16"),
 	)
 
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("10.9.1.2")).Action)
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("10.8.0.1")).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("10.9.1.2"), testNow).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "example.com"), "", netip.MustParseAddr("10.8.0.1"), testNow).Action)
 }
 
 func TestCompileRejectsRulesWithTheWrongPayload(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"aegis/internal/blocklist"
 	"aegis/internal/client"
@@ -39,6 +40,7 @@ type snapshot struct {
 type Runtime struct {
 	store  *store.Store
 	logger *slog.Logger
+	now    func() time.Time
 
 	mu sync.Mutex
 	// lists are the blocklist files given at boot. publish reads them on every
@@ -50,12 +52,25 @@ type Runtime struct {
 	current     atomic.Pointer[snapshot]
 }
 
+// Option changes a Runtime at construction.
+type Option func(*Runtime)
+
+// WithClock names where Decide reads the wall clock, so a test can state the
+// minute it asks about.
+func WithClock(now func() time.Time) Option {
+	return func(r *Runtime) { r.now = now }
+}
+
 // New returns a Runtime that allows every query until Reload runs.
-func New(s *store.Store, lists []ListFile, logger *slog.Logger) *Runtime {
+func New(s *store.Store, lists []ListFile, logger *slog.Logger, opts ...Option) *Runtime {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Runtime{store: s, lists: lists, logger: logger}
+	r := &Runtime{store: s, lists: lists, logger: logger, now: time.Now}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Reload reads the stored configuration, compiles it with the current rules,
@@ -118,7 +133,7 @@ func (r *Runtime) Decide(name filter.Domain, address netip.Addr) filter.Verdict 
 	if current == nil {
 		return filter.Verdict{Action: filter.ActionAllow}
 	}
-	return current.set.Decide(name, current.identity.Key(address), address)
+	return current.set.Decide(name, current.identity.Key(address), address, r.now())
 }
 
 // ValidateLists reads and parses every list file the way publish will, so a

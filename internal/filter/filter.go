@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Domain is a parsed DNS name. It is always lowercase and holds no trailing
@@ -154,15 +155,20 @@ type Source struct {
 // RuleSpec is one rule as it arrives from a parsed blocklist or from config.
 // The kind names which payload it matches on: a Domain for exact and
 // subdomains, a Pattern for wildcard and regex, a Network for cidr. Compile
-// rejects a rule whose payload does not fit its kind.
+// rejects a rule whose payload does not fit its kind. A rule may name a
+// Schedule, which keeps it active only while that schedule covers the query
+// minute, and a Client, which keeps it scoped to one identity; a scope
+// without a schedule has no meaning, so Compile rejects it.
 type RuleSpec struct {
-	ID      string
-	Source  Source
-	Kind    MatchKind
-	Domain  Domain
-	Pattern string
-	Network netip.Prefix
-	Action  Action
+	ID       string
+	Source   Source
+	Kind     MatchKind
+	Domain   Domain
+	Pattern  string
+	Network  netip.Prefix
+	Schedule string
+	Client   ClientKey
+	Action   Action
 }
 
 // Provenance names the rule that produced a verdict. The query log and the
@@ -190,6 +196,8 @@ type RuleSet struct {
 	subdomains map[string]*entry
 	patterns   []patternRule
 	networks   []networkRule
+	schedules  []compiledSchedule
+	minutes    [minutesPerWeek]uint16
 	clients    map[ClientKey]Policy
 	fallback   Policy
 	rules      int
@@ -234,14 +242,24 @@ func Compile(cfg Config) (*RuleSet, error) {
 	if err != nil {
 		return nil, err
 	}
+	schedules, minutes, err := compileSchedules(cfg.Schedules)
+	if err != nil {
+		return nil, err
+	}
 
 	rs := &RuleSet{
 		exact:      make(map[string]*entry, len(cfg.Rules)),
 		subdomains: make(map[string]*entry, len(cfg.Rules)),
+		schedules:  schedules,
+		minutes:    minutes,
 		clients:    clients,
 		fallback:   profiles[cfg.Default],
 	}
-	if err := rs.indexRules(cfg.Rules); err != nil {
+	byName := make(map[string]int, len(schedules))
+	for i, schedule := range schedules {
+		byName[schedule.name] = i
+	}
+	if err := rs.indexRules(cfg.Rules, byName); err != nil {
 		return nil, err
 	}
 	return rs, nil
@@ -251,12 +269,15 @@ func Compile(cfg Config) (*RuleSet, error) {
 // of index keys when several rules claim one name.
 func (rs *RuleSet) Len() int { return rs.rules }
 
-func (rs *RuleSet) indexRules(specs []RuleSpec) error {
+func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int) error {
 	rs.rules = len(specs)
 	byNetwork := make(map[netip.Prefix]*entry)
 	for order, spec := range specs {
 		if spec.Action != ActionAllow && spec.Action != ActionBlock {
 			return fmt.Errorf("filter: rule %q has unknown action %d", spec.ID, spec.Action)
+		}
+		if spec.Client != "" && spec.Schedule == "" {
+			return fmt.Errorf("filter: rule %q names a client but no schedule", spec.ID)
 		}
 
 		switch spec.Kind {
@@ -267,22 +288,33 @@ func (rs *RuleSet) indexRules(specs []RuleSpec) error {
 			if spec.Pattern != "" || spec.Network.IsValid() {
 				return fmt.Errorf("filter: rule %q carries a payload kind %s does not use", spec.ID, spec.Kind)
 			}
-			table, exact := rs.exact, true
+			candidate := candidate{
+				provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Domain.name},
+				action:     spec.Action,
+				labels:     countLabels(spec.Domain.name),
+				exact:      spec.Kind == MatchExact,
+				order:      order,
+			}
+			if spec.Schedule != "" {
+				if err := rs.schedule(spec, scheduleIndex, scheduledRule{
+					candidate: candidate,
+					client:    spec.Client,
+					match:     nameMatcher(spec.Kind, spec.Domain, nil),
+				}); err != nil {
+					return err
+				}
+				continue
+			}
+			table := rs.exact
 			if spec.Kind == MatchSubdomains {
-				table, exact = rs.subdomains, false
+				table = rs.subdomains
 			}
 			e := table[spec.Domain.name]
 			if e == nil {
 				e = &entry{}
 				table[spec.Domain.name] = e
 			}
-			e.best = better(e.best, &candidate{
-				provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Domain.name},
-				action:     spec.Action,
-				labels:     countLabels(spec.Domain.name),
-				exact:      exact,
-				order:      order,
-			})
+			e.best = better(e.best, &candidate)
 		case MatchWildcard, MatchRegex:
 			if spec.Domain.name != "" || spec.Network.IsValid() {
 				return fmt.Errorf("filter: rule %q carries a payload kind %s does not use", spec.ID, spec.Kind)
@@ -291,15 +323,26 @@ func (rs *RuleSet) indexRules(specs []RuleSpec) error {
 			if err != nil {
 				return fmt.Errorf("filter: rule %q: %w", spec.ID, err)
 			}
-			rs.patterns = append(rs.patterns, patternRule{
-				candidate: candidate{
-					provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Pattern},
-					action:     spec.Action,
-					order:      len(rs.patterns),
-				},
-				re: re,
-			})
+			candidate := candidate{
+				provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Pattern},
+				action:     spec.Action,
+				order:      order,
+			}
+			if spec.Schedule != "" {
+				if err := rs.schedule(spec, scheduleIndex, scheduledRule{
+					candidate: candidate,
+					client:    spec.Client,
+					match:     nameMatcher(spec.Kind, Domain{}, re),
+				}); err != nil {
+					return err
+				}
+				continue
+			}
+			rs.patterns = append(rs.patterns, patternRule{candidate: candidate, re: re})
 		case MatchCIDR:
+			if spec.Schedule != "" || spec.Client != "" {
+				return fmt.Errorf("filter: rule %q cannot schedule a cidr rule", spec.ID)
+			}
 			if spec.Domain.name != "" || spec.Pattern != "" || !spec.Network.IsValid() {
 				return fmt.Errorf("filter: rule %q needs a network and no other payload", spec.ID)
 			}
@@ -328,16 +371,45 @@ func (rs *RuleSet) indexRules(specs []RuleSpec) error {
 	return nil
 }
 
-// Decide returns the verdict for one name, one client, and the address the
-// query came from. It looks up the client's policy once, then the whole name
-// and each parent, so its cost follows the label count and not the rule count.
+// schedule places one time-scoped rule into the schedule it names, refusing a
+// rule that names a schedule the config does not define.
+func (rs *RuleSet) schedule(spec RuleSpec, scheduleIndex map[string]int, rule scheduledRule) error {
+	index, exists := scheduleIndex[spec.Schedule]
+	if !exists {
+		return fmt.Errorf("filter: rule %q names schedule %q, which is not defined", spec.ID, spec.Schedule)
+	}
+	rs.schedules[index].rules = append(rs.schedules[index].rules, rule)
+	return nil
+}
+
+// nameMatcher bakes the comparison one name rule performs into a function, so
+// the scheduled layer never branches on the kind while answering. A nil re is
+// only passed by the exact and subdomains kinds.
+func nameMatcher(kind MatchKind, domain Domain, re *regexp.Regexp) func(string) bool {
+	switch kind {
+	case MatchExact:
+		target := domain.name
+		return func(name string) bool { return name == target }
+	case MatchSubdomains:
+		target := "." + domain.name
+		return func(name string) bool { return name == target[1:] || strings.HasSuffix(name, target) }
+	default:
+		return func(name string) bool { return re.MatchString(name) }
+	}
+}
+
+// Decide returns the verdict for one name, one client, the address the query
+// came from, and the wall clock the query arrived at, in the zone the caller
+// means. It looks up the client's policy once, then the whole name and each
+// parent, so its cost follows the label count and not the rule count.
 //
 // A rule that matches the client's network outranks any rule that only matches
 // the domain: an exempt network is exempt however blocking the lists are, and
 // a locked network is locked however permissive the domain rules are. Within
 // one dimension the tiers, specificity, and declaration order decide, so the
-// result never depends on map iteration.
-func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr) Verdict {
+// result never depends on map iteration. Time-scoped rules join the same
+// comparison when their schedule covers the minute.
+func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now time.Time) Verdict {
 	policy := rs.fallback
 	if specific, exists := rs.clients[client]; exists {
 		policy = specific
@@ -371,6 +443,21 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr) Ver
 	for i := range rs.patterns {
 		if rs.patterns[i].re.MatchString(name.name) {
 			best = better(best, &rs.patterns[i].candidate)
+		}
+	}
+
+	// The minute table names the schedule that owns this minute of the week;
+	// its rules join the comparison like any other candidate.
+	if index := rs.minutes[minuteOfWeek(now)]; index != 0 {
+		layer := &rs.schedules[index-1]
+		for i := range layer.rules {
+			rule := &layer.rules[i]
+			if rule.client != "" && rule.client != client {
+				continue
+			}
+			if rule.match(name.name) {
+				best = better(best, &rule.candidate)
+			}
 		}
 	}
 
