@@ -100,7 +100,7 @@ func TestLoadRoundTripsAProfileAndAClientsSelectors(t *testing.T) {
 		Default:  cfg.Default,
 	})
 	require.NoError(t, err)
-	require.Equal(t, filter.Refused, set.Decide(mustDomain(t, "example.com"), "tablet").Policy.Mode)
+	require.Equal(t, filter.Refused, set.Decide(mustDomain(t, "example.com"), "tablet", netip.Addr{}).Policy.Mode)
 
 	resolver, err := client.New(cfg.Selectors())
 	require.NoError(t, err)

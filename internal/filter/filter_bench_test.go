@@ -28,7 +28,7 @@ func BenchmarkDecide(b *testing.B) {
 			name := mustParse("x.ads.doubleclick.net")
 			b.ReportAllocs()
 			for b.Loop() {
-				if got := rs.Decide(name, ""); got.Action != filter.ActionAllow {
+				if got := rs.Decide(name, "", noAddress); got.Action != filter.ActionAllow {
 					b.Fatalf("unexpected action %d", got.Action)
 				}
 			}

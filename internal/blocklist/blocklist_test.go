@@ -1,6 +1,7 @@
 package blocklist_test
 
 import (
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -139,13 +140,13 @@ func TestParsedListDecidesAQueryAndNamesTheLineThatDecidedIt(t *testing.T) {
 	engine := filter.New()
 	engine.Publish(set)
 
-	blocked := engine.Decide(mustParse("ads.example.com"), "")
+	blocked := engine.Decide(mustParse("ads.example.com"), "", netip.Addr{})
 	require.Equal(t, filter.ActionBlock, blocked.Action)
 	require.NotNil(t, blocked.Match)
 	require.Equal(t, "test:2", blocked.Match.RuleID)
 	require.Equal(t, "Test list", blocked.Match.Source.Name)
 
-	allowed := engine.Decide(mustParse("news.ads.example.com"), "")
+	allowed := engine.Decide(mustParse("news.ads.example.com"), "", netip.Addr{})
 	require.Equal(t, filter.ActionAllow, allowed.Action)
 	require.NotNil(t, allowed.Match)
 	require.Equal(t, "test:3", allowed.Match.RuleID)

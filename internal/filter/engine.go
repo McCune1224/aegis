@@ -1,6 +1,9 @@
 package filter
 
-import "sync/atomic"
+import (
+	"net/netip"
+	"sync/atomic"
+)
 
 // Engine holds the rule set a running server answers from. Queries read the
 // current set without a lock, and an update swaps the whole set in one store,
@@ -32,8 +35,8 @@ func (e *Engine) Publish(next *RuleSet) {
 	e.current.Store(next)
 }
 
-// Decide answers one query for one client against the set the Engine answers
-// from now.
-func (e *Engine) Decide(name Domain, client ClientKey) Verdict {
-	return e.current.Load().Decide(name, client)
+// Decide answers one query for one client from one address against the set
+// the Engine answers from now.
+func (e *Engine) Decide(name Domain, client ClientKey, address netip.Addr) Verdict {
+	return e.current.Load().Decide(name, client, address)
 }

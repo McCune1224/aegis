@@ -24,7 +24,7 @@ func TestCompileResolvesAProfileChain(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got := set.Decide(mustParse("example.com"), "")
+	got := set.Decide(mustParse("example.com"), "", noAddress)
 
 	require.Equal(t, filter.CustomAddress, got.Policy.Mode)
 	require.Equal(t, custom, got.Policy.Custom)
@@ -42,7 +42,7 @@ func TestAProfileInheritsWhatItDoesNotSet(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got := set.Decide(mustParse("example.com"), "")
+	got := set.Decide(mustParse("example.com"), "", noAddress)
 
 	require.Equal(t, filter.CustomAddress, got.Policy.Mode)
 	require.Equal(t, custom, got.Policy.Custom)
@@ -58,7 +58,7 @@ func TestAChildProfileOverridesTheModeItSets(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got := set.Decide(mustParse("example.com"), "")
+	got := set.Decide(mustParse("example.com"), "", noAddress)
 
 	require.Equal(t, filter.Refused, got.Policy.Mode)
 }
@@ -74,9 +74,9 @@ func TestAClientGetsThePolicyOfItsOwnProfile(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.Equal(t, filter.Refused, set.Decide(mustParse("example.com"), "tablet").Policy.Mode)
-	require.Equal(t, filter.NullAddress, set.Decide(mustParse("example.com"), "laptop").Policy.Mode)
-	require.Equal(t, filter.NullAddress, set.Decide(mustParse("example.com"), "").Policy.Mode)
+	require.Equal(t, filter.Refused, set.Decide(mustParse("example.com"), "tablet", noAddress).Policy.Mode)
+	require.Equal(t, filter.NullAddress, set.Decide(mustParse("example.com"), "laptop", noAddress).Policy.Mode)
+	require.Equal(t, filter.NullAddress, set.Decide(mustParse("example.com"), "", noAddress).Policy.Mode)
 }
 
 func TestCompileRejectsAProfileCycle(t *testing.T) {

@@ -118,7 +118,7 @@ func (r *Runtime) Decide(name filter.Domain, address netip.Addr) filter.Verdict 
 	if current == nil {
 		return filter.Verdict{Action: filter.ActionAllow}
 	}
-	return current.set.Decide(name, current.identity.Key(address))
+	return current.set.Decide(name, current.identity.Key(address), address)
 }
 
 // ValidateLists reads and parses every list file the way publish will, so a
