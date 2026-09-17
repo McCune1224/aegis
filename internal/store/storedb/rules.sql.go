@@ -19,17 +19,19 @@ func (q *Queries) DeleteRule(ctx context.Context, id int64) error {
 }
 
 const insertRule = `-- name: InsertRule :one
-INSERT INTO rules (domain, kind, action, notes, created)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO rules (domain, kind, action, notes, created, schedule, client)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
 type InsertRuleParams struct {
-	Domain  string
-	Kind    string
-	Action  string
-	Notes   string
-	Created int64
+	Domain   string
+	Kind     string
+	Action   string
+	Notes    string
+	Created  int64
+	Schedule string
+	Client   string
 }
 
 func (q *Queries) InsertRule(ctx context.Context, arg InsertRuleParams) (int64, error) {
@@ -39,6 +41,8 @@ func (q *Queries) InsertRule(ctx context.Context, arg InsertRuleParams) (int64, 
 		arg.Action,
 		arg.Notes,
 		arg.Created,
+		arg.Schedule,
+		arg.Client,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -46,7 +50,7 @@ func (q *Queries) InsertRule(ctx context.Context, arg InsertRuleParams) (int64, 
 }
 
 const listRules = `-- name: ListRules :many
-SELECT id, domain, kind, action, notes, created
+SELECT id, domain, kind, action, notes, created, schedule, client
 FROM rules ORDER BY id
 `
 
@@ -66,6 +70,8 @@ func (q *Queries) ListRules(ctx context.Context) ([]Rule, error) {
 			&i.Action,
 			&i.Notes,
 			&i.Created,
+			&i.Schedule,
+			&i.Client,
 		); err != nil {
 			return nil, err
 		}
@@ -82,17 +88,19 @@ func (q *Queries) ListRules(ctx context.Context) ([]Rule, error) {
 
 const updateRule = `-- name: UpdateRule :exec
 UPDATE rules
-SET domain = ?, kind = ?, action = ?, notes = ?, created = ?
+SET domain = ?, kind = ?, action = ?, notes = ?, created = ?, schedule = ?, client = ?
 WHERE id = ?
 `
 
 type UpdateRuleParams struct {
-	Domain  string
-	Kind    string
-	Action  string
-	Notes   string
-	Created int64
-	ID      int64
+	Domain   string
+	Kind     string
+	Action   string
+	Notes    string
+	Created  int64
+	Schedule string
+	Client   string
+	ID       int64
 }
 
 func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) error {
@@ -102,6 +110,8 @@ func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) error {
 		arg.Action,
 		arg.Notes,
 		arg.Created,
+		arg.Schedule,
+		arg.Client,
 		arg.ID,
 	)
 	return err

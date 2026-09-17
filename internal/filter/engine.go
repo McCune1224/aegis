@@ -3,6 +3,7 @@ package filter
 import (
 	"net/netip"
 	"sync/atomic"
+	"time"
 )
 
 // Engine holds the rule set a running server answers from. Queries read the
@@ -35,8 +36,8 @@ func (e *Engine) Publish(next *RuleSet) {
 	e.current.Store(next)
 }
 
-// Decide answers one query for one client from one address against the set
-// the Engine answers from now.
-func (e *Engine) Decide(name Domain, client ClientKey, address netip.Addr) Verdict {
-	return e.current.Load().Decide(name, client, address)
+// Decide answers one query for one client from one address at one wall clock
+// against the set the Engine answers from now.
+func (e *Engine) Decide(name Domain, client ClientKey, address netip.Addr, now time.Time) Verdict {
+	return e.current.Load().Decide(name, client, address, now)
 }

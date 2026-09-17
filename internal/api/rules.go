@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"aegis/internal/filter"
@@ -15,31 +16,40 @@ import (
 )
 
 // ruleRequest is one rule as it arrives over HTTP. A nil field means keep what
-// is stored, which is what makes a one-field body an action toggle.
+// is stored, which is what makes a one-field body an action toggle. Schedule
+// and client are optional: a rule that names a schedule is only active while
+// that schedule covers the query minute, and a rule that names a client only
+// answers for that identity.
 type ruleRequest struct {
-	Domain *string `json:"domain"`
-	Kind   *string `json:"kind"`
-	Action *string `json:"action"`
-	Notes  *string `json:"notes"`
+	Domain   *string `json:"domain"`
+	Kind     *string `json:"kind"`
+	Action   *string `json:"action"`
+	Schedule *string `json:"schedule"`
+	Client   *string `json:"client"`
+	Notes    *string `json:"notes"`
 }
 
 // ruleResponse is one rule as it leaves over HTTP.
 type ruleResponse struct {
-	ID      int64  `json:"id"`
-	Domain  string `json:"domain"`
-	Kind    string `json:"kind"`
-	Action  string `json:"action"`
-	Notes   string `json:"notes,omitempty"`
-	Created string `json:"created,omitempty"`
+	ID       int64  `json:"id"`
+	Domain   string `json:"domain"`
+	Kind     string `json:"kind"`
+	Action   string `json:"action"`
+	Schedule string `json:"schedule,omitempty"`
+	Client   string `json:"client,omitempty"`
+	Notes    string `json:"notes,omitempty"`
+	Created  string `json:"created,omitempty"`
 }
 
 func ruleResponseFrom(rule store.Rule) ruleResponse {
 	response := ruleResponse{
-		ID:     rule.ID,
-		Domain: rule.Value(),
-		Kind:   rule.Kind.String(),
-		Action: rule.Action.String(),
-		Notes:  rule.Notes,
+		ID:       rule.ID,
+		Domain:   rule.Value(),
+		Kind:     rule.Kind.String(),
+		Action:   rule.Action.String(),
+		Schedule: rule.Schedule,
+		Client:   string(rule.Client),
+		Notes:    rule.Notes,
 	}
 	if !rule.Created.IsZero() {
 		response.Created = rule.Created.Format(time.RFC3339)
@@ -92,6 +102,13 @@ func (s *Server) postRule(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	ctx := r.Context()
 
+	if rule.Schedule != "" {
+		if err := s.scheduleExists(ctx, rule.Schedule); err != nil {
+			writeError(w, badRequest{err})
+			return
+		}
+	}
+
 	id, err := s.store.SaveRule(ctx, rule)
 	if err != nil {
 		writeError(w, err)
@@ -133,7 +150,7 @@ func (s *Server) putRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if request.Domain != nil || request.Kind != nil || request.Action != nil {
+	if request.Domain != nil || request.Kind != nil || request.Action != nil || request.Schedule != nil || request.Client != nil {
 		// A patch that changes any field must still leave a whole rule, so the
 		// missing pieces come from the stored one and the value is reparsed
 		// under the kind the rule will carry.
@@ -157,6 +174,18 @@ func (s *Server) putRule(w http.ResponseWriter, r *http.Request) {
 				writeError(w, badRequest{err})
 				return
 			}
+		}
+	}
+	if request.Schedule != nil {
+		rule.Schedule = strings.TrimSpace(*request.Schedule)
+	}
+	if request.Client != nil {
+		rule.Client = filter.ClientKey(strings.TrimSpace(*request.Client))
+	}
+	if rule.Schedule != "" {
+		if err := s.scheduleExists(ctx, rule.Schedule); err != nil {
+			writeError(w, badRequest{err})
+			return
 		}
 	}
 	if request.Notes != nil {
@@ -230,6 +259,12 @@ func parseRuleFields(request ruleRequest) (store.Rule, error) {
 	if err := parseRuleValue(&rule, kind, *request.Domain); err != nil {
 		return store.Rule{}, err
 	}
+	if request.Schedule != nil {
+		rule.Schedule = strings.TrimSpace(*request.Schedule)
+	}
+	if request.Client != nil {
+		rule.Client = filter.ClientKey(strings.TrimSpace(*request.Client))
+	}
 	return rule, nil
 }
 
@@ -255,6 +290,21 @@ func parseRuleValue(rule *store.Rule, kind filter.MatchKind, raw string) error {
 	}
 	rule.Kind = kind
 	return nil
+}
+
+// scheduleExists refuses a rule that names a schedule the store does not hold,
+// because a rule whose schedule never exists would fail every reload.
+func (s *Server) scheduleExists(ctx context.Context, name string) error {
+	schedules, err := s.store.Schedules(ctx)
+	if err != nil {
+		return err
+	}
+	for _, schedule := range schedules {
+		if schedule.Name == name {
+			return nil
+		}
+	}
+	return fmt.Errorf("schedule %q does not exist", name)
 }
 
 func parseRuleID(r *http.Request) (int64, error) {

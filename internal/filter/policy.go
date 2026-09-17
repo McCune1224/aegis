@@ -95,12 +95,14 @@ type ClientSpec struct {
 }
 
 // Config is everything Compile needs: the rules, the profiles that choose a
-// policy, and the clients that pick a profile.
+// policy, the clients that pick a profile, and the schedules that time-scope
+// rules.
 type Config struct {
-	Rules    []RuleSpec
-	Profiles []ProfileSpec
-	Clients  []ClientSpec
-	Default  ProfileID
+	Rules     []RuleSpec
+	Profiles  []ProfileSpec
+	Clients   []ClientSpec
+	Schedules []ScheduleSpec
+	Default   ProfileID
 }
 
 // compileProfiles resolves every profile to a concrete Policy by walking its

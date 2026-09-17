@@ -4,6 +4,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -12,6 +13,10 @@ import (
 )
 
 var source = filter.Source{ID: "test", Name: "Test list"}
+
+// testTime is the wall clock every verdict in this package is asked at. No
+// test here compiles a schedule, so any fixed time works.
+var testTime = time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
 
 func mustParse(name string) filter.Domain {
 	d, err := filter.ParseDomain(name)
@@ -205,13 +210,13 @@ func TestParsedListDecidesAQueryAndNamesTheLineThatDecidedIt(t *testing.T) {
 	engine := filter.New()
 	engine.Publish(set)
 
-	blocked := engine.Decide(mustParse("ads.example.com"), "", netip.Addr{})
+	blocked := engine.Decide(mustParse("ads.example.com"), "", netip.Addr{}, testTime)
 	require.Equal(t, filter.ActionBlock, blocked.Action)
 	require.NotNil(t, blocked.Match)
 	require.Equal(t, "test:2", blocked.Match.RuleID)
 	require.Equal(t, "Test list", blocked.Match.Source.Name)
 
-	allowed := engine.Decide(mustParse("news.ads.example.com"), "", netip.Addr{})
+	allowed := engine.Decide(mustParse("news.ads.example.com"), "", netip.Addr{}, testTime)
 	require.Equal(t, filter.ActionAllow, allowed.Action)
 	require.NotNil(t, allowed.Match)
 	require.Equal(t, "test:3", allowed.Match.RuleID)

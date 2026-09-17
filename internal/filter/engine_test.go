@@ -13,7 +13,7 @@ import (
 func TestEngineAllowsBeforeAnythingIsPublished(t *testing.T) {
 	eng := filter.New()
 
-	got := eng.Decide(mustParse("example.com"), "", noAddress)
+	got := eng.Decide(mustParse("example.com"), "", noAddress, testNow)
 
 	require.Equal(t, filter.ActionAllow, got.Action)
 	require.Nil(t, got.Match)
@@ -23,10 +23,10 @@ func TestEngineDecideUsesTheLatestPublishedSet(t *testing.T) {
 	eng := filter.New()
 
 	eng.Publish(compile(t, hagezi("block-ads", filter.MatchSubdomains, "doubleclick.net")))
-	require.Equal(t, filter.ActionBlock, eng.Decide(mustParse("ads.doubleclick.net"), "", noAddress).Action)
+	require.Equal(t, filter.ActionBlock, eng.Decide(mustParse("ads.doubleclick.net"), "", noAddress, testNow).Action)
 
 	eng.Publish(compile(t))
-	require.Equal(t, filter.ActionAllow, eng.Decide(mustParse("ads.doubleclick.net"), "", noAddress).Action)
+	require.Equal(t, filter.ActionAllow, eng.Decide(mustParse("ads.doubleclick.net"), "", noAddress, testNow).Action)
 }
 
 func TestEngineSnapshotAnswersWithTheSetItWasTakenFrom(t *testing.T) {
@@ -36,8 +36,8 @@ func TestEngineSnapshotAnswersWithTheSetItWasTakenFrom(t *testing.T) {
 	snapshot := eng.Snapshot()
 	eng.Publish(compile(t))
 
-	require.Equal(t, filter.ActionBlock, snapshot.Decide(mustParse("ads.doubleclick.net"), "", noAddress).Action)
-	require.Equal(t, filter.ActionAllow, eng.Decide(mustParse("ads.doubleclick.net"), "", noAddress).Action)
+	require.Equal(t, filter.ActionBlock, snapshot.Decide(mustParse("ads.doubleclick.net"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionAllow, eng.Decide(mustParse("ads.doubleclick.net"), "", noAddress, testNow).Action)
 }
 
 func TestEngineRefusesToPublishNil(t *testing.T) {
@@ -68,7 +68,7 @@ func TestEngineSwapIsAtomicUnderLoad(t *testing.T) {
 					return
 				default:
 				}
-				got := eng.Decide(name, "", noAddress)
+				got := eng.Decide(name, "", noAddress, testNow)
 				switch {
 				case got.Action == filter.ActionAllow && got.Match == nil:
 				case got.Action == filter.ActionBlock && got.Match != nil && got.Match.RuleID == "block-ads":
