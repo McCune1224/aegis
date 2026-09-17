@@ -75,17 +75,25 @@ func ParseList(r io.Reader, source filter.Source, format Format) (ParseResult, e
 		entries := parseLine(scanner.Text())
 		kept := 0
 		for _, entry := range entries {
-			domain, err := filter.ParseDomain(entry.name)
-			if err != nil {
-				continue
-			}
-			result.Rules = append(result.Rules, filter.RuleSpec{
+			spec := filter.RuleSpec{
 				ID:     lineRef(source, line, kept),
 				Source: source,
 				Kind:   entry.kind,
-				Domain: domain,
 				Action: entry.action,
-			})
+			}
+			var err error
+			switch entry.kind {
+			case filter.MatchExact, filter.MatchSubdomains:
+				spec.Domain, err = filter.ParseDomain(entry.value)
+			case filter.MatchWildcard, filter.MatchRegex:
+				spec.Pattern, err = filter.ParsePattern(entry.kind, entry.value)
+			default:
+				err = fmt.Errorf("blocklist: kind %s carries no line syntax", entry.kind)
+			}
+			if err != nil {
+				continue
+			}
+			result.Rules = append(result.Rules, spec)
 			kept++
 		}
 		if kept == 0 {
@@ -98,10 +106,11 @@ func ParseList(r io.Reader, source filter.Source, format Format) (ParseResult, e
 	return result, nil
 }
 
-// entry is one rule as a line parser found it, before the name is validated and
-// before it carries a rule ID.
+// entry is one rule as a line parser found it. Value is the name for exact
+// and subdomains kinds and the pattern text for wildcard and regex; ParseList
+// validates it into the typed payload.
 type entry struct {
-	name   string
+	value  string
 	kind   filter.MatchKind
 	action filter.Action
 }
@@ -112,6 +121,15 @@ var lineParsers = [formatCount]lineParser{
 	FormatHosts:   parseHostsLine,
 	FormatDomains: parseDomainsLine,
 	FormatAdBlock: parseAdBlockLine,
+}
+
+// nameKind labels a bare name from a list. A name holding a * can only be a
+// wildcard, since * is not a byte a DNS name carries.
+func nameKind(value string) filter.MatchKind {
+	if strings.Contains(value, "*") {
+		return filter.MatchWildcard
+	}
+	return filter.MatchSubdomains
 }
 
 // parseHostsLine reads the hosts layout, where an address precedes one or more
@@ -131,7 +149,7 @@ func parseHostsLine(text string) []entry {
 	}
 	out := make([]entry, 0, len(fields))
 	for _, name := range fields {
-		out = append(out, entry{name: name, kind: filter.MatchSubdomains, action: filter.ActionBlock})
+		out = append(out, entry{value: name, kind: nameKind(name), action: filter.ActionBlock})
 	}
 	return out
 }
@@ -142,12 +160,12 @@ func parseDomainsLine(text string) []entry {
 	if len(fields) == 0 {
 		return nil
 	}
-	return []entry{{name: fields[0], kind: filter.MatchSubdomains, action: filter.ActionBlock}}
+	return []entry{{value: fields[0], kind: nameKind(fields[0]), action: filter.ActionBlock}}
 }
 
 // parseAdBlockLine reads the network rules an AdBlock list can express in DNS.
-// Element hiding, regular expressions, and scriptlet rules have no DNS form, so
-// they return nothing and the caller counts them as skipped.
+// Element hiding and scriptlet rules have no DNS form, so they return nothing
+// and the caller counts them as skipped.
 // See https://adguard.com/kb/general/ad-filtering/create-own-filters/.
 func parseAdBlockLine(text string) []entry {
 	line := strings.TrimSpace(text)
@@ -161,6 +179,11 @@ func parseAdBlockLine(text string) []entry {
 		line = rest
 	}
 
+	// A rule between slashes is a regular expression.
+	if len(line) > 1 && strings.HasPrefix(line, "/") && strings.HasSuffix(line, "/") {
+		return []entry{{value: line[1 : len(line)-1], kind: filter.MatchRegex, action: action}}
+	}
+
 	name, ok := strings.CutPrefix(line, "||")
 	if !ok {
 		return nil
@@ -172,7 +195,7 @@ func parseAdBlockLine(text string) []entry {
 	if name == "" {
 		return nil
 	}
-	return []entry{{name: name, kind: filter.MatchSubdomains, action: action}}
+	return []entry{{value: name, kind: nameKind(name), action: action}}
 }
 
 func stripComment(line string, marker byte) string {

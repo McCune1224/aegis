@@ -4,6 +4,9 @@ package filter
 
 import (
 	"fmt"
+	"net/netip"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -102,6 +105,16 @@ const (
 	// MatchSubdomains covers the rule's domain and every name under it, so a
 	// rule for example.com also covers ads.example.com.
 	MatchSubdomains
+	// MatchWildcard matches names built from the pattern's labels, where a *
+	// label stands for exactly one arbitrary label, the way a DNS zone
+	// wildcard does. Unlike subdomains, *.ads.example covers srv.ads.example
+	// but not ads.example itself and not a.b.ads.example.
+	MatchWildcard
+	// MatchRegex matches the name against a Go regular expression. Matching is
+	// case-insensitive and unanchored, so ^ and $ belong to the author.
+	MatchRegex
+	// MatchCIDR matches the address the query came from against a network.
+	MatchCIDR
 
 	matchKindCount
 )
@@ -109,6 +122,9 @@ const (
 var matchKindNames = [matchKindCount]string{
 	MatchExact:      "exact",
 	MatchSubdomains: "subdomains",
+	MatchWildcard:   "wildcard",
+	MatchRegex:      "regex",
+	MatchCIDR:       "cidr",
 }
 
 func (k MatchKind) String() string {
@@ -136,12 +152,17 @@ type Source struct {
 }
 
 // RuleSpec is one rule as it arrives from a parsed blocklist or from config.
+// The kind names which payload it matches on: a Domain for exact and
+// subdomains, a Pattern for wildcard and regex, a Network for cidr. Compile
+// rejects a rule whose payload does not fit its kind.
 type RuleSpec struct {
-	ID     string
-	Source Source
-	Kind   MatchKind
-	Domain Domain
-	Action Action
+	ID      string
+	Source  Source
+	Kind    MatchKind
+	Domain  Domain
+	Pattern string
+	Network netip.Prefix
+	Action  Action
 }
 
 // Provenance names the rule that produced a verdict. The query log and the
@@ -167,6 +188,8 @@ type Verdict struct {
 type RuleSet struct {
 	exact      map[string]*entry
 	subdomains map[string]*entry
+	patterns   []patternRule
+	networks   []networkRule
 	clients    map[ClientKey]Policy
 	fallback   Policy
 	rules      int
@@ -182,6 +205,21 @@ type candidate struct {
 	labels     int
 	exact      bool
 	order      int
+}
+
+// patternRule is one compiled wildcard or regex rule. A wildcard compiles to
+// an anchored regexp, so both kinds match through one path and Decide never
+// branches on which of the two it is looking at.
+type patternRule struct {
+	candidate candidate
+	re        *regexp.Regexp
+}
+
+// networkRule is one CIDR rule. The slice is sorted longest prefix first, so
+// the first prefix that contains the address is the most specific one.
+type networkRule struct {
+	prefix netip.Prefix
+	best   *candidate
 }
 
 // Compile resolves every profile and client and indexes the rules for lookup.
@@ -215,50 +253,98 @@ func (rs *RuleSet) Len() int { return rs.rules }
 
 func (rs *RuleSet) indexRules(specs []RuleSpec) error {
 	rs.rules = len(specs)
+	byNetwork := make(map[netip.Prefix]*entry)
 	for order, spec := range specs {
-		if spec.Domain.name == "" {
-			return fmt.Errorf("filter: rule %q has no domain", spec.ID)
-		}
 		if spec.Action != ActionAllow && spec.Action != ActionBlock {
 			return fmt.Errorf("filter: rule %q has unknown action %d", spec.ID, spec.Action)
 		}
 
-		var (
-			table map[string]*entry
-			exact bool
-		)
 		switch spec.Kind {
-		case MatchExact:
-			table, exact = rs.exact, true
-		case MatchSubdomains:
-			table, exact = rs.subdomains, false
+		case MatchExact, MatchSubdomains:
+			if spec.Domain.name == "" {
+				return fmt.Errorf("filter: rule %q needs a domain", spec.ID)
+			}
+			if spec.Pattern != "" || spec.Network.IsValid() {
+				return fmt.Errorf("filter: rule %q carries a payload kind %s does not use", spec.ID, spec.Kind)
+			}
+			table, exact := rs.exact, true
+			if spec.Kind == MatchSubdomains {
+				table, exact = rs.subdomains, false
+			}
+			e := table[spec.Domain.name]
+			if e == nil {
+				e = &entry{}
+				table[spec.Domain.name] = e
+			}
+			e.best = better(e.best, &candidate{
+				provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Domain.name},
+				action:     spec.Action,
+				labels:     countLabels(spec.Domain.name),
+				exact:      exact,
+				order:      order,
+			})
+		case MatchWildcard, MatchRegex:
+			if spec.Domain.name != "" || spec.Network.IsValid() {
+				return fmt.Errorf("filter: rule %q carries a payload kind %s does not use", spec.ID, spec.Kind)
+			}
+			re, err := compilePattern(spec.Kind, spec.Pattern)
+			if err != nil {
+				return fmt.Errorf("filter: rule %q: %w", spec.ID, err)
+			}
+			rs.patterns = append(rs.patterns, patternRule{
+				candidate: candidate{
+					provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Pattern},
+					action:     spec.Action,
+					order:      len(rs.patterns),
+				},
+				re: re,
+			})
+		case MatchCIDR:
+			if spec.Domain.name != "" || spec.Pattern != "" || !spec.Network.IsValid() {
+				return fmt.Errorf("filter: rule %q needs a network and no other payload", spec.ID)
+			}
+			e := byNetwork[spec.Network]
+			if e == nil {
+				e = &entry{}
+				byNetwork[spec.Network] = e
+			}
+			e.best = better(e.best, &candidate{
+				provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Network.String()},
+				action:     spec.Action,
+				order:      order,
+			})
 		default:
 			return fmt.Errorf("filter: rule %q has unknown match kind %d", spec.ID, spec.Kind)
 		}
-
-		e := table[spec.Domain.name]
-		if e == nil {
-			e = &entry{}
-			table[spec.Domain.name] = e
-		}
-		e.best = better(e.best, &candidate{
-			provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Domain.name},
-			action:     spec.Action,
-			labels:     countLabels(spec.Domain.name),
-			exact:      exact,
-			order:      order,
-		})
 	}
+
+	rs.networks = make([]networkRule, 0, len(byNetwork))
+	for prefix, e := range byNetwork {
+		rs.networks = append(rs.networks, networkRule{prefix: prefix, best: e.best})
+	}
+	sort.Slice(rs.networks, func(i, j int) bool {
+		return rs.networks[i].prefix.Bits() > rs.networks[j].prefix.Bits()
+	})
 	return nil
 }
 
-// Decide returns the verdict for one name and one client. It looks up the
-// client's policy once, then the whole name and each parent, so its cost
-// follows the label count and not the rule count.
-func (rs *RuleSet) Decide(name Domain, client ClientKey) Verdict {
+// Decide returns the verdict for one name, one client, and the address the
+// query came from. It looks up the client's policy once, then the whole name
+// and each parent, so its cost follows the label count and not the rule count.
+//
+// A rule that matches the client's network outranks any rule that only matches
+// the domain: an exempt network is exempt however blocking the lists are, and
+// a locked network is locked however permissive the domain rules are. Within
+// one dimension the tiers, specificity, and declaration order decide, so the
+// result never depends on map iteration.
+func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr) Verdict {
 	policy := rs.fallback
 	if specific, exists := rs.clients[client]; exists {
 		policy = specific
+	}
+
+	if best := rs.networkMatch(address); best != nil {
+		return Verdict{Action: best.action, Match: &best.provenance, Policy: policy}
 	}
 
 	var best *candidate
@@ -279,10 +365,33 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey) Verdict {
 		start += dot + 1
 	}
 
+	// A pattern ranks below an indexed rule of the same tier, since a pattern
+	// carries no specificity to compare. The action is the tier winner either
+	// way, so this orders only the provenance.
+	for i := range rs.patterns {
+		if rs.patterns[i].re.MatchString(name.name) {
+			best = better(best, &rs.patterns[i].candidate)
+		}
+	}
+
 	if best == nil {
 		return Verdict{Action: ActionAllow, Policy: policy}
 	}
 	return Verdict{Action: best.action, Match: &best.provenance, Policy: policy}
+}
+
+// networkMatch returns the most specific CIDR rule that claims the address.
+func (rs *RuleSet) networkMatch(address netip.Addr) *candidate {
+	if len(rs.networks) == 0 || !address.IsValid() {
+		return nil
+	}
+	addr := address.Unmap()
+	for i := range rs.networks {
+		if rs.networks[i].prefix.Contains(addr) {
+			return rs.networks[i].best
+		}
+	}
+	return nil
 }
 
 // better picks between two candidates for the same name. Tie-breaking is by

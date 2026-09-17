@@ -62,7 +62,7 @@ type stubDecider struct {
 }
 
 func (d stubDecider) Decide(name filter.Domain, address netip.Addr) filter.Verdict {
-	return d.set.Decide(name, d.clients.Key(address))
+	return d.set.Decide(name, d.clients.Key(address), address)
 }
 
 // deciderFor builds a decider whose default profile answers blocked names with

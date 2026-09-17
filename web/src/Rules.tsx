@@ -1,8 +1,20 @@
 import { createSignal, For, Show } from "solid-js";
 import type { Rule, RuleInput } from "./api";
 
-const kinds = ["exact", "subdomains"];
+const kinds = ["exact", "subdomains", "wildcard", "regex", "cidr"];
 const actions = ["block", "allow"];
+
+const placeholders: Record<string, string> = {
+  exact: "ads.example.com",
+  subdomains: "ads.example.com",
+  wildcard: "*.ads.example",
+  regex: "^ads[0-9]+\\.example$",
+  cidr: "10.0.0.0/16",
+};
+
+function placeholderFor(kind: string): string {
+  return placeholders[kind] ?? "ads.example.com";
+}
 
 type Props = {
   rules: Rule[];
@@ -105,11 +117,11 @@ export default function Rules(props: Props) {
       <form onSubmit={(event) => void submit(event)}>
         <h2>New rule</h2>
         <label>
-          Domain
+          Domain or pattern
           <input
             data-testid="rule-domain"
             value={domain()}
-            placeholder="ads.example.com"
+            placeholder={placeholderFor(kind())}
             onInput={(event) => setDomain(event.currentTarget.value)}
           />
         </label>

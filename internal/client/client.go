@@ -1,6 +1,7 @@
 // Package client resolves a source address to the identity that policy keys on.
-// Identity lives here so the filter package never reads an address and never
-// queries a lease table.
+// Identity lives here so the filter package never resolves one: it receives an
+// address only as the payload its CIDR rules match on, and it never queries a
+// lease table.
 package client
 
 import (

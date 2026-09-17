@@ -84,7 +84,7 @@ func TestDecideAppliesAllowBeforeBlock(t *testing.T) {
 		},
 	)
 
-	got := rs.Decide(domain(t, "news.doubleclick.net"), "")
+	got := rs.Decide(domain(t, "news.doubleclick.net"), "", noAddress)
 
 	require.Equal(t, filter.ActionAllow, got.Action)
 	require.NotNil(t, got.Match)
@@ -95,7 +95,7 @@ func TestDecideAppliesAllowBeforeBlock(t *testing.T) {
 func TestDecideSubdomainRuleMatchesTheDomainItself(t *testing.T) {
 	rs := compile(t, hagezi("block-ads", filter.MatchSubdomains, "doubleclick.net"))
 
-	got := rs.Decide(domain(t, "doubleclick.net"), "")
+	got := rs.Decide(domain(t, "doubleclick.net"), "", noAddress)
 
 	require.Equal(t, filter.ActionBlock, got.Action)
 	require.NotNil(t, got.Match)
@@ -105,15 +105,15 @@ func TestDecideSubdomainRuleMatchesTheDomainItself(t *testing.T) {
 func TestDecideExactRuleDoesNotMatchChildName(t *testing.T) {
 	rs := compile(t, hagezi("block-exact", filter.MatchExact, "ads.example.com"))
 
-	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "cdn.ads.example.com"), "").Action)
-	require.Nil(t, rs.Decide(domain(t, "cdn.ads.example.com"), "").Match)
-	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "ads.example.com"), "").Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "cdn.ads.example.com"), "", noAddress).Action)
+	require.Nil(t, rs.Decide(domain(t, "cdn.ads.example.com"), "", noAddress).Match)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "ads.example.com"), "", noAddress).Action)
 }
 
 func TestDecideWithoutAMatchAllows(t *testing.T) {
 	rs := compile(t)
 
-	got := rs.Decide(domain(t, "example.com"), "")
+	got := rs.Decide(domain(t, "example.com"), "", noAddress)
 
 	require.Equal(t, filter.ActionAllow, got.Action)
 	require.Nil(t, got.Match)
@@ -131,7 +131,7 @@ func TestDecidePrefersTheMoreSpecificRule(t *testing.T) {
 		},
 	)
 
-	got := rs.Decide(domain(t, "x.ads.doubleclick.net"), "")
+	got := rs.Decide(domain(t, "x.ads.doubleclick.net"), "", noAddress)
 
 	require.Equal(t, filter.ActionBlock, got.Action)
 	require.NotNil(t, got.Match)
@@ -150,7 +150,7 @@ func TestDecidePrefersExactOverSubdomain(t *testing.T) {
 		},
 	)
 
-	got := rs.Decide(domain(t, "ads.example.com"), "")
+	got := rs.Decide(domain(t, "ads.example.com"), "", noAddress)
 
 	require.NotNil(t, got.Match)
 	require.Equal(t, "block-exact", got.Match.RuleID)
@@ -168,7 +168,7 @@ func TestDecideBreaksTiesByDeclarationOrder(t *testing.T) {
 		},
 	)
 
-	got := rs.Decide(domain(t, "example.com"), "")
+	got := rs.Decide(domain(t, "example.com"), "", noAddress)
 
 	require.NotNil(t, got.Match)
 	require.Equal(t, "first", got.Match.RuleID)
@@ -193,7 +193,7 @@ func TestDecideKeepsAllowFromOneSourceWhenAnotherBlocks(t *testing.T) {
 		},
 	)
 
-	got := rs.Decide(domain(t, "www.example.com"), "")
+	got := rs.Decide(domain(t, "www.example.com"), "", noAddress)
 
 	require.Equal(t, filter.ActionAllow, got.Action)
 	require.NotNil(t, got.Match)

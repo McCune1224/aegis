@@ -1,6 +1,7 @@
 package blocklist_test
 
 import (
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestParseListReadsOneDomainPerLineAndCountsWhatItCannotUse(t *testing.T) {
 	const fixture = `# comment
 example.com
 ads.example.com   # trailing comment
-*.wildcard.example
+bad..name.example
 `
 
 	got, err := blocklist.ParseList(strings.NewReader(fixture), source, blocklist.FormatDomains)
@@ -87,8 +88,73 @@ example.com##.advert
 		rule("test:3", "ads.example.com", filter.ActionBlock),
 		rule("test:4", "allowed.example.com", filter.ActionAllow),
 		rule("test:5", "tracker.example.com", filter.ActionBlock),
+		{
+			ID:      "test:7",
+			Source:  source,
+			Kind:    filter.MatchRegex,
+			Pattern: "regex.*",
+			Action:  filter.ActionBlock,
+		},
 	}, got.Rules)
-	require.Equal(t, 5, got.Skipped)
+	require.Equal(t, 4, got.Skipped)
+}
+
+func TestParseListReadsAdBlockRegexAndWildcardLines(t *testing.T) {
+	const fixture = `! comment
+/^ads[0-9]+\.tracker\.example$/
+@@/allow[0-9]+\.example/
+||ads.*.example^
+||weird*/path^
+`
+
+	got, err := blocklist.ParseList(strings.NewReader(fixture), source, blocklist.FormatAdBlock)
+
+	require.NoError(t, err)
+	require.Equal(t, []filter.RuleSpec{
+		{
+			ID:      "test:2",
+			Source:  source,
+			Kind:    filter.MatchRegex,
+			Pattern: `^ads[0-9]+\.tracker\.example$`,
+			Action:  filter.ActionBlock,
+		},
+		{
+			ID:      "test:3",
+			Source:  source,
+			Kind:    filter.MatchRegex,
+			Pattern: `allow[0-9]+\.example`,
+			Action:  filter.ActionAllow,
+		},
+		{
+			ID:      "test:4",
+			Source:  source,
+			Kind:    filter.MatchWildcard,
+			Pattern: "ads.*.example",
+			Action:  filter.ActionBlock,
+		},
+	}, got.Rules)
+	require.Equal(t, 2, got.Skipped)
+}
+
+func TestParseListReadsWildcardNamesFromNameFormats(t *testing.T) {
+	const fixture = `*.ads.example
+plain.example.com
+`
+
+	got, err := blocklist.ParseList(strings.NewReader(fixture), source, blocklist.FormatDomains)
+
+	require.NoError(t, err)
+	require.Equal(t, []filter.RuleSpec{
+		{
+			ID:      "test:1",
+			Source:  source,
+			Kind:    filter.MatchWildcard,
+			Pattern: "*.ads.example",
+			Action:  filter.ActionBlock,
+		},
+		rule("test:2", "plain.example.com", filter.ActionBlock),
+	}, got.Rules)
+	require.Equal(t, 0, got.Skipped)
 }
 
 func TestParseListGivesEachHostnameOnALineItsOwnRule(t *testing.T) {
@@ -139,13 +205,13 @@ func TestParsedListDecidesAQueryAndNamesTheLineThatDecidedIt(t *testing.T) {
 	engine := filter.New()
 	engine.Publish(set)
 
-	blocked := engine.Decide(mustParse("ads.example.com"), "")
+	blocked := engine.Decide(mustParse("ads.example.com"), "", netip.Addr{})
 	require.Equal(t, filter.ActionBlock, blocked.Action)
 	require.NotNil(t, blocked.Match)
 	require.Equal(t, "test:2", blocked.Match.RuleID)
 	require.Equal(t, "Test list", blocked.Match.Source.Name)
 
-	allowed := engine.Decide(mustParse("news.ads.example.com"), "")
+	allowed := engine.Decide(mustParse("news.ads.example.com"), "", netip.Addr{})
 	require.Equal(t, filter.ActionAllow, allowed.Action)
 	require.NotNil(t, allowed.Match)
 	require.Equal(t, "test:3", allowed.Match.RuleID)
