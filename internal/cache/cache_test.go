@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,15 +26,18 @@ func (c *clock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
 // stubUpstream counts Resolve calls. With no answer set it replies to each A
 // query with a distinct address, so a cached answer is distinguishable from a
-// fresh fetch even if the counter alone would not show it.
+// fresh fetch even if the counter alone would not show it. The counter is
+// atomic because concurrent cold misses call it from several goroutines.
 type stubUpstream struct {
-	calls  int
+	calls  atomic.Int64
 	answer func(req *mdns.Msg) *mdns.Msg
 	err    error
 }
 
+func (s *stubUpstream) saw() int { return int(s.calls.Load()) }
+
 func (s *stubUpstream) Resolve(_ context.Context, req *mdns.Msg) (*mdns.Msg, error) {
-	s.calls++
+	n := int(s.calls.Add(1))
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -42,9 +46,9 @@ func (s *stubUpstream) Resolve(_ context.Context, req *mdns.Msg) (*mdns.Msg, err
 	}
 	switch req.Question[0].Qtype {
 	case mdns.TypeAAAA:
-		return aaaaAnswer(req, s.calls), nil
+		return aaaaAnswer(req, n), nil
 	default:
-		return aAnswer(req, s.calls, 300), nil
+		return aAnswer(req, n, 300), nil
 	}
 }
 
@@ -119,12 +123,12 @@ func TestResolveAnswersARepeatFromTheCacheAndTheUpstreamSeesOneRequest(t *testin
 
 	first, err := resolver.Resolve(context.Background(), query("allowed.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, 1, upstream.saw())
 	requireA(t, first, "203.0.113.1")
 
 	second, err := resolver.Resolve(context.Background(), query("allowed.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 1, upstream.calls, "the repeat must come from the cache")
+	require.Equal(t, 1, upstream.saw(), "the repeat must come from the cache")
 	requireA(t, second, "203.0.113.1")
 	require.Equal(t, uint16(4242), second.Id)
 	require.Equal(t, "allowed.example.net.", second.Question[0].Name)
@@ -143,7 +147,7 @@ func TestResolveServesTheCachedNegativeAnswer(t *testing.T) {
 		_, isSOA := resp.Ns[0].(*mdns.SOA)
 		require.True(t, isSOA)
 	}
-	require.Equal(t, 1, upstream.calls, "the negative answer must be cached")
+	require.Equal(t, 1, upstream.saw(), "the negative answer must be cached")
 }
 
 func TestResolveDecaysTheCachedTtlByAge(t *testing.T) {
@@ -153,18 +157,18 @@ func TestResolveDecaysTheCachedTtlByAge(t *testing.T) {
 
 	_, err := resolver.Resolve(context.Background(), query("aged.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, 1, upstream.saw())
 
 	fake.Advance(40 * time.Second)
 	aged, err := resolver.Resolve(context.Background(), query("aged.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, 1, upstream.saw())
 	require.Equal(t, uint32(260), aged.Answer[0].Header().Ttl)
 
 	fake.Advance(300 * time.Second)
 	_, err = resolver.Resolve(context.Background(), query("aged.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 2, upstream.calls, "an expired entry asks upstream again")
+	require.Equal(t, 2, upstream.saw(), "an expired entry asks upstream again")
 }
 
 func TestResolveClampsTheTtlToTheFloor(t *testing.T) {
@@ -177,18 +181,18 @@ func TestResolveClampsTheTtlToTheFloor(t *testing.T) {
 
 	_, err := resolver.Resolve(context.Background(), query("churn.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, 1, upstream.saw())
 
 	fake.Advance(2 * time.Second)
 	early, err := resolver.Resolve(context.Background(), query("churn.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 1, upstream.calls, "the floor holds a one second answer for five seconds")
+	require.Equal(t, 1, upstream.saw(), "the floor holds a one second answer for five seconds")
 	require.Equal(t, uint32(3), early.Answer[0].Header().Ttl)
 
 	fake.Advance(4 * time.Second)
 	_, err = resolver.Resolve(context.Background(), query("churn.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 2, upstream.calls, "expiry follows the clamped TTL, not the upstream one")
+	require.Equal(t, 2, upstream.saw(), "expiry follows the clamped TTL, not the upstream one")
 }
 
 func TestResolveClampsTheTtlToTheCeiling(t *testing.T) {
@@ -201,18 +205,18 @@ func TestResolveClampsTheTtlToTheCeiling(t *testing.T) {
 
 	_, err := resolver.Resolve(context.Background(), query("stable.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, 1, upstream.saw())
 
 	fake.Advance(3599 * time.Second)
 	late, err := resolver.Resolve(context.Background(), query("stable.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, 1, upstream.saw())
 	require.Equal(t, uint32(1), late.Answer[0].Header().Ttl)
 
 	fake.Advance(2 * time.Second)
 	_, err = resolver.Resolve(context.Background(), query("stable.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 2, upstream.calls, "a day-long TTL still expires at the ceiling")
+	require.Equal(t, 2, upstream.saw(), "a day-long TTL still expires at the ceiling")
 }
 
 func TestResolveNeverCachesServfail(t *testing.T) {
@@ -224,7 +228,7 @@ func TestResolveNeverCachesServfail(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, mdns.RcodeServerFailure, resp.Rcode)
 	}
-	require.Equal(t, 2, upstream.calls)
+	require.Equal(t, 2, upstream.saw())
 }
 
 func TestResolveNeverCachesAnError(t *testing.T) {
@@ -233,11 +237,11 @@ func TestResolveNeverCachesAnError(t *testing.T) {
 
 	_, err := resolver.Resolve(context.Background(), query("dark.example.net.", mdns.TypeA))
 	require.Error(t, err)
-	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, 1, upstream.saw())
 
 	_, err = resolver.Resolve(context.Background(), query("dark.example.net.", mdns.TypeA))
 	require.Error(t, err)
-	require.Equal(t, 2, upstream.calls)
+	require.Equal(t, 2, upstream.saw())
 }
 
 func TestResolveKeysOnNameAndTypeCaseInsensitively(t *testing.T) {
@@ -248,11 +252,11 @@ func TestResolveKeysOnNameAndTypeCaseInsensitively(t *testing.T) {
 	require.NoError(t, err)
 	_, err = resolver.Resolve(context.Background(), query("mixed.case.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 1, upstream.calls, "the name key ignores case")
+	require.Equal(t, 1, upstream.saw(), "the name key ignores case")
 
 	_, err = resolver.Resolve(context.Background(), query("mixed.case.example.net.", mdns.TypeAAAA))
 	require.NoError(t, err)
-	require.Equal(t, 2, upstream.calls, "each record type holds its own entry")
+	require.Equal(t, 2, upstream.saw(), "each record type holds its own entry")
 }
 
 func TestResolveEvictsTheLeastRecentlyUsedEntry(t *testing.T) {
@@ -265,19 +269,19 @@ func TestResolveEvictsTheLeastRecentlyUsedEntry(t *testing.T) {
 	require.NoError(t, err)
 	_, err = resolver.Resolve(context.Background(), query("a.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 2, upstream.calls, "a was touched, so a stays")
+	require.Equal(t, 2, upstream.saw(), "a was touched, so a stays")
 
 	_, err = resolver.Resolve(context.Background(), query("c.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 3, upstream.calls)
+	require.Equal(t, 3, upstream.saw())
 
 	_, err = resolver.Resolve(context.Background(), query("a.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 3, upstream.calls, "a survived the eviction")
+	require.Equal(t, 3, upstream.saw(), "a survived the eviction")
 
 	_, err = resolver.Resolve(context.Background(), query("b.example.net.", mdns.TypeA))
 	require.NoError(t, err)
-	require.Equal(t, 4, upstream.calls, "b was the least recently used and was evicted")
+	require.Equal(t, 4, upstream.saw(), "b was the least recently used and was evicted")
 }
 
 func TestConcurrentResolveSharesEntries(t *testing.T) {
@@ -302,7 +306,7 @@ func TestConcurrentResolveSharesEntries(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	require.Greater(t, upstream.calls, 0)
+	require.Greater(t, upstream.saw(), 0)
 }
 
 func TestNewRejectsAConfigWithoutAnUpstream(t *testing.T) {
