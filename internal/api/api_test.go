@@ -37,6 +37,11 @@ type harness struct {
 // serve wires them, so a mutation travels the whole path to a wire answer.
 func startHarness(t *testing.T) *harness {
 	t.Helper()
+	return startHarnessWithClock(t, nil)
+}
+
+func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
+	t.Helper()
 	ctx := t.Context()
 
 	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "aegis.db"))
@@ -44,7 +49,11 @@ func startHarness(t *testing.T) *harness {
 	t.Cleanup(func() { _ = database.Close() })
 
 	lists := []runtime.ListFile{listFileWith(t, "ads.example.com\n")}
-	rt := runtime.New(database, lists, quietLogger())
+	var options []runtime.Option
+	if now != nil {
+		options = append(options, runtime.WithClock(now))
+	}
+	rt := runtime.New(database, lists, quietLogger(), options...)
 	require.NoError(t, rt.Reload(ctx))
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(2*time.Second), rt, quietLogger())
 

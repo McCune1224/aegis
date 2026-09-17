@@ -64,6 +64,24 @@ type scheduledRule struct {
 	match     func(name string) bool
 }
 
+// ValidateSchedule reports whether a schedule is one Compile accepts. The
+// API calls it before storing, so a malformed schedule is refused with the
+// request rather than discovered at the next reload.
+func ValidateSchedule(spec ScheduleSpec) error {
+	if spec.Name == "" {
+		return fmt.Errorf("filter: a schedule has no name")
+	}
+	if len(spec.Windows) == 0 {
+		return fmt.Errorf("filter: schedule %q has no window", spec.Name)
+	}
+	for _, window := range spec.Windows {
+		if err := validateWindow(window); err != nil {
+			return fmt.Errorf("filter: schedule %q: %w", spec.Name, err)
+		}
+	}
+	return nil
+}
+
 // compileSchedules validates every schedule and folds recurrence and overlap
 // into one table: the winner for every minute of the week, keyed by wall
 // clock. Daylight saving needs no special case, because the table is indexed
@@ -77,19 +95,11 @@ func compileSchedules(specs []ScheduleSpec) ([]compiledSchedule, [minutesPerWeek
 	var bestPriority [minutesPerWeek]int
 
 	for i, spec := range specs {
-		if spec.Name == "" {
-			return nil, winner, fmt.Errorf("filter: a schedule has no name")
+		if err := ValidateSchedule(spec); err != nil {
+			return nil, winner, err
 		}
 		if _, exists := byName[spec.Name]; exists {
 			return nil, winner, fmt.Errorf("filter: schedule %q is defined twice", spec.Name)
-		}
-		if len(spec.Windows) == 0 {
-			return nil, winner, fmt.Errorf("filter: schedule %q has no window", spec.Name)
-		}
-		for _, window := range spec.Windows {
-			if err := validateWindow(window); err != nil {
-				return nil, winner, fmt.Errorf("filter: schedule %q: %w", spec.Name, err)
-			}
 		}
 		byName[spec.Name] = i
 		compiled = append(compiled, compiledSchedule{name: spec.Name})

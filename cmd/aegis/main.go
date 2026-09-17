@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	// Schedules key on local wall-clock time, and release targets such as
+	// routers ship no zoneinfo database, so the zone tables ride in the binary.
+	_ "time/tzdata"
+
 	"github.com/spf13/cobra"
 )
 

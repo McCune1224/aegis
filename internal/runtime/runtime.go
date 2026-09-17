@@ -114,10 +114,11 @@ func (r *Runtime) publish(ctx context.Context) error {
 	rules = append(rules, listRules...)
 	rules = append(rules, r.sourceRules...)
 	set, err := filter.Compile(filter.Config{
-		Rules:    rules,
-		Profiles: cfg.Profiles,
-		Clients:  cfg.ClientSpecs(),
-		Default:  cfg.Default,
+		Rules:     rules,
+		Profiles:  cfg.Profiles,
+		Clients:   cfg.ClientSpecs(),
+		Schedules: cfg.Schedules,
+		Default:   cfg.Default,
 	})
 	if err != nil {
 		return err
