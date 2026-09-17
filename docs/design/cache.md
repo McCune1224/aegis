@@ -8,8 +8,8 @@ The cache is a decorator over the upstream resolver, the same `Resolve(ctx,
 req)` shape the DNS handler already consumes. It sits between the handler and
 the forwarder, so it only ever sees queries the filter allowed. Per-client
 policy stays ahead of the cache and never goes stale inside it. It holds an
-LRU table keyed on lowercased name and record type, bounded by entry count
-(default 4096), with one mutex over the table and the order.
+LRU table keyed on lowercased name, class, and record type, bounded by entry
+count (default 4096), with one mutex over the table and the order.
 
 An entry stores a private copy of the upstream answer with the extra section
 dropped. Extra carries the upstream's EDNS state, which has no meaning on a

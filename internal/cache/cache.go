@@ -41,10 +41,12 @@ type Config struct {
 }
 
 // key identifies one cached answer. DNS names are case-insensitive, so the
-// name is stored lowercased.
+// name is stored lowercased. The class and type are part of the slot: the
+// same name in IN and CH is a different question.
 type key struct {
-	name  string
-	qtype uint16
+	name   string
+	qclass uint16
+	qtype  uint16
 }
 
 // entry is one stored upstream answer. resp is a private template whose ID and
@@ -119,7 +121,7 @@ func (c *Cache) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
 		return c.upstream.Resolve(ctx, req)
 	}
 	question := req.Question[0]
-	k := key{name: strings.ToLower(question.Name), qtype: question.Qtype}
+	k := key{name: strings.ToLower(question.Name), qclass: question.Qclass, qtype: question.Qtype}
 
 	c.mu.Lock()
 	if el, ok := c.items[k]; ok {
@@ -139,7 +141,7 @@ func (c *Cache) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
 	if err != nil {
 		return nil, err
 	}
-	if e := storable(resp, c.minTTL, c.maxTTL, c.now()); e != nil {
+	if e := storable(resp, k, c.minTTL, c.maxTTL, c.now()); e != nil {
 		c.mu.Lock()
 		c.replace(k, e)
 		c.mu.Unlock()
@@ -167,29 +169,31 @@ func (c *Cache) replace(k key, e *entry) {
 }
 
 // storable reads the TTL guidance out of an upstream answer and returns the
-// entry to cache, or nil when the answer has to be asked for again. A positive
-// answer lives for the shortest answer TTL. A negative answer lives for the
-// SOA's negative TTL (RFC 2308), the shorter of the SOA header TTL and the SOA
-// minimum. Anything without TTL guidance, including every rcode that is not a
-// success or a name error, returns nil.
-func storable(resp *mdns.Msg, minTTL, maxTTL time.Duration, now time.Time) *entry {
-	if len(resp.Question) != 1 {
-		return nil
-	}
+// entry to cache under the requesting slot k, or nil when the answer has to
+// be asked for again. The slot comes from the request, not the response, so a
+// broken upstream that echoes another name cannot move the entry out from
+// under its LRU element. A positive answer lives for the shortest answer TTL.
+// A negative answer lives for the SOA's negative TTL (RFC 2308), the shorter
+// of the SOA header TTL and the SOA minimum. Guidance of zero is real
+// guidance and takes the floor; an answer with no guidance at all (no answer
+// records and no SOA), including every rcode that is not a success or a name
+// error, returns nil.
+func storable(resp *mdns.Msg, k key, minTTL, maxTTL time.Duration, now time.Time) *entry {
 	var ttl time.Duration
+	var guided bool
 	switch resp.Rcode {
 	case mdns.RcodeSuccess:
 		if len(resp.Answer) > 0 {
-			ttl = shortestTTL(resp.Answer)
+			ttl, guided = shortestTTL(resp.Answer), true
 		} else {
-			ttl = negativeTTL(resp.Ns)
+			ttl, guided = negativeTTL(resp.Ns)
 		}
 	case mdns.RcodeNameError:
-		ttl = negativeTTL(resp.Ns)
+		ttl, guided = negativeTTL(resp.Ns)
 	default:
 		return nil
 	}
-	if ttl <= 0 {
+	if !guided {
 		return nil
 	}
 	if ttl < minTTL {
@@ -214,7 +218,7 @@ func storable(resp *mdns.Msg, minTTL, maxTTL time.Duration, now time.Time) *entr
 		}
 	}
 	return &entry{
-		k:       key{name: strings.ToLower(resp.Question[0].Name), qtype: resp.Question[0].Qtype},
+		k:       k,
 		resp:    stored,
 		ttl:     seconds,
 		stored:  now,
@@ -239,7 +243,7 @@ func shortestTTL(rrs []mdns.RR) time.Duration {
 	return shortest
 }
 
-func negativeTTL(authority []mdns.RR) time.Duration {
+func negativeTTL(authority []mdns.RR) (time.Duration, bool) {
 	for _, rr := range authority {
 		soa, ok := rr.(*mdns.SOA)
 		if !ok {
@@ -248,11 +252,11 @@ func negativeTTL(authority []mdns.RR) time.Duration {
 		header := time.Duration(soa.Hdr.Ttl) * time.Second
 		minimum := time.Duration(soa.Minttl) * time.Second
 		if minimum < header {
-			return minimum
+			return minimum, true
 		}
-		return header
+		return header, true
 	}
-	return 0
+	return 0, false
 }
 
 // reply builds the answer for one client from the stored template: the
@@ -268,12 +272,7 @@ func (e *entry) reply(req *mdns.Msg, now time.Time) *mdns.Msg {
 	}
 	decay := func(rrs []mdns.RR) {
 		for _, rr := range rrs {
-			header := rr.Header()
-			if header.Ttl > age {
-				header.Ttl -= age
-			} else {
-				header.Ttl = 1
-			}
+			rr.Header().Ttl -= age
 		}
 	}
 	decay(out.Answer)
