@@ -98,6 +98,10 @@ func TestRuleInputIsRejectedWithFourHundred(t *testing.T) {
 		{"missing action", `{"domain":"example.com","kind":"exact"}`, "action"},
 		{"malformed json", `{`, "invalid JSON"},
 		{"wrong field type", `{"domain":1}`, "domain"},
+		{"regex that does not compile", `{"domain":"([)+","kind":"regex","action":"block"}`, "regex"},
+		{"empty regex", `{"domain":"","kind":"regex","action":"block"}`, "pattern"},
+		{"cidr that is not a prefix", `{"domain":"10.0.0.0/99","kind":"cidr","action":"block"}`, "prefix"},
+		{"wildcard with a bad label", `{"domain":"a**b.example","kind":"wildcard","action":"block"}`, "wildcard"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -109,6 +113,47 @@ func TestRuleInputIsRejectedWithFourHundred(t *testing.T) {
 			require.Contains(t, body, tc.want)
 		})
 	}
+}
+
+func TestRegexAndCIDRRulesGoThroughHTTPAndDecideRealQueries(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPost, "/api/v1/rules",
+		`{"domain":"^ads\\.example\\.(com|net)$","kind":"regex","action":"block"}`)
+	require.Equal(t, http.StatusCreated, status, body)
+	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.5", h.dnsAddress).Rcode, body)
+
+	status, body = h.do(t, http.MethodPost, "/api/v1/rules",
+		`{"domain":"127.0.0.5/32","kind":"cidr","action":"allow"}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	// The network exemption outranks the regex block for that one address,
+	// and every other loopback address still sees the block.
+	require.NotEqual(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.5", h.dnsAddress).Rcode)
+	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.6", h.dnsAddress).Rcode)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/rules", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"kind":"regex"`)
+	require.Contains(t, body, `"domain":"^ads\\.example\\.(com|net)$"`)
+	require.Contains(t, body, `"kind":"cidr"`)
+	require.Contains(t, body, `"domain":"127.0.0.5/32"`)
+}
+
+func TestPatchingTheKindReparsesTheStoredValue(t *testing.T) {
+	h := startHarness(t)
+
+	status, _ := h.do(t, http.MethodPost, "/api/v1/rules",
+		`{"domain":"games.example.com","kind":"exact","action":"allow"}`)
+	require.Equal(t, http.StatusCreated, status)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/rules/1", `{"kind":"cidr"}`)
+	require.Equal(t, http.StatusBadRequest, status, body)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/rules", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"kind":"exact"`)
+	require.Contains(t, body, `"domain":"games.example.com"`)
 }
 
 func TestARuleIDMustBeANumber(t *testing.T) {

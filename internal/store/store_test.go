@@ -185,3 +185,44 @@ func mustDomain(t *testing.T, name string) filter.Domain {
 	require.NoError(t, err)
 	return domain
 }
+
+func TestRulesRoundTripTheNewMatchKinds(t *testing.T) {
+	s := open(t)
+	ctx := t.Context()
+
+	stored := []store.Rule{
+		{Kind: filter.MatchWildcard, Pattern: "*.ads.example", Action: filter.ActionBlock},
+		{Kind: filter.MatchRegex, Pattern: `^x[0-9]+\.example$`, Action: filter.ActionAllow},
+		{Kind: filter.MatchCIDR, Network: mustNetwork(t, "10.4.1.2/16"), Action: filter.ActionBlock},
+	}
+	for i := range stored {
+		id, err := s.SaveRule(ctx, stored[i])
+		require.NoError(t, err)
+		stored[i].ID = id
+	}
+
+	got, err := s.Rules(ctx)
+	require.NoError(t, err)
+	require.Equal(t, stored, got)
+
+	specs := make([]filter.RuleSpec, 0, len(got))
+	for _, rule := range got {
+		specs = append(specs, rule.Spec())
+	}
+	set, err := filter.Compile(filter.Config{
+		Rules:    specs,
+		Profiles: []filter.ProfileSpec{{ID: "default"}},
+		Default:  "default",
+	})
+	require.NoError(t, err)
+	require.Equal(t, filter.ActionBlock, set.Decide(mustDomain(t, "srv.ads.example"), "", netip.Addr{}).Action)
+	require.Equal(t, filter.ActionAllow, set.Decide(mustDomain(t, "x9.example"), "", netip.Addr{}).Action)
+	require.Equal(t, filter.ActionBlock, set.Decide(mustDomain(t, "example.com"), "", netip.MustParseAddr("10.4.9.9")).Action)
+}
+
+func mustNetwork(t *testing.T, raw string) netip.Prefix {
+	t.Helper()
+	network, err := filter.ParseNetwork(raw)
+	require.NoError(t, err)
+	return network
+}
