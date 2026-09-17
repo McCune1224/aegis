@@ -20,6 +20,9 @@ func serveFlags() *pflag.FlagSet {
 	flags.String("block-format", "hosts", "")
 	flags.StringArray("profile", nil, "")
 	flags.StringArray("client", nil, "")
+	flags.String("source-refresh", "6h", "")
+	flags.Float64("rate-limit", 0, "")
+	flags.Int("rate-burst", 0, "")
 	flags.String("log-level", "info", "")
 	return flags
 }
@@ -37,6 +40,9 @@ func TestLoadReadsEveryFlagValue(t *testing.T) {
 		"--block-format", "adblock",
 		"--profile", "kids=nxdomain",
 		"--client", "10.0.0.5=kids",
+		"--source-refresh", "12h",
+		"--rate-limit", "20",
+		"--rate-burst", "50",
 		"--log-level", "debug",
 	}))
 
@@ -53,6 +59,9 @@ func TestLoadReadsEveryFlagValue(t *testing.T) {
 		BlockFormat:   "adblock",
 		Profiles:      []string{"kids=nxdomain"},
 		Clients:       []string{"10.0.0.5=kids"},
+		SourceRefresh: "12h",
+		RateLimit:     20,
+		RateBurst:     50,
 		LogLevel:      "debug",
 	}, got)
 }

@@ -275,6 +275,55 @@ func TestServeCommandReportsWhatItCannotParse(t *testing.T) {
 // A mapstructure tag that names no flag reads as working config and silently
 // yields the zero value. The blocklist flag hid behind exactly that, so this
 // checks the tags against the flags instead of trusting them.
+func TestServeCommandRefusesABurstOverTheClientRateLimit(t *testing.T) {
+	upstream := startUpstream(t, "203.0.113.40")
+
+	address := freeAddress(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"serve",
+		"--dns-address", address,
+		"--upstream", upstream,
+		"--db", filepath.Join(t.TempDir(), "aegis.db"),
+		"--log-level", "error",
+		"--rate-limit", "1",
+		"--rate-burst", "2",
+	})
+	cmd.SetContext(ctx)
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	require.Eventually(t, func() bool {
+		client := &mdns.Client{Net: "udp", Timeout: 200 * time.Millisecond}
+		_, _, err := client.Exchange(new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA), address)
+		return err == nil
+	}, 5*time.Second, 25*time.Millisecond, "serve never began answering")
+
+	time.Sleep(2500 * time.Millisecond)
+
+	var allowed, refused int
+	for i := 0; i < 5; i++ {
+		got := ask(t, address, "example.com.")
+		switch got.Rcode {
+		case mdns.RcodeSuccess:
+			allowed++
+		case mdns.RcodeRefused:
+			refused++
+		}
+	}
+	require.Equal(t, 2, allowed, "the burst of two goes through")
+	require.Equal(t, 3, refused, "every query past the burst is refused")
+
+	time.Sleep(1200 * time.Millisecond)
+	require.Equal(t, mdns.RcodeSuccess, ask(t, address, "example.com.").Rcode, "a query at one per second sits under the limit")
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestEveryConfigFieldNamesAServeFlag(t *testing.T) {
 	flags := newServeCmd().Flags()
 

@@ -22,6 +22,7 @@ import (
 	"aegis/internal/dns"
 	"aegis/internal/filter"
 	"aegis/internal/querylog"
+	"aegis/internal/ratelimit"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 	"aegis/web"
@@ -59,6 +60,8 @@ func newServeCmd() *cobra.Command {
 	flags.StringArray("profile", nil, "extra profile as name=mode or name=mode=address, repeatable")
 	flags.StringArray("client", nil, "bind an address to a profile as address=profile, repeatable")
 	flags.String("source-refresh", "6h", "how often to fetch blocklist sources for updates, as a duration")
+	flags.Float64("rate-limit", 0, "queries per second one client may ask, 0 disables rate limiting")
+	flags.Int("rate-burst", 0, "queries one client may ask in an instant, requires rate-limit")
 	flags.String("log-level", "info", "debug, info, warn, or error")
 
 	return cmd
@@ -132,11 +135,21 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	handler, err := dns.NewHandler(dns.Config{
+	limiter, err := buildLimiter(cfg, engine)
+	if err != nil {
+		return err
+	}
+	handlerConfig := dns.Config{
 		Decider:   engine,
 		Upstream:  resolver,
 		Observers: []dns.Observer{hub, log},
-	})
+	}
+	// A nil *ratelimit.Limiter inside the interface would look non-nil to the
+	// handler, so the field stays unset when limiting is off.
+	if limiter != nil {
+		handlerConfig.Limiter = limiter
+	}
+	handler, err := dns.NewHandler(handlerConfig)
 	if err != nil {
 		return err
 	}
@@ -195,6 +208,26 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	return errors.Join(apiServer.Shutdown(shutdown), server.Shutdown(shutdown))
+}
+
+// buildLimiter reads the rate flags into a limiter whose buckets key on the
+// runtime's identity table, so a query and its rate bucket always agree on who
+// is asking. A zero rate leaves the limiter off.
+func buildLimiter(cfg config.Config, engine *runtime.Runtime) (*ratelimit.Limiter, error) {
+	if cfg.RateLimit == 0 {
+		if cfg.RateBurst != 0 {
+			return nil, errors.New("rate-burst needs rate-limit to be set")
+		}
+		return nil, nil
+	}
+	if cfg.RateBurst < 1 {
+		return nil, errors.New("rate-limit needs rate-burst of at least one")
+	}
+	return ratelimit.New(ratelimit.Config{
+		Keys:  engine.ClientKey,
+		Rate:  cfg.RateLimit,
+		Burst: cfg.RateBurst,
+	})
 }
 
 // runSourceRefreshLoop fetches every enabled source whose own schedule has

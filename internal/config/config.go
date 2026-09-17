@@ -25,6 +25,8 @@ type Config struct {
 	Clients       []string `mapstructure:"client"`
 	Sources       []string `mapstructure:"source"`
 	SourceRefresh string   `mapstructure:"source-refresh"`
+	RateLimit     float64  `mapstructure:"rate-limit"`
+	RateBurst     int      `mapstructure:"rate-burst"`
 	LogLevel      string   `mapstructure:"log-level"`
 }
 
