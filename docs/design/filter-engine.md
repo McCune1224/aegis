@@ -90,6 +90,28 @@ selectors, and the command line is now a bootstrap path rather than the way an
 operator configures Aegis. The store is the source of truth, and the YAML file
 this project originally planned is now only a way to seed a first boot.
 
+## How a rule matches
+
+A rule carries one payload, named by its kind: a domain for exact and
+subdomains, a pattern for wildcard and regex, a network for cidr. Compile
+rejects a rule whose payload does not fit its kind, so a bad rule fails the
+load instead of failing open.
+
+The name kinds index into the hash tables, and wildcard compiles to an anchored
+regexp where each `*` label stands for exactly one arbitrary label, the way a
+DNS zone wildcard does. That is deliberately narrower than subdomains, which is
+the kind for "this name and everything under it". Regex compiles case-
+insensitive and unanchored, so `^` and `$` belong to the author.
+
+A cidr rule matches the address the query came from, and a rule that matches
+the client's network outranks any rule that only matches the domain. An exempt
+network is exempt however blocking the lists are, and a locked network is
+locked however permissive the domain rules are. Within networks the longest
+prefix wins, then the same tier rule as everywhere else. Within name rules a
+pattern ranks below an indexed rule of the same tier for provenance only; the
+action is the tier winner either way, since a pattern carries no specificity a
+comparison could use.
+
 ## How a client is identified
 
 A client is a name plus the selectors that carry it, because one device answers
@@ -110,8 +132,9 @@ An address nothing claims gives the empty key, which takes the default profile.
 ## Deferred, with the reason
 
 Hand-written DFAs for wildcard and regular expression rules. Go's `regexp` is
-fast enough for the small number of regex rules a home network carries. Revisit
-only when a measurement asks for it.
+fast enough for the small number of regex rules a home network carries, and the
+decision benchmark still runs flat across rule counts at zero allocations.
+Revisit only when a measurement asks for it.
 
 `quic-go` and DNS-over-QUIC. A large dependency for one transport, and not on the
 path to replacing AdGuard Home for a first user.
