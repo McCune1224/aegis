@@ -272,12 +272,7 @@ func (e *entry) reply(req *mdns.Msg, now time.Time) *mdns.Msg {
 	}
 	decay := func(rrs []mdns.RR) {
 		for _, rr := range rrs {
-			header := rr.Header()
-			if header.Ttl > age {
-				header.Ttl -= age
-			} else {
-				header.Ttl = 1
-			}
+			rr.Header().Ttl -= age
 		}
 	}
 	decay(out.Answer)
