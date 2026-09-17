@@ -170,26 +170,28 @@ func (c *Cache) replace(k key, e *entry) {
 // entry to cache, or nil when the answer has to be asked for again. A positive
 // answer lives for the shortest answer TTL. A negative answer lives for the
 // SOA's negative TTL (RFC 2308), the shorter of the SOA header TTL and the SOA
-// minimum. Anything without TTL guidance, including every rcode that is not a
-// success or a name error, returns nil.
+// minimum. Guidance of zero is real guidance and takes the floor; an answer
+// with no guidance at all (no answer records and no SOA), including every
+// rcode that is not a success or a name error, returns nil.
 func storable(resp *mdns.Msg, minTTL, maxTTL time.Duration, now time.Time) *entry {
 	if len(resp.Question) != 1 {
 		return nil
 	}
 	var ttl time.Duration
+	var guided bool
 	switch resp.Rcode {
 	case mdns.RcodeSuccess:
 		if len(resp.Answer) > 0 {
-			ttl = shortestTTL(resp.Answer)
+			ttl, guided = shortestTTL(resp.Answer), true
 		} else {
-			ttl = negativeTTL(resp.Ns)
+			ttl, guided = negativeTTL(resp.Ns)
 		}
 	case mdns.RcodeNameError:
-		ttl = negativeTTL(resp.Ns)
+		ttl, guided = negativeTTL(resp.Ns)
 	default:
 		return nil
 	}
-	if ttl <= 0 {
+	if !guided {
 		return nil
 	}
 	if ttl < minTTL {
@@ -239,7 +241,7 @@ func shortestTTL(rrs []mdns.RR) time.Duration {
 	return shortest
 }
 
-func negativeTTL(authority []mdns.RR) time.Duration {
+func negativeTTL(authority []mdns.RR) (time.Duration, bool) {
 	for _, rr := range authority {
 		soa, ok := rr.(*mdns.SOA)
 		if !ok {
@@ -248,11 +250,11 @@ func negativeTTL(authority []mdns.RR) time.Duration {
 		header := time.Duration(soa.Hdr.Ttl) * time.Second
 		minimum := time.Duration(soa.Minttl) * time.Second
 		if minimum < header {
-			return minimum
+			return minimum, true
 		}
-		return header
+		return header, true
 	}
-	return 0
+	return 0, false
 }
 
 // reply builds the answer for one client from the stored template: the

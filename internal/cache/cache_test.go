@@ -309,6 +309,31 @@ func TestConcurrentResolveSharesEntries(t *testing.T) {
 	require.Greater(t, upstream.saw(), 0)
 }
 
+func TestResolveCachesAZeroTTLAnswerAtTheFloor(t *testing.T) {
+	upstream := &stubUpstream{answer: func(req *mdns.Msg) *mdns.Msg { return aAnswer(req, 1, 0) }}
+	resolver := newResolver(t, upstream, nil)
+
+	_, err := resolver.Resolve(context.Background(), query("zero.example.net.", mdns.TypeA))
+	require.NoError(t, err)
+	_, err = resolver.Resolve(context.Background(), query("zero.example.net.", mdns.TypeA))
+	require.NoError(t, err)
+	require.Equal(t, 1, upstream.saw(), "the floor holds a zero-TTL answer for five seconds")
+}
+
+func TestResolveDoesNotCacheAnEmptyAnswerWithoutASOA(t *testing.T) {
+	upstream := &stubUpstream{answer: func(req *mdns.Msg) *mdns.Msg {
+		resp := new(mdns.Msg)
+		return resp.SetReply(req)
+	}}
+	resolver := newResolver(t, upstream, nil)
+
+	for i := 0; i < 2; i++ {
+		_, err := resolver.Resolve(context.Background(), query("nodata.example.net.", mdns.TypeA))
+		require.NoError(t, err)
+	}
+	require.Equal(t, 2, upstream.saw(), "no answer records and no SOA is no guidance, so nothing is cached")
+}
+
 func TestNewRejectsAConfigWithoutAnUpstream(t *testing.T) {
 	_, err := cache.New(cache.Config{})
 	require.Error(t, err)
