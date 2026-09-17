@@ -4,6 +4,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -100,7 +101,7 @@ func TestLoadRoundTripsAProfileAndAClientsSelectors(t *testing.T) {
 		Default:  cfg.Default,
 	})
 	require.NoError(t, err)
-	require.Equal(t, filter.Refused, set.Decide(mustDomain(t, "example.com"), "tablet", netip.Addr{}).Policy.Mode)
+	require.Equal(t, filter.Refused, set.Decide(mustDomain(t, "example.com"), "tablet", netip.Addr{}, time.Now()).Policy.Mode)
 
 	resolver, err := client.New(cfg.Selectors())
 	require.NoError(t, err)
@@ -179,6 +180,93 @@ func TestValidateRejectsAProfileCycle(t *testing.T) {
 	require.Contains(t, err.Error(), "extends itself")
 }
 
+func TestSchedulesRoundTripAndReachTheEngine(t *testing.T) {
+	s := open(t)
+	ctx := t.Context()
+
+	night := filter.ScheduleSpec{
+		Name:     "night",
+		Priority: 2,
+		Windows:  []filter.Window{{Days: []time.Weekday{time.Monday}, Start: 21 * 60, End: 7 * 60}},
+	}
+	weekend := filter.ScheduleSpec{
+		Name:     "weekend",
+		Priority: 5,
+		Windows: []filter.Window{
+			{Days: []time.Weekday{time.Saturday, time.Sunday}, Start: 0, End: 12 * 60},
+			{Days: []time.Weekday{time.Sunday}, Start: 19 * 60, End: 21 * 60},
+		},
+	}
+	for _, schedule := range []filter.ScheduleSpec{night, weekend} {
+		require.NoError(t, s.SaveSchedule(ctx, schedule))
+	}
+
+	// Saving again replaces the stored windows and priority.
+	weekend.Priority = 7
+	require.NoError(t, s.SaveSchedule(ctx, weekend))
+
+	got, err := s.Schedules(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []filter.ScheduleSpec{night, weekend}, got)
+
+	games := filter.RuleSpec{ID: "custom:1", Source: filter.Source{ID: "custom", Name: "custom"}, Kind: filter.MatchExact, Domain: mustDomain(t, "games.example"), Schedule: "night", Client: "tablet", Action: filter.ActionBlock}
+	_, err = s.SaveRule(ctx, store.Rule{
+		Kind:     filter.MatchExact,
+		Domain:   mustDomain(t, "games.example"),
+		Schedule: "night",
+		Client:   "tablet",
+		Action:   filter.ActionBlock,
+	})
+	require.NoError(t, err)
+	rules, err := s.Rules(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []store.Rule{{
+		ID:       1,
+		Kind:     filter.MatchExact,
+		Domain:   mustDomain(t, "games.example"),
+		Schedule: "night",
+		Client:   "tablet",
+		Action:   filter.ActionBlock,
+	}}, rules)
+
+	cfg, err := s.Load(ctx)
+	require.NoError(t, err)
+	require.NoError(t, cfg.Validate())
+	require.Equal(t, []filter.ScheduleSpec{night, weekend}, cfg.Schedules)
+	require.Equal(t, []filter.RuleSpec{games}, cfg.Rules)
+
+	set, err := filter.Compile(filter.Config{
+		Rules:     cfg.Rules,
+		Profiles:  cfg.Profiles,
+		Clients:   cfg.ClientSpecs(),
+		Schedules: cfg.Schedules,
+		Default:   cfg.Default,
+	})
+	require.NoError(t, err)
+
+	monday22 := time.Date(2026, 9, 21, 22, 0, 0, 0, time.UTC)
+	mondayNoon := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, filter.ActionBlock, set.Decide(mustDomain(t, "games.example"), "tablet", netip.Addr{}, monday22).Action)
+	require.Equal(t, filter.ActionAllow, set.Decide(mustDomain(t, "games.example"), "tablet", netip.Addr{}, mondayNoon).Action)
+	require.Equal(t, filter.ActionAllow, set.Decide(mustDomain(t, "games.example"), "laptop", netip.Addr{}, monday22).Action)
+}
+
+func TestAConfigWithAnUnknownScheduleIsInvalid(t *testing.T) {
+	s := open(t)
+	ctx := t.Context()
+
+	_, err := s.SaveRule(ctx, store.Rule{
+		Kind:     filter.MatchExact,
+		Domain:   mustDomain(t, "games.example"),
+		Schedule: "ghost",
+		Action:   filter.ActionBlock,
+	})
+	require.NoError(t, err)
+	cfg, err := s.Load(ctx)
+	require.NoError(t, err)
+	require.Error(t, cfg.Validate())
+}
+
 func mustDomain(t *testing.T, name string) filter.Domain {
 	t.Helper()
 	domain, err := filter.ParseDomain(name)
@@ -215,9 +303,9 @@ func TestRulesRoundTripTheNewMatchKinds(t *testing.T) {
 		Default:  "default",
 	})
 	require.NoError(t, err)
-	require.Equal(t, filter.ActionBlock, set.Decide(mustDomain(t, "srv.ads.example"), "", netip.Addr{}).Action)
-	require.Equal(t, filter.ActionAllow, set.Decide(mustDomain(t, "x9.example"), "", netip.Addr{}).Action)
-	require.Equal(t, filter.ActionBlock, set.Decide(mustDomain(t, "example.com"), "", netip.MustParseAddr("10.4.9.9")).Action)
+	require.Equal(t, filter.ActionBlock, set.Decide(mustDomain(t, "srv.ads.example"), "", netip.Addr{}, time.Now()).Action)
+	require.Equal(t, filter.ActionAllow, set.Decide(mustDomain(t, "x9.example"), "", netip.Addr{}, time.Now()).Action)
+	require.Equal(t, filter.ActionBlock, set.Decide(mustDomain(t, "example.com"), "", netip.MustParseAddr("10.4.9.9"), time.Now()).Action)
 }
 
 func mustNetwork(t *testing.T, raw string) netip.Prefix {

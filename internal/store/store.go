@@ -32,10 +32,11 @@ type Client struct {
 // projections of it, so a client's profile and its selectors cannot drift
 // apart.
 type Config struct {
-	Profiles []filter.ProfileSpec
-	Clients  []Client
-	Rules    []filter.RuleSpec
-	Default  filter.ProfileID
+	Profiles  []filter.ProfileSpec
+	Clients   []Client
+	Rules     []filter.RuleSpec
+	Schedules []filter.ScheduleSpec
+	Default   filter.ProfileID
 }
 
 // ClientSpecs is the client list in the shape filter.Compile takes.
@@ -64,10 +65,11 @@ func (c Config) Validate() error {
 		return err
 	}
 	_, err := filter.Compile(filter.Config{
-		Rules:    c.Rules,
-		Profiles: c.Profiles,
-		Clients:  c.ClientSpecs(),
-		Default:  c.Default,
+		Rules:     c.Rules,
+		Profiles:  c.Profiles,
+		Clients:   c.ClientSpecs(),
+		Schedules: c.Schedules,
+		Default:   c.Default,
 	})
 	return err
 }
@@ -160,11 +162,17 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		specs = append(specs, rule.Spec())
 	}
 
+	schedules, err := s.Schedules(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
-		Profiles: profiles,
-		Clients:  clients,
-		Rules:    specs,
-		Default:  filter.ProfileID(defaultProfile),
+		Profiles:  profiles,
+		Clients:   clients,
+		Rules:     specs,
+		Schedules: schedules,
+		Default:   filter.ProfileID(defaultProfile),
 	}, nil
 }
 

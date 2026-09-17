@@ -38,12 +38,20 @@ type Query struct {
 }
 
 type Rule struct {
-	ID      int64
-	Domain  string
-	Kind    string
-	Action  string
-	Notes   string
-	Created int64
+	ID       int64
+	Domain   string
+	Kind     string
+	Action   string
+	Notes    string
+	Created  int64
+	Schedule string
+	Client   string
+}
+
+type Schedule struct {
+	Name     string
+	Priority int64
+	Windows  string
 }
 
 type Setting struct {
