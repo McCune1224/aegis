@@ -363,3 +363,81 @@ func TestNewHandlerRejectsAnIncompleteConfig(t *testing.T) {
 		require.Error(t, err, "case=%q", name)
 	}
 }
+
+// stubLimiter hands out scripted verdicts and counts how often the handler
+// asked, so a test can prove the limiter stayed off a path.
+type stubLimiter struct {
+	allowed []bool
+	asked   int
+}
+
+func (s *stubLimiter) Allow(netip.Addr) bool {
+	if s.asked >= len(s.allowed) {
+		return false
+	}
+	allowed := s.allowed[s.asked]
+	s.asked++
+	return allowed
+}
+
+func TestHandleRefusesAQueryTheLimiterTurnsDown(t *testing.T) {
+	upstream := &stubResolver{}
+	limiter := &stubLimiter{allowed: []bool{true, false}}
+	handler, err := dns.NewHandler(dns.Config{
+		Decider:  deciderFor(t, defaultPolicy),
+		Upstream: upstream,
+		Limiter:  limiter,
+	})
+	require.NoError(t, err)
+
+	for i := 0; i < 2; i++ {
+		upstream.answer = upstreamA(query("example.com.", mdns.TypeA), "203.0.113.7")
+		got, err := handler.Handle(context.Background(), query("example.com.", mdns.TypeA), netip.MustParseAddr("10.0.0.5"))
+		require.NoError(t, err)
+		if i == 0 {
+			require.Equal(t, mdns.RcodeSuccess, got.Rcode)
+		} else {
+			require.Equal(t, mdns.RcodeRefused, got.Rcode, "the second query is over the limit")
+		}
+	}
+	require.Equal(t, 1, upstream.calls, "the refused query never reaches the upstream or the cache")
+}
+
+func TestHandleNeverAsksTheLimiterAboutABlockedName(t *testing.T) {
+	upstream := &stubResolver{}
+	limiter := &stubLimiter{allowed: []bool{true}}
+	handler, err := dns.NewHandler(dns.Config{
+		Decider:  deciderFor(t, defaultPolicy, blockedAds()),
+		Upstream: upstream,
+		Limiter:  limiter,
+	})
+	require.NoError(t, err)
+
+	blocked, err := handler.Handle(context.Background(), query("ads.example.com.", mdns.TypeA), netip.Addr{})
+	require.NoError(t, err)
+	require.Equal(t, mdns.RcodeNameError, blocked.Rcode)
+	require.Equal(t, 0, limiter.asked, "the block path spends no rate limit")
+
+	upstream.answer = upstreamA(query("example.com.", mdns.TypeA), "203.0.113.7")
+	allowed, err := handler.Handle(context.Background(), query("example.com.", mdns.TypeA), netip.Addr{})
+	require.NoError(t, err)
+	require.Equal(t, mdns.RcodeSuccess, allowed.Rcode)
+	require.Equal(t, 1, limiter.asked, "the allowed path asks once")
+}
+
+func TestHandleLimitsAnUnparseableNameToo(t *testing.T) {
+	upstream := &stubResolver{}
+	limiter := &stubLimiter{allowed: []bool{false}}
+	handler, err := dns.NewHandler(dns.Config{
+		Decider:  deciderFor(t, defaultPolicy),
+		Upstream: upstream,
+		Limiter:  limiter,
+	})
+	require.NoError(t, err)
+
+	got, err := handler.Handle(context.Background(), query("exa mple.net.", mdns.TypeA), netip.Addr{})
+
+	require.NoError(t, err)
+	require.Equal(t, mdns.RcodeRefused, got.Rcode, "a flood of unparseable names cannot bypass the limit")
+	require.Equal(t, 0, upstream.calls)
+}

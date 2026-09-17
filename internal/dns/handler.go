@@ -51,12 +51,20 @@ type Observer interface {
 	Observe(Decision)
 }
 
+// RateLimiter decides whether the client at one address may spend the
+// resolver's time. The handler asks it on the allowed path only, so a blocked
+// query never pays for it and a refused query never reaches the cache.
+type RateLimiter interface {
+	Allow(address netip.Addr) bool
+}
+
 // Config is what a Handler needs to answer queries. Every observer sees every
 // decision, so the stream and the query log can consume them independently.
 type Config struct {
 	Decider   Decider
 	Upstream  Resolver
 	Observers []Observer
+	Limiter   RateLimiter
 }
 
 // Handler answers one DNS message. It holds no mutable state, so one Handler
@@ -65,6 +73,7 @@ type Handler struct {
 	decider   Decider
 	upstream  Resolver
 	observers []Observer
+	limiter   RateLimiter
 }
 
 // NewHandler checks the config and returns a Handler.
@@ -75,7 +84,7 @@ func NewHandler(cfg Config) (*Handler, error) {
 	if cfg.Upstream == nil {
 		return nil, errors.New("dns: Config.Upstream is required")
 	}
-	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream, observers: cfg.Observers}, nil
+	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream, observers: cfg.Observers, limiter: cfg.Limiter}, nil
 }
 
 // Handle answers one query for the client at address. A blocked name never
@@ -91,7 +100,7 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 	name, err := filter.ParseDomain(question.Name)
 	if err != nil {
 		// A name we cannot parse cannot match a rule, so it is none of ours.
-		return h.forward(ctx, req)
+		return h.forward(ctx, req, address)
 	}
 
 	verdict := h.decider.Decide(name, address)
@@ -111,10 +120,13 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 	if verdict.Action == filter.ActionBlock {
 		return blocked(req, question, verdict.Policy), nil
 	}
-	return h.forward(ctx, req)
+	return h.forward(ctx, req, address)
 }
 
-func (h *Handler) forward(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+func (h *Handler) forward(ctx context.Context, req *mdns.Msg, address netip.Addr) (*mdns.Msg, error) {
+	if h.limiter != nil && !h.limiter.Allow(address) {
+		return reply(req, mdns.RcodeRefused), nil
+	}
 	resp, err := h.upstream.Resolve(ctx, req)
 	if err != nil {
 		return reply(req, mdns.RcodeServerFailure), fmt.Errorf("dns: upstream: %w", err)
