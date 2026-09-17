@@ -112,6 +112,25 @@ pattern ranks below an indexed rule of the same tier for provenance only; the
 action is the tier winner either way, since a pattern carries no specificity a
 comparison could use.
 
+## How a schedule compiles
+
+A schedule names recurring windows with a priority. Compile folds recurrence
+and overlap into one table naming the winner for every minute of the week, so
+the hot path is one array index and the answer never re-evaluates a window.
+The table is keyed on what the wall clock reads, so daylight saving needs no
+special case: a minute that repeats answers the same way both times, and a
+minute that never comes is never read. The caller passes the wall clock in the
+zone it means, and the binary embeds the timezone database, because release
+targets such as routers ship no zoneinfo.
+
+A window whose end is before its start crosses midnight and covers the
+following morning. Two schedules claiming one minute with the same priority
+fail the load, because an ambiguous minute would pick a winner nobody can
+debug. The winning schedule's rules join the same candidate comparison as
+always-on rules, so allow still beats block inside a window, and a rule may be
+scoped to one client identity. A rule that names a schedule the config does
+not hold fails the load.
+
 ## How a client is identified
 
 A client is a name plus the selectors that carry it, because one device answers
@@ -140,3 +159,8 @@ Revisit only when a measurement asks for it.
 path to replacing AdGuard Home for a first user.
 
 Blocklist diffing and source health monitoring. Both need the store first.
+
+A profile attached to a schedule. Profiles today carry only a blocking mode,
+which answers how a blocked name is answered and cannot block anything by
+itself, so a profile swap on a window changes nothing an operator can see.
+Revisit when profiles grow rule sets of their own.
