@@ -17,6 +17,7 @@ import (
 
 	"aegis/internal/api"
 	"aegis/internal/blocklist"
+	"aegis/internal/cache"
 	"aegis/internal/config"
 	"aegis/internal/dns"
 	"aegis/internal/filter"
@@ -127,9 +128,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	hub := api.NewHub(logger)
 	log := querylog.New(database, logger)
 
+	resolver, err := cache.New(cache.Config{Upstream: dns.NewForwarder(cfg.Upstream)})
+	if err != nil {
+		return err
+	}
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:   engine,
-		Upstream:  dns.NewForwarder(cfg.Upstream),
+		Upstream:  resolver,
 		Observers: []dns.Observer{hub, log},
 	})
 	if err != nil {
