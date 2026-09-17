@@ -42,6 +42,14 @@ export const IconLog = () =>
     </>,
   );
 
+export const IconClock = () =>
+  base(
+    <>
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M8 4.6 V8 l2.4 1.6" />
+    </>,
+  );
+
 export const IconClients = () =>
   base(
     <>
@@ -68,8 +76,7 @@ export const IconRules = () =>
     </>,
   );
 
-export const IconSources = () =>
-  base(
+export const IconSources = () =>  base(
     <>
       <ellipse cx="8" cy="3.8" rx="5.5" ry="2.2" />
       <path d="M2.5 3.8 v8.4 c0 1.2 2.5 2.2 5.5 2.2 s5.5-1 5.5-2.2 V3.8" />

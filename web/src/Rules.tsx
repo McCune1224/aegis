@@ -18,6 +18,8 @@ function placeholderFor(kind: string): string {
 
 type Props = {
   rules: Rule[];
+  schedules: string[];
+  clients: string[];
   onCreate: (input: RuleInput) => Promise<void>;
   onUpdate: (id: number, input: RuleInput) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
@@ -35,6 +37,8 @@ export default function Rules(props: Props) {
   const [domain, setDomain] = createSignal("");
   const [kind, setKind] = createSignal("exact");
   const [action, setAction] = createSignal("block");
+  const [schedule, setSchedule] = createSignal("");
+  const [client, setClient] = createSignal("");
   const [notes, setNotes] = createSignal("");
   const [error, setError] = createSignal<string>();
   const [busy, setBusy] = createSignal(false);
@@ -43,6 +47,8 @@ export default function Rules(props: Props) {
     setDomain("");
     setKind("exact");
     setAction("block");
+    setSchedule("");
+    setClient("");
     setNotes("");
   }
 
@@ -55,7 +61,14 @@ export default function Rules(props: Props) {
     setBusy(true);
     setError(undefined);
     try {
-      await props.onCreate({ domain: domain(), kind: kind(), action: action(), notes: notes() });
+      const input: RuleInput = { domain: domain(), kind: kind(), action: action(), notes: notes() };
+      if (schedule()) {
+        input.schedule = schedule();
+      }
+      if (client()) {
+        input.client = client();
+      }
+      await props.onCreate(input);
       reset();
     } catch (cause) {
       setError(String(cause));
@@ -91,7 +104,10 @@ export default function Rules(props: Props) {
               <div>
                 <strong>{rule.domain}</strong>
                 <span class="muted">
-                  {rule.kind} {createdTime(rule)}
+                  {rule.kind}
+                  <Show when={rule.schedule}> · schedule {rule.schedule}</Show>
+                  <Show when={rule.client}> · client {rule.client}</Show>
+                  {createdTime(rule)}
                 </span>
                 <Show when={rule.notes}>
                   <span class="selectors">{rule.notes}</span>
@@ -143,6 +159,28 @@ export default function Rules(props: Props) {
             onInput={(event) => setAction(event.currentTarget.value)}
           >
             <For each={actions}>{(value) => <option value={value}>{value}</option>}</For>
+          </select>
+        </label>
+        <label>
+          Schedule
+          <select
+            data-testid="rule-schedule"
+            value={schedule()}
+            onInput={(event) => setSchedule(event.currentTarget.value)}
+          >
+            <option value="">always</option>
+            <For each={props.schedules}>{(name) => <option value={name}>{name}</option>}</For>
+          </select>
+        </label>
+        <label>
+          Client
+          <select
+            data-testid="rule-client"
+            value={client()}
+            onInput={(event) => setClient(event.currentTarget.value)}
+          >
+            <option value="">all clients</option>
+            <For each={props.clients}>{(name) => <option value={name}>{name}</option>}</For>
           </select>
         </label>
         <label>

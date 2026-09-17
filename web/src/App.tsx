@@ -5,6 +5,7 @@ import {
   deleteClient as removeClient,
   deleteProfile as removeProfile,
   deleteRule as removeRule,
+  deleteSchedule as removeSchedule,
   deleteSource as removeSource,
   getDefaultProfile,
   getStatus,
@@ -12,9 +13,11 @@ import {
   listClients,
   listProfiles,
   listRules,
+  listSchedules,
   listSources,
   saveClient as putClient,
   saveProfile as putProfile,
+  saveSchedule as putSchedule,
   saveSource as putSource,
   setDefaultProfile as putDefaultProfile,
   updateRule as patchRule,
@@ -25,10 +28,12 @@ import {
   type ProfileInput,
   type Rule,
   type RuleInput,
+  type Schedule,
+  type ScheduleInput,
   type Source,
   type SourceInput,
 } from "./api";
-import { IconClients, IconDashboard, IconGear, IconGraph, IconLog, IconRules, IconShield, IconSources } from "./Icons";
+import { IconClients, IconClock, IconDashboard, IconGear, IconGraph, IconLog, IconRules, IconShield, IconSources } from "./Icons";
 import Clients from "./Clients";
 import Dashboard from "./Dashboard";
 import Graph from "./Graph";
@@ -37,9 +42,10 @@ import Settings from "./Settings";
 import { createQueryLog } from "./querylog";
 import Profiles from "./Profiles";
 import Rules from "./Rules";
+import Schedules from "./Schedules";
 import Sources from "./Sources";
 
-type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "settings" | "graph";
+type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "schedules" | "settings" | "graph";
 
 type NavItem = { id: Tab; label: string; icon: () => JSX.Element };
 
@@ -50,6 +56,7 @@ const NAV: NavItem[] = [
   { id: "clients", label: "Clients", icon: IconClients },
   { id: "profiles", label: "Profiles", icon: IconShield },
   { id: "rules", label: "Rules", icon: IconRules },
+  { id: "schedules", label: "Schedules", icon: IconClock },
   { id: "sources", label: "Sources", icon: IconSources },
   { id: "settings", label: "Settings", icon: IconGear },
 ];
@@ -61,6 +68,7 @@ const TITLES: Record<Tab, string> = {
   clients: "Clients",
   profiles: "Profiles",
   rules: "Rules",
+  schedules: "Schedules",
   sources: "Sources",
   settings: "Settings",
 };
@@ -72,6 +80,7 @@ export default function App() {
   const [sources, setSources] = createSignal<Source[]>([]);
   const [catalog, setCatalog] = createSignal<CatalogEntry[]>([]);
   const [rules, setRules] = createSignal<Rule[]>([]);
+  const [schedules, setSchedules] = createSignal<Schedule[]>([]);
   const [defaultProfile, setDefaultProfile] = createSignal("");
   const [upstream, setUpstream] = createSignal("");
   const [ruleCount, setRuleCount] = createSignal(0);
@@ -83,13 +92,14 @@ export default function App() {
   const log = createQueryLog({ live: live() });
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextDefault, nextStatus] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextDefault, nextStatus] =
       await Promise.all([
         listProfiles(),
         listClients(),
         listSources(),
         listCatalog(),
         listRules(),
+        listSchedules(),
         getDefaultProfile(),
         getStatus(),
       ]);
@@ -98,6 +108,7 @@ export default function App() {
     setSources(nextSources);
     setCatalog(nextCatalog);
     setRules(nextRules);
+    setSchedules(nextSchedules);
     setDefaultProfile(nextDefault.profile);
     setUpstream(nextStatus.upstream);
     setRuleCount(nextStatus.rules ?? 0);
@@ -153,6 +164,16 @@ export default function App() {
 
   async function deleteRule(id: number) {
     await removeRule(id);
+    await refresh();
+  }
+
+  async function addSchedule(name: string, input: ScheduleInput) {
+    await putSchedule(name, input);
+    await refresh();
+  }
+
+  async function deleteSchedule(name: string) {
+    await removeSchedule(name);
     await refresh();
   }
 
@@ -254,7 +275,24 @@ export default function App() {
             </Show>
             <Show when={tab() === "rules"}>
               <div class="screen-inner">
-                <Rules rules={rules()} onCreate={addRule} onUpdate={changeRule} onDelete={deleteRule} />
+                <Rules
+                  rules={rules()}
+                  schedules={schedules().map((schedule) => schedule.name)}
+                  clients={clients().map((client) => client.name)}
+                  onCreate={addRule}
+                  onUpdate={changeRule}
+                  onDelete={deleteRule}
+                />
+              </div>
+            </Show>
+            <Show when={tab() === "schedules"}>
+              <div class="screen-inner">
+                <Schedules
+                  schedules={schedules()}
+                  rules={rules()}
+                  onSave={addSchedule}
+                  onDelete={deleteSchedule}
+                />
               </div>
             </Show>
             <Show when={tab() === "sources"}>

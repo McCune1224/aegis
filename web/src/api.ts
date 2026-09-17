@@ -61,17 +61,39 @@ export type Rule = {
   domain: string;
   kind: string;
   action: string;
+  schedule?: string;
+  client?: string;
   notes?: string;
   created?: string;
 };
 
 // A rule has no inherited fields, so every field the body names is replaced and
-// the rest survive.
+// the rest survive. A schedule keeps the rule active only while its windows
+// cover the query minute, and a client scopes it to one identity.
 export type RuleInput = {
   domain?: string;
   kind?: string;
   action?: string;
+  schedule?: string;
+  client?: string;
   notes?: string;
+};
+
+export type ScheduleWindow = {
+  days: number[];
+  start: string;
+  end: string;
+};
+
+export type Schedule = {
+  name: string;
+  priority: number;
+  windows: ScheduleWindow[];
+};
+
+export type ScheduleInput = {
+  priority: number;
+  windows: ScheduleWindow[];
 };
 
 export type Status = {
@@ -205,6 +227,21 @@ export function updateRule(id: number, input: RuleInput): Promise<Rule> {
 
 export function deleteRule(id: number): Promise<void> {
   return request<void>(`/api/v1/rules/${id}`, { method: "DELETE" });
+}
+
+export function listSchedules(): Promise<Schedule[]> {
+  return request<Schedule[]>("/api/v1/schedules");
+}
+
+export function saveSchedule(name: string, input: ScheduleInput): Promise<Schedule> {
+  return request<Schedule>(`/api/v1/schedules/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteSchedule(name: string): Promise<void> {
+  return request<void>(`/api/v1/schedules/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 export type QueryEntry = {
