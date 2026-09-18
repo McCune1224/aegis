@@ -19,6 +19,7 @@ import (
 	mdns "github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
 
+	"aegis/internal/blocklist"
 	"aegis/internal/config"
 	"aegis/internal/filter"
 	"aegis/internal/store"
@@ -398,6 +399,112 @@ func askPTR(t *testing.T, address, name string) *mdns.Msg {
 	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion(name, mdns.TypePTR), address)
 	require.NoError(t, err)
 	return resp
+}
+
+func TestServeCommandLoadsAHostsListAndAnAdblockListTogether(t *testing.T) {
+	upstream := startUpstream(t, "203.0.113.80")
+
+	hosts := filepath.Join(t.TempDir(), "hosts.txt")
+	require.NoError(t, os.WriteFile(hosts, []byte("0.0.0.0 ads.example.com\n"), 0o600))
+	adblock := filepath.Join(t.TempDir(), "adblock.txt")
+	require.NoError(t, os.WriteFile(adblock, []byte("||trackers.example.com^\n"), 0o600))
+
+	servedHosts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "0.0.0.0 served-hosts.example.com\n")
+	}))
+	t.Cleanup(servedHosts.Close)
+	servedAdblock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "||served-adblock.example.com^\n")
+	}))
+	t.Cleanup(servedAdblock.Close)
+
+	address := freeAddress(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"serve",
+		"--dns-address", address,
+		"--api-address", freeTCPAddress(t),
+		"--upstream", upstream,
+		"--db", filepath.Join(t.TempDir(), "aegis.db"),
+		"--blocklist", hosts,
+		"--blocklist", "adblock:" + adblock,
+		"--source", "sh=" + servedHosts.URL,
+		"--source", "sa=adblock:" + servedAdblock.URL,
+		"--log-level", "error",
+	})
+	cmd.SetContext(ctx)
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	require.Eventually(t, func() bool {
+		client := &mdns.Client{Net: "udp", Timeout: 200 * time.Millisecond}
+		_, _, err := client.Exchange(new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA), address)
+		return err == nil
+	}, 5*time.Second, 25*time.Millisecond, "serve never began answering")
+
+	// Every list is parsed in its own format: the hosts file blocks as a
+	// hosts entry, the adblock file blocks as a rule, and the fetched
+	// sources do the same in one run.
+	for _, name := range []string{
+		"ads.example.com.",
+		"trackers.example.com.",
+		"served-hosts.example.com.",
+		"served-adblock.example.com.",
+	} {
+		blocked := ask(t, address, name)
+		require.Equal(t, mdns.RcodeNameError, blocked.Rcode, "case=%s must block", name)
+		require.Empty(t, blocked.Answer)
+	}
+
+	allowed := ask(t, address, "example.com.")
+	require.Equal(t, mdns.RcodeSuccess, allowed.Rcode, "the formats must not swallow the allow path")
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after its context was cancelled")
+	}
+}
+
+func TestParseBlocklistEntryAndSourceTakeAnExactFormatPrefix(t *testing.T) {
+	hosts := mustFormat(t, "hosts")
+
+	list := parseBlocklistEntry("adblock:/etc/lists/x.txt", hosts)
+	require.Equal(t, "/etc/lists/x.txt", list.Path)
+	require.Equal(t, mustFormat(t, "adblock"), list.Format)
+
+	list = parseBlocklistEntry("/etc/lists/plain.txt", hosts)
+	require.Equal(t, "/etc/lists/plain.txt", list.Path)
+	require.Equal(t, hosts, list.Format, "a bare path keeps the fallback format")
+
+	// A drive-letter path or any other colon-bearing string that does not
+	// name a format is a path, not an error.
+	list = parseBlocklistEntry("C:\\lists\\x.txt", hosts)
+	require.Equal(t, "C:\\lists\\x.txt", list.Path)
+	require.Equal(t, hosts, list.Format)
+
+	source, err := parseSource("mix=adblock:https://lists.example.com/a?dl=1", hosts)
+	require.NoError(t, err)
+	require.Equal(t, mustFormat(t, "adblock"), source.Format)
+	require.Equal(t, "https://lists.example.com/a?dl=1", source.URL, "the url keeps its colons and equals")
+
+	source, err = parseSource("plain=https://lists.example.com/a?dl=1", hosts)
+	require.NoError(t, err)
+	require.Equal(t, hosts, source.Format, "a url without a prefix takes the fallback format")
+	require.Equal(t, "https://lists.example.com/a?dl=1", source.URL)
+}
+
+func mustFormat(t *testing.T, name string) blocklist.Format {
+	t.Helper()
+	format, err := blocklist.ParseFormat(name)
+	require.NoError(t, err)
+	return format
 }
 
 func TestServeCommandReportsWhatItCannotParse(t *testing.T) {
