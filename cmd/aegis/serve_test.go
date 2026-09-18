@@ -622,3 +622,74 @@ func TestEveryConfigFieldNamesAServeFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestServeCommandExposesMetricsThatMoveWithQueries(t *testing.T) {
+	upstream := startUpstream(t, "203.0.113.90")
+	list := filepath.Join(t.TempDir(), "block.txt")
+	require.NoError(t, os.WriteFile(list, []byte("0.0.0.0 ads.example.com\n"), 0o600))
+
+	address := freeAddress(t)
+	apiAddress := freeTCPAddress(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"serve",
+		"--dns-address", address,
+		"--upstream", upstream,
+		"--db", filepath.Join(t.TempDir(), "aegis.db"),
+		"--blocklist", list,
+		"--api-address", apiAddress,
+		"--log-level", "error",
+	})
+	cmd.SetContext(ctx)
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	// The readiness probe asks warmup.example.com, a name no later
+	// assertion counts, so every metric below is exact: one blocked ask,
+	// two allowed asks, of which the repeat is answered from the cache.
+	require.Eventually(t, func() bool {
+		client := &mdns.Client{Net: "udp", Timeout: 200 * time.Millisecond}
+		_, _, err := client.Exchange(new(mdns.Msg).SetQuestion("warmup.example.com.", mdns.TypeA), address)
+		return err == nil
+	}, 5*time.Second, 25*time.Millisecond, "serve never began answering")
+
+	// One blocked query, one allowed, and a repeat of the allowed one so the
+	// cache counters move too.
+	blocked := ask(t, address, "ads.example.com.")
+	require.Equal(t, mdns.RcodeNameError, blocked.Rcode)
+	allowed := ask(t, address, "example.com.")
+	require.Equal(t, mdns.RcodeSuccess, allowed.Rcode)
+	repeat := ask(t, address, "example.com.")
+	require.Equal(t, mdns.RcodeSuccess, repeat.Rcode)
+
+	body := getBody(t, "http://"+apiAddress+"/metrics")
+	require.Contains(t, body, `aegis_queries_total{verdict="blocked"} 1`, "the blocked query must move the verdict counter")
+	require.Contains(t, body, `aegis_queries_total{verdict="allowed"} 3`, "the warmup ask plus the pair")
+	require.Contains(t, body, `aegis_cache_hits_total 1`, "the repeated ask came from the cache")
+	require.Contains(t, body, `aegis_cache_misses_total 2`)
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after its context was cancelled")
+	}
+}
+
+func getBody(t *testing.T, url string) string {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	payload, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(payload)
+}
