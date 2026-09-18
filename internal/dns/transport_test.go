@@ -2,6 +2,7 @@ package dns_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -52,6 +53,33 @@ func aRecord(name, address string) *mdns.A {
 	}
 }
 
+// resolverFor answers Resolve calls the way a real upstream would: it asks
+// the stub server over UDP. The upstream pool now owns forwarding; these
+// tests only need a resolver to stand behind the handler.
+func resolverFor(t *testing.T, handle mdns.HandlerFunc) dns.Resolver {
+	t.Helper()
+	address := startUpstream(t, handle)
+	return resolverFunc(func(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+		client := &mdns.Client{Net: "udp"}
+		resp, _, err := client.ExchangeContext(ctx, req, address)
+		return resp, err
+	})
+}
+
+// deadResolver fails every exchange, for tests where the upstream is never
+// meant to be reached.
+func deadResolver() dns.Resolver {
+	return resolverFunc(func(_ context.Context, _ *mdns.Msg) (*mdns.Msg, error) {
+		return nil, errors.New("no upstream configured")
+	})
+}
+
+type resolverFunc func(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error)
+
+func (f resolverFunc) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+	return f(ctx, req)
+}
+
 func answerWith(address string) mdns.HandlerFunc {
 	return func(w mdns.ResponseWriter, req *mdns.Msg) {
 		resp := new(mdns.Msg)
@@ -69,52 +97,10 @@ func exchange(t *testing.T, network, address string, req *mdns.Msg) *mdns.Msg {
 	return resp
 }
 
-func TestForwarderResolvesOverUdp(t *testing.T) {
-	upstream := startUpstream(t, answerWith("203.0.113.20"))
-
-	got, err := dns.NewForwarder(upstream).Resolve(context.Background(), query("example.com.", mdns.TypeA))
-
-	require.NoError(t, err)
-	require.Len(t, got.Answer, 1)
-	require.Equal(t, netip.MustParseAddr("203.0.113.20").AsSlice(), []byte(got.Answer[0].(*mdns.A).A))
-}
-
-func TestForwarderRetriesOverTcpWhenTheUdpAnswerIsTruncated(t *testing.T) {
-	overTCP := "203.0.113.21"
-	upstream := startUpstream(t, func(w mdns.ResponseWriter, req *mdns.Msg) {
-		resp := new(mdns.Msg)
-		resp.SetReply(req)
-		_, isTCP := w.RemoteAddr().(*net.TCPAddr)
-		if isTCP {
-			resp.Answer = append(resp.Answer, aRecord(req.Question[0].Name, overTCP))
-		} else {
-			resp.Truncated = true
-		}
-		_ = w.WriteMsg(resp)
-	})
-
-	got, err := dns.NewForwarder(upstream).Resolve(context.Background(), query("big.example.com.", mdns.TypeA))
-
-	require.NoError(t, err)
-	require.False(t, got.Truncated)
-	require.Len(t, got.Answer, 1)
-	require.Equal(t, netip.MustParseAddr(overTCP).AsSlice(), []byte(got.Answer[0].(*mdns.A).A))
-}
-
-func TestForwarderHonoursACancelledContext(t *testing.T) {
-	upstream := startUpstream(t, answerWith("203.0.113.22"))
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := dns.NewForwarder(upstream).Resolve(ctx, query("example.com.", mdns.TypeA))
-
-	require.Error(t, err)
-}
-
 func TestServerAnswersOverUdpAndTcp(t *testing.T) {
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:  deciderFor(t, defaultPolicy, blockedAds()),
-		Upstream: dns.NewForwarder(startUpstream(t, answerWith("203.0.113.23"))),
+		Upstream: resolverFor(t, answerWith("203.0.113.23")),
 	})
 	require.NoError(t, err)
 
@@ -133,7 +119,7 @@ func TestServerBlocksByRuleAndForwardsTheRestThroughARealUpstream(t *testing.T) 
 	upstreamAddress := "203.0.113.30"
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:  deciderFor(t, defaultPolicy, blockedAds()),
-		Upstream: dns.NewForwarder(startUpstream(t, answerWith(upstreamAddress))),
+		Upstream: resolverFor(t, answerWith(upstreamAddress)),
 	})
 	require.NoError(t, err)
 
@@ -155,7 +141,7 @@ func TestServerBlocksByRuleAndForwardsTheRestThroughARealUpstream(t *testing.T) 
 func TestServerStopsAnsweringAfterShutdown(t *testing.T) {
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:  deciderFor(t, defaultPolicy),
-		Upstream: dns.NewForwarder(startUpstream(t, answerWith("203.0.113.24"))),
+		Upstream: resolverFor(t, answerWith("203.0.113.24")),
 	})
 	require.NoError(t, err)
 
@@ -173,7 +159,7 @@ func TestServerStopsAnsweringAfterShutdown(t *testing.T) {
 func TestStartRejectsAnIncompleteConfig(t *testing.T) {
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:  deciderFor(t, defaultPolicy),
-		Upstream: dns.NewForwarder("127.0.0.1:53"),
+		Upstream: deadResolver(),
 	})
 	require.NoError(t, err)
 
@@ -187,7 +173,7 @@ func TestStartRejectsAnIncompleteConfig(t *testing.T) {
 func TestStartReportsThePortItBound(t *testing.T) {
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:  deciderFor(t, defaultPolicy),
-		Upstream: dns.NewForwarder("127.0.0.1:53"),
+		Upstream: deadResolver(),
 	})
 	require.NoError(t, err)
 
@@ -203,7 +189,7 @@ func TestStartReportsThePortItBound(t *testing.T) {
 func TestStartErrorNamesTheAddressOnce(t *testing.T) {
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:  deciderFor(t, defaultPolicy),
-		Upstream: dns.NewForwarder("127.0.0.1:53"),
+		Upstream: deadResolver(),
 	})
 	require.NoError(t, err)
 

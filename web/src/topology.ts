@@ -20,22 +20,27 @@ export type Topology = {
   edges: GraphEdge[];
 };
 
-export const upstreamID = "upstream";
+export function upstreamNodeID(address: string): string {
+  return `upstream:${address}`;
+}
 export const defaultClientID = "client:unidentified";
 
 // buildTopology is the shape the resolver actually applies: clients point at a
-// profile, profiles inherit from a parent, and every profile answers through the
-// upstream. The same structure the engine compiles is what the canvas draws.
+// profile, profiles inherit from a parent, and every profile answers through
+// every configured upstream, because the pool fails over between them. The
+// same structure the engine compiles is what the canvas draws.
 export function buildTopology(
   profiles: Profile[],
   clients: Client[],
   defaultProfile: string,
-  upstream: string,
+  upstreams: string[],
 ): Topology {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
-  nodes.push({ id: upstreamID, label: "upstream", detail: upstream || "not configured", kind: "upstream" });
+  for (const address of upstreams) {
+    nodes.push({ id: upstreamNodeID(address), label: "upstream", detail: address, kind: "upstream" });
+  }
 
   for (const profile of profiles) {
     nodes.push({
@@ -44,7 +49,13 @@ export function buildTopology(
       detail: profile.mode ?? "inherited",
       kind: "profile",
     });
-    edges.push({ id: `answer:${profile.name}`, from: `profile:${profile.name}`, to: upstreamID });
+    for (const address of upstreams) {
+      edges.push({
+        id: `answer:${profile.name}:${address}`,
+        from: `profile:${profile.name}`,
+        to: upstreamNodeID(address),
+      });
+    }
   }
 
   for (const profile of profiles) {

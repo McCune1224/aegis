@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -24,6 +25,14 @@ import (
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 )
+
+// deadResolver never answers: the harness exercises the API surface, so no
+// query should reach an upstream.
+type deadResolver struct{}
+
+func (deadResolver) Resolve(_ context.Context, _ *mdns.Msg) (*mdns.Msg, error) {
+	return nil, errors.New("the api harness has no resolver")
+}
 
 type harness struct {
 	apiURL     string
@@ -61,7 +70,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 	log := querylog.New(database, quietLogger())
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:   rt,
-		Upstream:  dns.NewForwarder("127.0.0.1:1"),
+		Upstream:  deadResolver{},
 		Observers: []dns.Observer{hub, log},
 	})
 	require.NoError(t, err)
@@ -69,7 +78,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = dnsServer.Shutdown(context.Background()) })
 
-	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Sources: sync, Preview: sync, Hub: hub, Upstream: "9.9.9.9:53", Address: "127.0.0.1:0"})
+	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Sources: sync, Preview: sync, Hub: hub, Upstreams: []string{"9.9.9.9:53"}, Address: "127.0.0.1:0"})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = apiServer.Shutdown(context.Background()) })
 

@@ -82,7 +82,7 @@ export default function App() {
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [schedules, setSchedules] = createSignal<Schedule[]>([]);
   const [defaultProfile, setDefaultProfile] = createSignal("");
-  const [upstream, setUpstream] = createSignal("");
+  const [upstreams, setUpstreams] = createSignal<string[]>([]);
   const [ruleCount, setRuleCount] = createSignal(0);
   const [error, setError] = createSignal<string>();
   const [windowMinutes, setWindowMinutes] = createSignal(Number(localStorage.getItem("aegis.window")) || 60);
@@ -110,7 +110,7 @@ export default function App() {
     setRules(nextRules);
     setSchedules(nextSchedules);
     setDefaultProfile(nextDefault.profile);
-    setUpstream(nextStatus.upstream);
+    setUpstreams(nextStatus.upstreams);
     setRuleCount(nextStatus.rules ?? 0);
   }
 
@@ -213,7 +213,8 @@ export default function App() {
             <h1 class="page-title">{TITLES[tab()]}</h1>
             <div class="pill" data-testid="status">
               <span class="dot" />
-              {upstream() || "no upstream"} · {ruleCount()} rules
+              {upstreams()[0] || "no upstream"}
+              {upstreams().length > 1 ? ` +${upstreams().length - 1}` : ""} · {ruleCount()} rules
             </div>
           </header>
           <Show when={error()}>
@@ -246,7 +247,7 @@ export default function App() {
                 profiles={profiles()}
                 clients={clients()}
                 defaultProfile={defaultProfile()}
-                upstream={upstream()}
+                upstreams={upstreams()}
                 log={log}
                 onSaveClient={saveClient}
                 onSetDefault={makeDefault}

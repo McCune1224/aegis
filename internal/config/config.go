@@ -14,7 +14,7 @@ import (
 // parses each one into a typed value where it is used.
 type Config struct {
 	DNSAddress    string   `mapstructure:"dns-address"`
-	Upstream      string   `mapstructure:"upstream"`
+	Upstreams     []string `mapstructure:"upstream"`
 	APIAddress    string   `mapstructure:"api-address"`
 	DB            string   `mapstructure:"db"`
 	BlockingMode  string   `mapstructure:"blocking-mode"`
