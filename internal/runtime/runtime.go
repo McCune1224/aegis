@@ -16,6 +16,7 @@ import (
 	"aegis/internal/blocklist"
 	"aegis/internal/client"
 	"aegis/internal/filter"
+	"aegis/internal/metrics"
 	"aegis/internal/rewrite"
 	"aegis/internal/store"
 )
@@ -44,6 +45,7 @@ type Runtime struct {
 	store  *store.Store
 	logger *slog.Logger
 	now    func() time.Time
+	counts *metrics.Metrics
 
 	mu sync.Mutex
 	// lists are the blocklist files given at boot. publish reads them on every
@@ -62,6 +64,11 @@ type Option func(*Runtime)
 // minute it asks about.
 func WithClock(now func() time.Time) Option {
 	return func(r *Runtime) { r.now = now }
+}
+
+// WithMetrics names where reload counts land. A nil Metrics counts nothing.
+func WithMetrics(m *metrics.Metrics) Option {
+	return func(r *Runtime) { r.counts = m }
 }
 
 // New returns a Runtime that allows every query until Reload runs.
@@ -85,7 +92,13 @@ func New(s *store.Store, lists []ListFile, logger *slog.Logger, opts ...Option) 
 func (r *Runtime) Reload(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.publish(ctx)
+	if err := r.publish(ctx); err != nil {
+		return err
+	}
+	if r.counts != nil {
+		r.counts.CountReload()
+	}
+	return nil
 }
 
 // replaceSourceRules swaps the source rules and republishes under the same

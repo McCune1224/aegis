@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"sync"
 
+	"aegis/internal/metrics"
 	"aegis/internal/store"
 )
 
@@ -47,6 +48,7 @@ type Config struct {
 	Upstreams []string
 	Address   string
 	Logger    *slog.Logger
+	Metrics   *metrics.Metrics
 }
 
 // Server is the HTTP control plane. It holds its own listener, separate from
@@ -59,6 +61,7 @@ type Server struct {
 	hub       *Hub
 	files     fs.FS
 	upstreams []string
+	metrics   *metrics.Metrics
 	http      *http.Server
 	listener  net.Listener
 
@@ -97,7 +100,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, preview: cfg.Preview, hub: cfg.Hub, files: cfg.Files, upstreams: cfg.Upstreams, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, preview: cfg.Preview, hub: cfg.Hub, files: cfg.Files, upstreams: cfg.Upstreams, metrics: cfg.Metrics, listener: listener}
 	s.http = &http.Server{
 		Handler:  s.routes(),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
@@ -120,6 +123,9 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ct
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/status", s.status)
+	if s.metrics != nil {
+		mux.Handle("GET /metrics", s.metrics.Handler())
+	}
 	mux.HandleFunc("GET /api/v1/profiles", s.listProfiles)
 	mux.HandleFunc("GET /api/v1/default-profile", s.getDefaultProfile)
 	mux.HandleFunc("PUT /api/v1/default-profile", s.putDefaultProfile)

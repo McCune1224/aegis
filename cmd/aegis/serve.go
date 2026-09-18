@@ -23,6 +23,7 @@ import (
 	"aegis/internal/config"
 	"aegis/internal/dns"
 	"aegis/internal/filter"
+	"aegis/internal/metrics"
 	"aegis/internal/querylog"
 	"aegis/internal/ratelimit"
 	"aegis/internal/rewrite"
@@ -146,7 +147,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := database.MarkSeeded(ctx); err != nil {
 		return err
 	}
-	engine := runtime.New(database, lists, logger)
+	counts := metrics.New()
+	engine := runtime.New(database, lists, logger, runtime.WithMetrics(counts))
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(sourceTimeout), engine, logger)
 	if err := sync.RefreshSources(ctx); err != nil {
 		return err
@@ -163,6 +165,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	counts.WatchDrops(hub.Dropped)
+	counts.WatchCache(func() metrics.CacheCounters {
+		stats := resolver.Stats()
+		return metrics.CacheCounters{
+			Hits:       stats.Hits,
+			Misses:     stats.Misses,
+			Evictions:  stats.Evictions,
+			Prefetches: stats.Prefetches,
+		}
+	})
 	limiter, err := buildLimiter(cfg, engine)
 	if err != nil {
 		return err
@@ -171,7 +183,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Decider:   engine,
 		Upstream:  resolver,
 		Rewriter:  engine,
-		Observers: []dns.Observer{hub, log},
+		Observers: []dns.Observer{hub, log, verdictCounter{counts}},
 	}
 	// A nil *ratelimit.Limiter inside the interface would look non-nil to the
 	// handler, so the field stays unset when limiting is off.
@@ -205,6 +217,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Upstreams: upstreamNames(specs),
 		Address:   cfg.APIAddress,
 		Logger:    logger,
+		Metrics:   counts,
 	})
 	if err != nil {
 		_ = server.Shutdown(context.Background())
@@ -513,6 +526,13 @@ func customPointer(address netip.Addr) *netip.Addr {
 	}
 	return &address
 }
+
+// verdictCounter adapts DNS decisions to the metrics counters. Observe runs
+// on the DNS worker, so it must stay lock-free — CountVerdict only bumps
+// atomics.
+type verdictCounter struct{ counts *metrics.Metrics }
+
+func (v verdictCounter) Observe(d dns.Decision) { v.counts.CountVerdict(d.Action) }
 
 // buildTLSConfig loads the operator's PEM pair for the encrypted listeners.
 // Zero listeners and zero paths is the disabled default; anything between the
