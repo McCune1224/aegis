@@ -91,3 +91,11 @@ export const IconGear = () =>
       <path d="M8 1.6v2 M8 12.4v2 M1.6 8h2 M12.4 8h2 M3.5 3.5l1.4 1.4 M11.1 11.1l1.4 1.4 M12.5 3.5l-1.4 1.4 M4.9 11.1l-1.4 1.4" />
     </>,
   );
+
+export const IconRewrite = () =>
+  base(
+    <>
+      <path d="M2.5 5.5 h9 M9.5 3 l2.5 2.5 -2.5 2.5" />
+      <path d="M13.5 11.5 h-9 M6.5 9 l-2.5 2.5 2.5 2.5" />
+    </>,
+  );

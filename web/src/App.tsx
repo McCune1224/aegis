@@ -4,6 +4,7 @@ import {
   createRule as postRule,
   deleteClient as removeClient,
   deleteProfile as removeProfile,
+  deleteRewrite as removeRewrite,
   deleteRule as removeRule,
   deleteSchedule as removeSchedule,
   deleteSource as removeSource,
@@ -12,11 +13,13 @@ import {
   listCatalog,
   listClients,
   listProfiles,
+  listRewrites,
   listRules,
   listSchedules,
   listSources,
   saveClient as putClient,
   saveProfile as putProfile,
+  saveRewrite as putRewrite,
   saveSchedule as putSchedule,
   saveSource as putSource,
   setDefaultProfile as putDefaultProfile,
@@ -26,6 +29,7 @@ import {
   type ClientInput,
   type Profile,
   type ProfileInput,
+  type Rewrite,
   type Rule,
   type RuleInput,
   type Schedule,
@@ -33,7 +37,7 @@ import {
   type Source,
   type SourceInput,
 } from "./api";
-import { IconClients, IconClock, IconDashboard, IconGear, IconGraph, IconLog, IconRules, IconShield, IconSources } from "./Icons";
+import { IconClients, IconClock, IconDashboard, IconGear, IconGraph, IconLog, IconRewrite, IconRules, IconShield, IconSources } from "./Icons";
 import Clients from "./Clients";
 import Dashboard from "./Dashboard";
 import Graph from "./Graph";
@@ -41,11 +45,12 @@ import QueryLog from "./QueryLog";
 import Settings from "./Settings";
 import { createQueryLog } from "./querylog";
 import Profiles from "./Profiles";
+import Rewrites from "./Rewrites";
 import Rules from "./Rules";
 import Schedules from "./Schedules";
 import Sources from "./Sources";
 
-type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "schedules" | "settings" | "graph";
+type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "schedules" | "rewrites" | "settings" | "graph";
 
 type NavItem = { id: Tab; label: string; icon: () => JSX.Element };
 
@@ -57,6 +62,7 @@ const NAV: NavItem[] = [
   { id: "profiles", label: "Profiles", icon: IconShield },
   { id: "rules", label: "Rules", icon: IconRules },
   { id: "schedules", label: "Schedules", icon: IconClock },
+  { id: "rewrites", label: "Rewrites", icon: IconRewrite },
   { id: "sources", label: "Sources", icon: IconSources },
   { id: "settings", label: "Settings", icon: IconGear },
 ];
@@ -69,6 +75,7 @@ const TITLES: Record<Tab, string> = {
   profiles: "Profiles",
   rules: "Rules",
   schedules: "Schedules",
+  rewrites: "Rewrites",
   sources: "Sources",
   settings: "Settings",
 };
@@ -81,6 +88,7 @@ export default function App() {
   const [catalog, setCatalog] = createSignal<CatalogEntry[]>([]);
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [schedules, setSchedules] = createSignal<Schedule[]>([]);
+  const [rewrites, setRewrites] = createSignal<Rewrite[]>([]);
   const [defaultProfile, setDefaultProfile] = createSignal("");
   const [upstreams, setUpstreams] = createSignal<string[]>([]);
   const [ruleCount, setRuleCount] = createSignal(0);
@@ -92,7 +100,7 @@ export default function App() {
   const log = createQueryLog({ live: live() });
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextDefault, nextStatus] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextDefault, nextStatus] =
       await Promise.all([
         listProfiles(),
         listClients(),
@@ -100,6 +108,7 @@ export default function App() {
         listCatalog(),
         listRules(),
         listSchedules(),
+        listRewrites(),
         getDefaultProfile(),
         getStatus(),
       ]);
@@ -109,6 +118,7 @@ export default function App() {
     setCatalog(nextCatalog);
     setRules(nextRules);
     setSchedules(nextSchedules);
+    setRewrites(nextRewrites);
     setDefaultProfile(nextDefault.profile);
     setUpstreams(nextStatus.upstreams);
     setRuleCount(nextStatus.rules ?? 0);
@@ -174,6 +184,16 @@ export default function App() {
 
   async function deleteSchedule(name: string) {
     await removeSchedule(name);
+    await refresh();
+  }
+
+  async function saveRewrite(pattern: string, target: string) {
+    await putRewrite(pattern, target);
+    await refresh();
+  }
+
+  async function deleteRewrite(pattern: string) {
+    await removeRewrite(pattern);
     await refresh();
   }
 
@@ -294,6 +314,11 @@ export default function App() {
                   onSave={addSchedule}
                   onDelete={deleteSchedule}
                 />
+              </div>
+            </Show>
+            <Show when={tab() === "rewrites"}>
+              <div class="screen-inner">
+                <Rewrites rewrites={rewrites()} onSave={saveRewrite} onDelete={deleteRewrite} />
               </div>
             </Show>
             <Show when={tab() === "sources"}>

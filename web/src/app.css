@@ -411,6 +411,12 @@ li strong {
   border: 1px solid rgba(110, 231, 183, 0.35);
 }
 
+.badge.rewrite {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(196, 181, 253, 0.35);
+}
+
 .badge.kind {
   color: var(--accent);
   background: var(--accent-soft);

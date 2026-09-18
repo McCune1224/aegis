@@ -11,11 +11,13 @@ import (
 	mdns "github.com/miekg/dns"
 
 	"aegis/internal/filter"
+	"aegis/internal/rewrite"
 )
 
-// blockTTL is how long a client may cache a blocked answer. It stays short so
-// that unblocking a name takes effect without waiting out a long cache.
-const blockTTL = 60
+// localAnswerTTL is how long a client may cache an answer aegis built
+// itself, a blocked name or a rewrite. It stays short so that unblocking a
+// name or removing a rewrite takes effect without waiting out a long cache.
+const localAnswerTTL = 60
 
 // Resolver answers a query that the filter allowed.
 type Resolver interface {
@@ -29,19 +31,6 @@ type Resolver interface {
 // table during a reload.
 type Decider interface {
 	Decide(name filter.Domain, address netip.Addr) filter.Verdict
-}
-
-// Decision is one resolved query, as the live stream and the query log consume
-// it. The handler publishes it for a blocked name and for an allowed one, so the
-// stream shows the whole pipeline rather than only what it stopped. Type is the
-// question's record type as its mnemonic, such as A or AAAA.
-type Decision struct {
-	Time    time.Time
-	Address netip.Addr
-	Name    filter.Domain
-	Type    string
-	Action  filter.Action
-	Match   *filter.Provenance
 }
 
 // Observer receives every decision the handler makes. It runs on the resolver's
@@ -58,13 +47,41 @@ type RateLimiter interface {
 	Allow(address netip.Addr) bool
 }
 
+// Rewriter answers one query from the configured rewrite table, the seam the
+// runtime fills with one snapshot generation. Lookup maps a name to its
+// record; Reverse maps an address back to the name that pins it.
+type Rewriter interface {
+	Lookup(name filter.Domain) (rewrite.Record, bool)
+	Reverse(address netip.Addr) (filter.Domain, bool)
+}
+
+// maxRewriteHops bounds how many name rewrites one query may follow, so a
+// configuration loop fails loudly instead of spinning.
+const maxRewriteHops = 8
+
 // Config is what a Handler needs to answer queries. Every observer sees every
 // decision, so the stream and the query log can consume them independently.
 type Config struct {
 	Decider   Decider
 	Upstream  Resolver
+	Rewriter  Rewriter
 	Observers []Observer
 	Limiter   RateLimiter
+}
+
+// Decision is one resolved query, as the live stream and the query log consume
+// it. The handler publishes it for a blocked name and for an allowed one, so
+// the stream shows the whole pipeline rather than only what it stopped. Type is
+// the question's record type as its mnemonic, such as A or AAAA. Rewritten
+// names the rewrite target when a rewrite took part, empty otherwise.
+type Decision struct {
+	Time      time.Time
+	Address   netip.Addr
+	Name      filter.Domain
+	Type      string
+	Action    filter.Action
+	Match     *filter.Provenance
+	Rewritten string
 }
 
 // Handler answers one DNS message. It holds no mutable state, so one Handler
@@ -72,6 +89,7 @@ type Config struct {
 type Handler struct {
 	decider   Decider
 	upstream  Resolver
+	rewriter  Rewriter
 	observers []Observer
 	limiter   RateLimiter
 }
@@ -84,13 +102,13 @@ func NewHandler(cfg Config) (*Handler, error) {
 	if cfg.Upstream == nil {
 		return nil, errors.New("dns: Config.Upstream is required")
 	}
-	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream, observers: cfg.Observers, limiter: cfg.Limiter}, nil
+	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream, rewriter: cfg.Rewriter, observers: cfg.Observers, limiter: cfg.Limiter}, nil
 }
 
-// Handle answers one query for the client at address. A blocked name never
-// reaches the upstream. A name the engine allows is forwarded, and an upstream
-// failure becomes SERVFAIL with the error returned so the caller can log what
-// went wrong.
+// Handle answers one query for the client at address. A name with a rewrite
+// is answered or followed before the filter sees it: an address rewrite is
+// answered locally, and a name rewrite becomes a CNAME whose target is
+// filtered and forwarded in the query's place.
 func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr) (*mdns.Msg, error) {
 	if len(req.Question) != 1 {
 		return reply(req, mdns.RcodeFormatError), nil
@@ -100,39 +118,99 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 	name, err := filter.ParseDomain(question.Name)
 	if err != nil {
 		// A name we cannot parse cannot match a rule, so it is none of ours.
-		return h.forward(ctx, req, address)
+		return h.forward(ctx, req, question, address, nil)
 	}
 
-	verdict := h.decider.Decide(name, address)
-	if len(h.observers) > 0 {
-		decision := Decision{
-			Time:    time.Now(),
-			Address: address,
-			Name:    name,
-			Type:    mdns.TypeToString[question.Qtype],
-			Action:  verdict.Action,
-			Match:   verdict.Match,
-		}
-		for _, observer := range h.observers {
-			observer.Observe(decision)
+	if h.rewriter != nil && question.Qtype == mdns.TypePTR {
+		if arpa, ok := rewrite.ParseReverse(name); ok {
+			if host, ok := h.rewriter.Reverse(arpa); ok {
+				h.publish(question, address, name, filter.Verdict{Action: filter.ActionRewrite}, host.String())
+				return ptrAnswer(req, question, host), nil
+			}
 		}
 	}
+
+	target := name
+	rewritten := ""
+	var chain []mdns.RR
+	if h.rewriter != nil {
+		var pinned *rewrite.Record
+		for range maxRewriteHops {
+			record, ok := h.rewriter.Lookup(target)
+			if !ok {
+				break
+			}
+			if rewritten == "" {
+				rewritten = rewrite.TargetText(record)
+			}
+			if record.Addr.IsValid() {
+				pinned = &record
+				break
+			}
+			chain = append(chain, cnameRecord(target, record.CName))
+			target = record.CName
+		}
+		if pinned != nil {
+			h.publish(question, address, name, filter.Verdict{Action: filter.ActionRewrite}, rewritten)
+			return addressAnswer(req, question, pinned.Addr), nil
+		}
+		if _, looping := h.rewriter.Lookup(target); looping {
+			return reply(req, mdns.RcodeServerFailure), fmt.Errorf("dns: rewrite loop from %s", name)
+		}
+	}
+
+	verdict := h.decider.Decide(target, address)
+	h.publish(question, address, name, verdict, rewritten)
 	if verdict.Action == filter.ActionBlock {
 		return blocked(req, question, verdict.Policy), nil
 	}
-	return h.forward(ctx, req, address)
+
+	ask := question
+	if target.String() != name.String() {
+		ask = mdns.Question{Name: mdns.Fqdn(target.String()), Qtype: question.Qtype, Qclass: question.Qclass}
+	}
+	return h.forward(ctx, req, ask, address, chain)
 }
 
-func (h *Handler) forward(ctx context.Context, req *mdns.Msg, address netip.Addr) (*mdns.Msg, error) {
+func (h *Handler) forward(ctx context.Context, req *mdns.Msg, ask mdns.Question, address netip.Addr, chain []mdns.RR) (*mdns.Msg, error) {
 	if h.limiter != nil && !h.limiter.Allow(address) {
 		return reply(req, mdns.RcodeRefused), nil
 	}
-	resp, err := h.upstream.Resolve(ctx, req)
+	outbound := req
+	if ask.Name != req.Question[0].Name {
+		outbound = req.Copy()
+		outbound.Question = []mdns.Question{ask}
+	}
+	resp, err := h.upstream.Resolve(ctx, outbound)
 	if err != nil {
 		return reply(req, mdns.RcodeServerFailure), fmt.Errorf("dns: upstream: %w", err)
 	}
 	resp.RecursionAvailable = true
+	if len(chain) > 0 {
+		resp.Question = req.Question
+		resp.Answer = append(chain, resp.Answer...)
+	}
 	return resp, nil
+}
+
+// publish sends one decision to every observer. Rewritten is empty unless a
+// rewrite took part in the answer.
+func (h *Handler) publish(question mdns.Question, address netip.Addr, name filter.Domain, verdict filter.Verdict, rewritten string) {
+	if len(h.observers) == 0 {
+		return
+	}
+	decision := Decision{
+		Time:      time.Now(),
+		Address:   address,
+		Name:      name,
+		Type:      mdns.TypeToString[question.Qtype],
+		Action:    verdict.Action,
+		Match:     verdict.Match,
+		Rewritten: rewritten,
+	}
+	for _, observer := range h.observers {
+		observer.Observe(decision)
+	}
 }
 
 func blocked(req *mdns.Msg, question mdns.Question, policy filter.Policy) *mdns.Msg {
@@ -168,12 +246,12 @@ func addressAnswer(req *mdns.Msg, question mdns.Question, address netip.Addr) *m
 	switch {
 	case question.Qtype == mdns.TypeA && address.Is4():
 		resp.Answer = append(resp.Answer, &mdns.A{
-			Hdr: mdns.RR_Header{Name: question.Name, Rrtype: mdns.TypeA, Class: mdns.ClassINET, Ttl: blockTTL},
+			Hdr: mdns.RR_Header{Name: question.Name, Rrtype: mdns.TypeA, Class: mdns.ClassINET, Ttl: localAnswerTTL},
 			A:   address.AsSlice(),
 		})
 	case question.Qtype == mdns.TypeAAAA && address.Is6():
 		resp.Answer = append(resp.Answer, &mdns.AAAA{
-			Hdr:  mdns.RR_Header{Name: question.Name, Rrtype: mdns.TypeAAAA, Class: mdns.ClassINET, Ttl: blockTTL},
+			Hdr:  mdns.RR_Header{Name: question.Name, Rrtype: mdns.TypeAAAA, Class: mdns.ClassINET, Ttl: localAnswerTTL},
 			AAAA: address.AsSlice(),
 		})
 	}
@@ -185,4 +263,22 @@ func nullAddressFor(qtype uint16) netip.Addr {
 		return netip.IPv6Unspecified()
 	}
 	return netip.IPv4Unspecified()
+}
+
+// ptrAnswer points one reverse name at the host that pins its address.
+func ptrAnswer(req *mdns.Msg, question mdns.Question, host filter.Domain) *mdns.Msg {
+	resp := reply(req, mdns.RcodeSuccess)
+	resp.Answer = append(resp.Answer, &mdns.PTR{
+		Hdr: mdns.RR_Header{Name: question.Name, Rrtype: mdns.TypePTR, Class: mdns.ClassINET, Ttl: localAnswerTTL},
+		Ptr: mdns.Fqdn(host.String()),
+	})
+	return resp
+}
+
+// cnameRecord hops one name to the next along a rewrite chain.
+func cnameRecord(name filter.Domain, target filter.Domain) mdns.RR {
+	return &mdns.CNAME{
+		Hdr:    mdns.RR_Header{Name: mdns.Fqdn(name.String()), Rrtype: mdns.TypeCNAME, Class: mdns.ClassINET, Ttl: localAnswerTTL},
+		Target: mdns.Fqdn(target.String()),
+	}
 }

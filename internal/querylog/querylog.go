@@ -136,7 +136,10 @@ func entriesFrom(decisions []dns.Decision) []store.QueryEntry {
 			Type:    decision.Type,
 			Verdict: decision.Action,
 		}
-		if decision.Match != nil {
+		switch {
+		case decision.Rewritten != "":
+			entry.Rule = decision.Rewritten
+		case decision.Match != nil:
 			entry.Rule = decision.Match.RuleID
 		}
 		entries = append(entries, entry)

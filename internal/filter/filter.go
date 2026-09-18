@@ -62,12 +62,18 @@ const (
 	ActionBlock Action = iota
 	ActionAllow
 
+	// ActionRewrite is never a rule verdict. Compile rejects a rule that
+	// carries it; the handler uses it to log a query it answered locally
+	// from a rewrite.
+	ActionRewrite
+
 	actionCount
 )
 
 var actionNames = [actionCount]string{
-	ActionBlock: "block",
-	ActionAllow: "allow",
+	ActionBlock:   "block",
+	ActionAllow:   "allow",
+	ActionRewrite: "rewrite",
 }
 
 func (a Action) String() string {

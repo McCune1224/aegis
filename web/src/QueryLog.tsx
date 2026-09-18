@@ -88,6 +88,7 @@ export default function QueryLog(props: Props) {
               <option value="">all</option>
               <option value="allow">allowed</option>
               <option value="block">blocked</option>
+              <option value="rewrite">rewritten</option>
             </select>
           </label>
           <label>
@@ -142,7 +143,7 @@ export default function QueryLog(props: Props) {
                     <td class="name">{entry.name}</td>
                     <td class="muted">{entry.type}</td>
                     <td>
-                      <span class={`badge ${entry.verdict === "block" ? "block" : "allow"}`}>{entry.verdict}</span>
+                      <span class={`badge ${entry.verdict === "block" ? "block" : entry.verdict === "rewrite" ? "rewrite" : "allow"}`}>{entry.verdict}</span>
                     </td>
                     <td class="selectors">{entry.rule ?? ""}</td>
                     <td>

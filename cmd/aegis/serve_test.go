@@ -242,6 +242,61 @@ func TestServeCommandLoadsRulesFromASourceAndSurvivesABadOne(t *testing.T) {
 	}
 }
 
+func TestServeCommandSeedsRewritesAndAnswersThemLocally(t *testing.T) {
+	upstream := startUpstream(t, "203.0.113.40")
+
+	address := freeAddress(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"serve",
+		"--dns-address", address,
+		"--upstream", upstream,
+		"--db", filepath.Join(t.TempDir(), "aegis.db"),
+		"--rewrite", "nas.local=192.0.2.44",
+		"--log-level", "error",
+	})
+	cmd.SetContext(ctx)
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	require.Eventually(t, func() bool {
+		client := &mdns.Client{Net: "udp", Timeout: 200 * time.Millisecond}
+		_, _, err := client.Exchange(new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA), address)
+		return err == nil
+	}, 5*time.Second, 25*time.Millisecond, "serve never began answering")
+
+	rewritten := ask(t, address, "nas.local.")
+	require.Equal(t, mdns.RcodeSuccess, rewritten.Rcode)
+	require.Len(t, rewritten.Answer, 1)
+	require.Equal(t, netip.MustParseAddr("192.0.2.44").AsSlice(), []byte(rewritten.Answer[0].(*mdns.A).A))
+
+	// A second boot keeps the seeded rewrite without the flag re-adding it.
+	ptr := askPTR(t, address, "44.2.0.192.in-addr.arpa.")
+	require.Equal(t, mdns.RcodeSuccess, ptr.Rcode)
+	require.Len(t, ptr.Answer, 1)
+	require.Equal(t, "nas.local.", ptr.Answer[0].(*mdns.PTR).Ptr)
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after its context was cancelled")
+	}
+}
+
+func askPTR(t *testing.T, address, name string) *mdns.Msg {
+	t.Helper()
+	client := &mdns.Client{Net: "udp", Timeout: 2 * time.Second}
+	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion(name, mdns.TypePTR), address)
+	require.NoError(t, err)
+	return resp
+}
+
 func TestServeCommandReportsWhatItCannotParse(t *testing.T) {
 	cases := map[string][]string{
 		"unknown blocking mode": {"--blocking-mode", "drop"},
@@ -250,6 +305,7 @@ func TestServeCommandReportsWhatItCannotParse(t *testing.T) {
 		"bad custom address":    {"--custom-address", "not-an-address"},
 		"missing blocklist":     {"--blocklist", "/nonexistent/list.txt"},
 		"bad upstream scheme":   {"--upstream", "ftp://9.9.9.9"},
+		"bad rewrite":           {"--rewrite", "nas.local=not a target"},
 	}
 	for name, extra := range cases {
 		args := append([]string{"serve", "--dns-address", "127.0.0.1:0"}, extra...)

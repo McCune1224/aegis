@@ -71,6 +71,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:   rt,
 		Upstream:  deadResolver{},
+		Rewriter:  rt,
 		Observers: []dns.Observer{hub, log},
 	})
 	require.NoError(t, err)
