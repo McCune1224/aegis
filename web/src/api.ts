@@ -244,6 +244,26 @@ export function deleteSchedule(name: string): Promise<void> {
   return request<void>(`/api/v1/schedules/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
+export type Rewrite = {
+  pattern: string;
+  target: string;
+};
+
+export function listRewrites(): Promise<Rewrite[]> {
+  return request<Rewrite[]>("/api/v1/rewrites");
+}
+
+export function saveRewrite(pattern: string, target: string): Promise<Rewrite> {
+  return request<Rewrite>(`/api/v1/rewrites/${encodeURIComponent(pattern)}`, {
+    method: "PUT",
+    body: JSON.stringify({ target }),
+  });
+}
+
+export function deleteRewrite(pattern: string): Promise<void> {
+  return request<void>(`/api/v1/rewrites/${encodeURIComponent(pattern)}`, { method: "DELETE" });
+}
+
 export type QueryEntry = {
   time: string;
   client: string;

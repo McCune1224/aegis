@@ -23,6 +23,7 @@ import (
 	"aegis/internal/filter"
 	"aegis/internal/querylog"
 	"aegis/internal/ratelimit"
+	"aegis/internal/rewrite"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 	"aegis/internal/upstream"
@@ -60,6 +61,7 @@ func newServeCmd() *cobra.Command {
 	flags.String("block-format", "hosts", "hosts, domains, or adblock, applied to every blocklist")
 	flags.StringArray("profile", nil, "extra profile as name=mode or name=mode=address, repeatable")
 	flags.StringArray("client", nil, "bind an address to a profile as address=profile, repeatable")
+	flags.StringArray("rewrite", nil, "rewrite a name as pattern=target, where target is an address or another name, repeatable")
 	flags.String("source-refresh", "6h", "how often to fetch blocklist sources for updates, as a duration")
 	flags.Float64("rate-limit", 0, "queries per second one client may ask, 0 disables rate limiting")
 	flags.Int("rate-burst", 0, "queries one client may ask in an instant, requires rate-limit")
@@ -99,6 +101,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	rewrites, err := buildRewrites(cfg.Rewrites)
+	if err != nil {
+		return err
+	}
 
 	lists := make([]runtime.ListFile, 0, len(cfg.Blocklists))
 	for _, path := range cfg.Blocklists {
@@ -122,6 +128,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := seedSources(ctx, database, cfg.Sources, format, firstBoot, logger); err != nil {
+		return err
+	}
+	if err := seedRewrites(ctx, database, rewrites, firstBoot, logger); err != nil {
 		return err
 	}
 	if err := database.MarkSeeded(ctx); err != nil {
@@ -151,6 +160,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	handlerConfig := dns.Config{
 		Decider:   engine,
 		Upstream:  resolver,
+		Rewriter:  engine,
 		Observers: []dns.Observer{hub, log},
 	}
 	// A nil *ratelimit.Limiter inside the interface would look non-nil to the
@@ -333,6 +343,39 @@ func seedSources(ctx context.Context, database *store.Store, entries []string, f
 		}
 	}
 	logger.Info("seeded blocklist sources from the flags", "sources", len(entries))
+	return nil
+}
+
+// buildRewrites parses every configured rewrite before the database is
+// touched, so a bad pair fails the start with the entry named, seeded or not.
+func buildRewrites(entries []string) ([]rewrite.Record, error) {
+	records := make([]rewrite.Record, 0, len(entries))
+	for _, raw := range entries {
+		pattern, target, found := strings.Cut(raw, "=")
+		if !found {
+			return nil, fmt.Errorf("rewrite %q must be pattern=target", raw)
+		}
+		record, err := rewrite.Parse(pattern, target)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+// seedRewrites stores the flag rewrites on first boot, so the database stays
+// the source of truth after that.
+func seedRewrites(ctx context.Context, database *store.Store, records []rewrite.Record, firstBoot bool, logger *slog.Logger) error {
+	if !firstBoot || len(records) == 0 {
+		return nil
+	}
+	for _, record := range records {
+		if err := database.SaveRewrite(ctx, record); err != nil {
+			return err
+		}
+	}
+	logger.Info("seeded rewrites from the flags", "rewrites", len(records))
 	return nil
 }
 

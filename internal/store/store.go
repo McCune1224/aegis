@@ -14,6 +14,7 @@ import (
 	"aegis/db"
 	"aegis/internal/client"
 	"aegis/internal/filter"
+	"aegis/internal/rewrite"
 	"aegis/internal/store/storedb"
 )
 
@@ -36,6 +37,7 @@ type Config struct {
 	Clients   []Client
 	Rules     []filter.RuleSpec
 	Schedules []filter.ScheduleSpec
+	Rewrites  []rewrite.Record
 	Default   filter.ProfileID
 }
 
@@ -167,11 +169,17 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 
+	rewrites, err := s.Rewrites(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Profiles:  profiles,
 		Clients:   clients,
 		Rules:     specs,
 		Schedules: schedules,
+		Rewrites:  rewrites,
 		Default:   filter.ProfileID(defaultProfile),
 	}, nil
 }

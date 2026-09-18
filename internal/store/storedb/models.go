@@ -37,6 +37,11 @@ type Query struct {
 	Rule    string
 }
 
+type Rewrite struct {
+	Domain string
+	Target string
+}
+
 type Rule struct {
 	ID       int64
 	Domain   string

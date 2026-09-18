@@ -11,6 +11,7 @@ import (
 
 	"aegis/internal/blocklist"
 	"aegis/internal/filter"
+	"aegis/internal/rewrite"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 )
@@ -209,4 +210,26 @@ func TestAReloadIsSafeWhileQueriesRun(t *testing.T) {
 	for msg := range torn {
 		t.Errorf("a query read a torn generation: %s", msg)
 	}
+}
+
+func TestStoredRewritesReachTheSnapshot(t *testing.T) {
+	s := openStore(t)
+	ctx := t.Context()
+	rt := runtime.New(s, nil, quietLogger())
+
+	_, ok := rt.Lookup(mustDomain(t, "home.local"))
+	require.False(t, ok, "an empty table rewrites nothing")
+
+	record, err := rewrite.Parse("home.local", "192.168.7.7")
+	require.NoError(t, err)
+	require.NoError(t, s.SaveRewrite(ctx, record))
+	require.NoError(t, rt.Reload(ctx))
+
+	got, ok := rt.Lookup(mustDomain(t, "home.local"))
+	require.True(t, ok)
+	require.Equal(t, "192.168.7.7", got.Addr.String())
+
+	host, ok := rt.Reverse(netip.MustParseAddr("192.168.7.7"))
+	require.True(t, ok)
+	require.Equal(t, "home.local", host.String())
 }

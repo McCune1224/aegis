@@ -16,6 +16,7 @@ import (
 	"aegis/internal/blocklist"
 	"aegis/internal/client"
 	"aegis/internal/filter"
+	"aegis/internal/rewrite"
 	"aegis/internal/store"
 )
 
@@ -27,12 +28,14 @@ type ListFile struct {
 	Format blocklist.Format
 }
 
-// snapshot is one generation of everything a query needs. The rule set and the
-// identity table are stored together and read with one load, so a query cannot
-// pair the new rules with the old selectors while a reload is in flight.
+// snapshot is one generation of everything a query needs. The rule set, the
+// identity table, and the rewrite table are stored together and read with one
+// load, so a query cannot pair the new rules with the old selectors while a
+// reload is in flight.
 type snapshot struct {
 	set      *filter.RuleSet
 	identity *client.Resolver
+	rewrites *rewrite.Table
 }
 
 // Runtime owns the engine's contents and rebuilds them when the configuration
@@ -124,7 +127,7 @@ func (r *Runtime) publish(ctx context.Context) error {
 		return err
 	}
 
-	r.current.Store(&snapshot{set: set, identity: identity})
+	r.current.Store(&snapshot{set: set, identity: identity, rewrites: rewrite.New(cfg.Rewrites)})
 	return nil
 }
 
@@ -146,6 +149,27 @@ func (r *Runtime) ClientKey(address netip.Addr) filter.ClientKey {
 		return ""
 	}
 	return current.identity.Key(address)
+}
+
+// Lookup maps one name through the rewrite table, from the same generation
+// the filter reads, so a query cannot be rewritten by new rules and filtered
+// by old ones. The handler calls it through the Rewriter seam.
+func (r *Runtime) Lookup(name filter.Domain) (rewrite.Record, bool) {
+	current := r.current.Load()
+	if current == nil {
+		return rewrite.Record{}, false
+	}
+	return current.rewrites.Lookup(name)
+}
+
+// Reverse maps one address back to the name that pins it, from the same
+// generation as Lookup.
+func (r *Runtime) Reverse(address netip.Addr) (filter.Domain, bool) {
+	current := r.current.Load()
+	if current == nil {
+		return filter.Domain{}, false
+	}
+	return current.rewrites.Reverse(address)
 }
 
 // ValidateLists reads and parses every list file the way publish will, so a

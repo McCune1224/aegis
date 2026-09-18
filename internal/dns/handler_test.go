@@ -19,10 +19,12 @@ type stubResolver struct {
 	answer *mdns.Msg
 	err    error
 	calls  int
+	asked  string
 }
 
-func (s *stubResolver) Resolve(context.Context, *mdns.Msg) (*mdns.Msg, error) {
+func (s *stubResolver) Resolve(_ context.Context, req *mdns.Msg) (*mdns.Msg, error) {
 	s.calls++
+	s.asked = req.Question[0].Name
 	if s.err != nil {
 		return nil, s.err
 	}
