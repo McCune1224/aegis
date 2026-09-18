@@ -22,6 +22,16 @@ const (
 	DefaultMaxEntries = 4096
 )
 
+// prefetchFraction is the share of stored life left under which a hit arms a
+// background refresh: remaining <= ttl/prefetchFraction. A fraction, not a
+// fixed second count, so the window scales with how long the answer is
+// actually good for.
+const prefetchFraction = 5
+
+// refreshTimeout bounds one background prefetch exchange, which cannot take
+// the asking client's context because that client has already been answered.
+const refreshTimeout = 10 * time.Second
+
 // Upstream answers a query on behalf of the cache. It is the same shape the
 // DNS handler calls a Resolver, declared here so this package does not import
 // the server.
@@ -36,6 +46,11 @@ type Config struct {
 	MaxEntries int
 	MinTTL     time.Duration
 	MaxTTL     time.Duration
+	// Prefetch refreshes a popular entry in the background once a hit lands
+	// inside the last fraction of its life, so the next ask never pays the
+	// cold round trip. It is demand-driven: nothing is refreshed unless a
+	// client asked, so a quiet network spends no upstream traffic.
+	Prefetch bool
 	// Now names the wall clock, so a test can state the moment it asks about.
 	Now func() time.Time
 }
@@ -51,28 +66,45 @@ type key struct {
 
 // entry is one stored upstream answer. resp is a private template whose ID and
 // question are rewritten on every hit. ttl is the clamped TTL the entry lives
-// for, not the upstream's raw value.
+// for, not the upstream's raw value. refreshing marks a background prefetch
+// in flight for this slot, so one entry arms at most one refresh.
 type entry struct {
-	k       key
-	resp    *mdns.Msg
-	ttl     uint32
-	stored  time.Time
-	expires time.Time
+	k          key
+	resp       *mdns.Msg
+	ttl        uint32
+	stored     time.Time
+	expires    time.Time
+	refreshing bool
+}
+
+// Stats is a snapshot of the cache counters. They are the raw material for
+// hit-rate reporting (#56) and are read nowhere on the DNS path.
+type Stats struct {
+	Hits       uint64
+	Misses     uint64
+	Evictions  uint64
+	Prefetches uint64
 }
 
 // Cache is an LRU of upstream answers bounded by MaxEntries. One mutex covers
-// the table and the LRU order, so the hit path is a map lookup and a list
-// move.
+// the table, the LRU order, and the counters, so the hit path is a map lookup
+// and a list move.
 type Cache struct {
 	upstream Upstream
 	now      func() time.Time
 	minTTL   time.Duration
 	maxTTL   time.Duration
 	bound    int
+	prefetch bool
 
 	mu    sync.Mutex
 	items map[key]*list.Element
 	lru   *list.List
+
+	hits       uint64
+	misses     uint64
+	evictions  uint64
+	prefetches uint64
 }
 
 // New checks the config and returns a Cache.
@@ -107,6 +139,7 @@ func New(cfg Config) (*Cache, error) {
 		minTTL:   minTTL,
 		maxTTL:   maxTTL,
 		bound:    bound,
+		prefetch: cfg.Prefetch,
 		items:    make(map[key]*list.Element, bound),
 		lru:      list.New(),
 	}, nil
@@ -115,7 +148,9 @@ func New(cfg Config) (*Cache, error) {
 // Resolve answers req from the cache when it holds a live entry for the
 // question's name and type, and asks the upstream once otherwise. A cacheable
 // answer is stored under the clamped TTL. An error response is never stored,
-// so the next query retries the upstream.
+// so the next query retries the upstream. A hit inside the last fraction of
+// the entry's life also starts one background refresh when prefetching is on,
+// so a popular name never costs a client the cold round trip.
 func (c *Cache) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
 	if len(req.Question) != 1 {
 		return c.upstream.Resolve(ctx, req)
@@ -129,12 +164,23 @@ func (c *Cache) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
 		now := c.now()
 		if now.Before(e.expires) {
 			c.lru.MoveToFront(el)
+			c.hits++
+			arm := c.prefetch && !e.refreshing &&
+				e.expires.Sub(now)*prefetchFraction <= time.Duration(e.ttl)*time.Second
+			if arm {
+				e.refreshing = true
+				c.prefetches++
+			}
 			c.mu.Unlock()
+			if arm {
+				go c.refresh(k)
+			}
 			return e.reply(req, now), nil
 		}
 		c.lru.Remove(el)
 		delete(c.items, k)
 	}
+	c.misses++
 	c.mu.Unlock()
 
 	resp, err := c.upstream.Resolve(ctx, req)
@@ -149,9 +195,41 @@ func (c *Cache) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
 	return resp, nil
 }
 
+// refresh re-asks the upstream for one slot in the background and swaps the
+// stored entry for the fresh answer. A failure leaves the stored entry alone
+// until its own expiry; the client's answer already went out either way.
+func (c *Cache) refresh(k key) {
+	ctx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
+	defer cancel()
+	req := new(mdns.Msg)
+	req.SetQuestion(k.name, k.qtype)
+	req.Question[0].Qclass = k.qclass
+
+	resp, err := c.upstream.Resolve(ctx, req)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el, ok := c.items[k]; ok {
+		el.Value.(*entry).refreshing = false
+	}
+	if err != nil {
+		return
+	}
+	if e := storable(resp, k, c.minTTL, c.maxTTL, c.now()); e != nil {
+		c.replace(k, e)
+	}
+}
+
+// Stats returns a snapshot of the counters.
+func (c *Cache) Stats() Stats {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return Stats{Hits: c.hits, Misses: c.misses, Evictions: c.evictions, Prefetches: c.prefetches}
+}
+
 // replace inserts the entry at the front of the LRU and evicts from the back
 // while the table is over its bound. An entry replacing itself frees its old
-// element first, so the bound still holds.
+// element first, so the bound still holds. Callers hold c.mu.
 func (c *Cache) replace(k key, e *entry) {
 	if el, ok := c.items[k]; ok {
 		c.lru.Remove(el)
@@ -165,6 +243,7 @@ func (c *Cache) replace(k key, e *entry) {
 		}
 		delete(c.items, oldest.Value.(*entry).k)
 		c.lru.Remove(oldest)
+		c.evictions++
 	}
 }
 

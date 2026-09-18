@@ -149,7 +149,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	resolver, err := cache.New(cache.Config{Upstream: pool})
+	resolver, err := cache.New(cache.Config{Upstream: pool, Prefetch: true})
 	if err != nil {
 		return err
 	}

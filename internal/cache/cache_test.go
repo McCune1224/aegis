@@ -16,13 +16,19 @@ import (
 	"aegis/internal/cache"
 )
 
-type clock struct{ now time.Time }
+// The time lives in an atomic because the prefetch refresh reads the clock
+// from its own goroutine while the test advances it.
+type clock struct{ nanos atomic.Int64 }
 
-func newClock() *clock { return &clock{now: time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)} }
+func newClock() *clock {
+	c := &clock{}
+	c.nanos.Store(time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC).UnixNano())
+	return c
+}
 
-func (c *clock) Now() time.Time { return c.now }
+func (c *clock) Now() time.Time { return time.Unix(0, c.nanos.Load()).UTC() }
 
-func (c *clock) Advance(d time.Duration) { c.now = c.now.Add(d) }
+func (c *clock) Advance(d time.Duration) { c.nanos.Add(int64(d)) }
 
 // stubUpstream counts Resolve calls. With no answer set it replies to each A
 // query with a distinct address, so a cached answer is distinguishable from a
@@ -106,7 +112,7 @@ func requireA(t *testing.T, msg *mdns.Msg, want string) {
 	require.Equal(t, want, netip.AddrFrom4([4]byte{a.A[0], a.A[1], a.A[2], a.A[3]}).String())
 }
 
-func newResolver(t *testing.T, upstream *stubUpstream, tune func(*cache.Config)) *cache.Cache {
+func newResolver(t *testing.T, upstream cache.Upstream, tune func(*cache.Config)) *cache.Cache {
 	t.Helper()
 	cfg := cache.Config{Upstream: upstream, Now: newClock().Now}
 	if tune != nil {
