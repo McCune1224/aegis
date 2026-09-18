@@ -5,6 +5,12 @@ whole network, with per-client policies, blocklist management, scheduling, and a
 node graph dashboard. The backend is Go. The web UI is Solid 2 over a WebGL
 canvas. Both ship as one static binary.
 
+The goal is a feature clone of AdGuard Home first, then a superset. When a
+feature exists in AdGuard Home, match its behaviour, including the semantics
+operators already rely on (rewrite wildcards, blocking modes, per-client
+settings), and cite the difference in the design record when Aegis chooses
+otherwise. Superset work comes after parity, not instead of it.
+
 Read `docs/stack.md` before you add a dependency or change the build. It records
 why each tool is here and which alternatives lost.
 
