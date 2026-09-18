@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -51,6 +53,10 @@ func newServeCmd() *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.String("dns-address", "127.0.0.1:53", "address to listen on, as host:port")
+	flags.String("dot-address", "", "address to serve DNS over TLS on, as host:port, requires tls-cert and tls-key")
+	flags.String("doh-address", "", "address to serve DNS over HTTPS on, as host:port, requires tls-cert and tls-key")
+	flags.String("tls-cert", "", "path to the PEM certificate chain the encrypted listeners serve")
+	flags.String("tls-key", "", "path to the PEM private key the encrypted listeners serve")
 	flags.StringArray("upstream", []string{"9.9.9.9:53"}, "upstream resolver as a URL: udp://, tcp://, tls://, or https://, repeatable")
 	flags.String("api-address", "127.0.0.1:8080", "address for the HTTP API, as host:port")
 	flags.String("db", "aegis.db", "path to the configuration database")
@@ -102,6 +108,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	rewrites, err := buildRewrites(cfg.Rewrites)
+	if err != nil {
+		return err
+	}
+	tlsConfig, err := buildTLSConfig(cfg.TLSCert, cfg.TLSKey, cfg.DoTAddress, cfg.DoHAddress)
 	if err != nil {
 		return err
 	}
@@ -174,9 +184,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	server, err := dns.Start(dns.ServerConfig{
-		Handler: handler,
-		Address: cfg.DNSAddress,
-		Logger:  logger,
+		Handler:    handler,
+		Address:    cfg.DNSAddress,
+		DoTAddress: cfg.DoTAddress,
+		DoHAddress: cfg.DoHAddress,
+		TLS:        tlsConfig,
+		Logger:     logger,
 	})
 	if err != nil {
 		return err
@@ -205,6 +218,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		"upstreams", strings.Join(upstreamNames(specs), ", "),
 		"database", cfg.DB,
 		"rules", engine.Size(),
+		slog.Group("encrypted",
+			"dot", listenerAddrOrOff(server.DoTAddr()),
+			"doh", listenerAddrOrOff(server.DoHAddr()),
+		),
 	)
 
 	stop, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -477,6 +494,41 @@ func customPointer(address netip.Addr) *netip.Addr {
 		return nil
 	}
 	return &address
+}
+
+// buildTLSConfig loads the operator's PEM pair for the encrypted listeners.
+// Zero listeners and zero paths is the disabled default; anything between the
+// two states is a configuration error, named here so a bad flag cannot hide
+// behind first-boot seeding.
+func buildTLSConfig(certPath, keyPath, dotAddress, dohAddress string) (*tls.Config, error) {
+	switch {
+	case certPath == "" && keyPath == "":
+		if dotAddress != "" || dohAddress != "" {
+			return nil, errors.New("dot-address or doh-address needs --tls-cert and --tls-key")
+		}
+		return nil, nil
+	case certPath == "" || keyPath == "":
+		return nil, errors.New("--tls-cert and --tls-key must be set together")
+	case dotAddress == "" && dohAddress == "":
+		return nil, errors.New("--tls-cert and --tls-key need --dot-address or --doh-address to serve on")
+	}
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("tls: %w", err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+		// h2 is what makes DoH serve HTTP/2; DoT clients ignore the offer.
+		NextProtos: []string{"h2", "http/1.1"},
+	}, nil
+}
+
+func listenerAddrOrOff(addr net.Addr) string {
+	if addr == nil {
+		return "off"
+	}
+	return addr.String()
 }
 
 func newLogger(level string, out io.Writer) (*slog.Logger, error) {

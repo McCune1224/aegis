@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
 	"log/slog"
 	"net"
@@ -166,6 +168,107 @@ func TestServeCommandServesTheAPI(t *testing.T) {
 	}
 }
 
+func TestServeCommandServesEncryptedDNSWithAGeneratedCertificate(t *testing.T) {
+	upstream := startUpstream(t, "203.0.113.70")
+	certPEM, keyPEM, pool := pinning(t)
+	certDir := t.TempDir()
+	certPath := filepath.Join(certDir, "cert.pem")
+	keyPath := filepath.Join(certDir, "key.pem")
+	require.NoError(t, os.WriteFile(certPath, certPEM, 0o600))
+	require.NoError(t, os.WriteFile(keyPath, keyPEM, 0o600))
+
+	list := filepath.Join(t.TempDir(), "block.txt")
+	require.NoError(t, os.WriteFile(list, []byte("0.0.0.0 ads.example.com\n"), 0o600))
+
+	address := freeAddress(t)
+	dotAddress := freeTCPAddress(t)
+	dohAddress := freeTCPAddress(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"serve",
+		"--dns-address", address,
+		"--upstream", upstream,
+		"--db", filepath.Join(t.TempDir(), "aegis.db"),
+		"--blocklist", list,
+		"--dot-address", dotAddress,
+		"--doh-address", dohAddress,
+		"--tls-cert", certPath,
+		"--tls-key", keyPath,
+		"--log-level", "error",
+	})
+	cmd.SetContext(ctx)
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	tlsCfg := &tls.Config{RootCAs: pool, ServerName: "localhost", MinVersion: tls.VersionTLS12}
+	require.Eventually(t, func() bool {
+		_, _, err := (&mdns.Client{Net: "tcp-tls", TLSConfig: tlsCfg, Timeout: 500 * time.Millisecond}).
+			Exchange(new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA), dotAddress)
+		return err == nil
+	}, 5*time.Second, 50*time.Millisecond, "serve never began answering over DoT")
+
+	// The plaintext, DoT, and DoH listeners agree on every answer, and the
+	// blocked rule holds on the encrypted paths: the client reaches the
+	// handler identified regardless of transport.
+	plain := ask(t, address, "example.com.")
+	require.Len(t, plain.Answer, 1)
+
+	dot, _, err := (&mdns.Client{Net: "tcp-tls", TLSConfig: tlsCfg, Timeout: 2 * time.Second}).
+		Exchange(new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA), dotAddress)
+	require.NoError(t, err)
+	require.Equal(t, plain.Answer, dot.Answer, "DoT answers what plaintext answers")
+
+	dotBlocked, _, err := (&mdns.Client{Net: "tcp-tls", TLSConfig: tlsCfg, Timeout: 2 * time.Second}).
+		Exchange(new(mdns.Msg).SetQuestion("ads.example.com.", mdns.TypeA), dotAddress)
+	require.NoError(t, err)
+	require.Equal(t, mdns.RcodeNameError, dotBlocked.Rcode, "the blocklist holds on DoT")
+
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsCfg}}
+	wire, err := new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA).Pack()
+	require.NoError(t, err)
+	post := postDNS(t, client, "https://"+dohAddress+"/dns", wire)
+	defer func() { _ = post.Body.Close() }()
+	require.Equal(t, http.StatusOK, post.StatusCode)
+	dohAnswer := new(mdns.Msg)
+	require.NoError(t, dohAnswer.Unpack(readAll(t, post.Body)))
+	require.Len(t, dohAnswer.Answer, 1)
+	a, ok := dohAnswer.Answer[0].(*mdns.A)
+	require.True(t, ok)
+	require.Equal(t, netip.MustParseAddr("203.0.113.70").AsSlice(), []byte(a.A), "DoH answers what plaintext answers")
+
+	blockedWire, err := new(mdns.Msg).SetQuestion("ads.example.com.", mdns.TypeA).Pack()
+	require.NoError(t, err)
+	blockedPost := postDNS(t, client, "https://"+dohAddress+"/dns", blockedWire)
+	defer func() { _ = blockedPost.Body.Close() }()
+	blockedAnswer := new(mdns.Msg)
+	require.NoError(t, blockedAnswer.Unpack(readAll(t, blockedPost.Body)))
+	require.Equal(t, mdns.RcodeNameError, blockedAnswer.Rcode, "the blocklist holds on DoH")
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after its context was cancelled")
+	}
+}
+
+// postDNS sends one wire-format DoH query with the request bound to the test
+// context, the form the noctx lint demands.
+func postDNS(t *testing.T, client *http.Client, url string, wire []byte) *http.Response {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewReader(wire))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/dns-message")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
 func modePtr(mode filter.BlockingMode) *filter.BlockingMode { return &mode }
 
 func TestASecondBootLeavesTheStoredConfigurationAlone(t *testing.T) {
@@ -298,14 +401,31 @@ func askPTR(t *testing.T, address, name string) *mdns.Msg {
 }
 
 func TestServeCommandReportsWhatItCannotParse(t *testing.T) {
+	certDir := t.TempDir()
+	certPEM, keyPEM, _ := pinning(t)
+	certPath := filepath.Join(certDir, "cert.pem")
+	keyPath := filepath.Join(certDir, "key.pem")
+	require.NoError(t, os.WriteFile(certPath, certPEM, 0o600))
+	require.NoError(t, os.WriteFile(keyPath, keyPEM, 0o600))
+
 	cases := map[string][]string{
-		"unknown blocking mode": {"--blocking-mode", "drop"},
-		"unknown block format":  {"--block-format", "csv"},
-		"unknown log level":     {"--log-level", "chatty"},
-		"bad custom address":    {"--custom-address", "not-an-address"},
-		"missing blocklist":     {"--blocklist", "/nonexistent/list.txt"},
-		"bad upstream scheme":   {"--upstream", "ftp://9.9.9.9"},
-		"bad rewrite":           {"--rewrite", "nas.local=not a target"},
+		"unknown blocking mode":     {"--blocking-mode", "drop"},
+		"unknown block format":      {"--block-format", "csv"},
+		"unknown log level":         {"--log-level", "chatty"},
+		"bad custom address":        {"--custom-address", "not-an-address"},
+		"missing blocklist":         {"--blocklist", "/nonexistent/list.txt"},
+		"bad upstream scheme":       {"--upstream", "ftp://9.9.9.9"},
+		"bad rewrite":               {"--rewrite", "nas.local=not a target"},
+		"dot without a certificate": {"--dot-address", "127.0.0.1:0"},
+		"doh without a certificate": {"--doh-address", "127.0.0.1:0"},
+		"half a certificate pair":   {"--tls-cert", certPath},
+		"certificates with no encrypted listener": {
+			"--tls-cert", certPath, "--tls-key", keyPath,
+		},
+		"a certificate that is no certificate": {
+			"--tls-cert", filepath.Join(certDir, "nope.pem"), "--tls-key", keyPath,
+			"--dot-address", "127.0.0.1:0",
+		},
 	}
 	for name, extra := range cases {
 		args := append([]string{"serve", "--dns-address", "127.0.0.1:0"}, extra...)
