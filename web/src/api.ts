@@ -97,7 +97,7 @@ export type ScheduleInput = {
 };
 
 export type Status = {
-  upstream: string;
+  upstreams: string[];
   rules?: number;
 };
 

@@ -12,7 +12,7 @@ import (
 func serveFlags() *pflag.FlagSet {
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	flags.String("dns-address", "127.0.0.1:53", "")
-	flags.String("upstream", "9.9.9.9:53", "")
+	flags.StringArray("upstream", []string{"9.9.9.9:53"}, "")
 	flags.String("db", "aegis.db", "")
 	flags.String("blocking-mode", "nxdomain", "")
 	flags.String("custom-address", "", "")
@@ -51,7 +51,7 @@ func TestLoadReadsEveryFlagValue(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, config.Config{
 		DNSAddress:    "0.0.0.0:5353",
-		Upstream:      "1.1.1.1:53",
+		Upstreams:     []string{"1.1.1.1:53"},
 		DB:            "/tmp/aegis.db",
 		BlockingMode:  "refused",
 		CustomAddress: "192.0.2.1",
@@ -74,7 +74,7 @@ func TestLoadFallsBackToTheFlagDefaults(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "127.0.0.1:53", got.DNSAddress)
-	require.Equal(t, "9.9.9.9:53", got.Upstream)
+	require.Equal(t, []string{"9.9.9.9:53"}, got.Upstreams)
 	require.Equal(t, "nxdomain", got.BlockingMode)
 	require.Equal(t, "hosts", got.BlockFormat)
 	require.Equal(t, "info", got.LogLevel)
@@ -89,7 +89,7 @@ func TestLoadPrefersTheEnvironmentOverTheFlagDefault(t *testing.T) {
 	got, err := config.Load(flags)
 
 	require.NoError(t, err)
-	require.Equal(t, "8.8.8.8:53", got.Upstream)
+	require.Equal(t, []string{"8.8.8.8:53"}, got.Upstreams)
 }
 
 func TestLoadPrefersASetFlagOverTheEnvironment(t *testing.T) {
@@ -100,5 +100,5 @@ func TestLoadPrefersASetFlagOverTheEnvironment(t *testing.T) {
 	got, err := config.Load(flags)
 
 	require.NoError(t, err)
-	require.Equal(t, "1.1.1.1:53", got.Upstream)
+	require.Equal(t, []string{"1.1.1.1:53"}, got.Upstreams)
 }

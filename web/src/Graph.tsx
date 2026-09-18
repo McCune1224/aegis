@@ -5,13 +5,13 @@ import type { Client, Profile } from "./api";
 import type { Decision } from "./api";
 import { effectiveMode } from "./resolve";
 import type { QueryLog } from "./querylog";
-import { buildTopology, matchClient, type Topology } from "./topology";
+import { buildTopology, matchClient, upstreamNodeID, type Topology } from "./topology";
 
 type Props = {
   profiles: Profile[];
   clients: Client[];
   defaultProfile: string;
-  upstream: string;
+  upstreams: string[];
   log: QueryLog;
   onSaveClient: (name: string, input: { profile: string; notes: string; addresses: string[]; prefixes: string[] }) => Promise<void>;
   onSetDefault: (name: string) => Promise<void>;
@@ -146,7 +146,7 @@ export default function Graph(props: Props) {
   let starTextures: Map<Kind, Texture>;
 
   createEffect(
-    () => [buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstream)] as const,
+    () => [buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams)] as const,
     ([topology]) => {
       void draw(topology);
     },
@@ -355,7 +355,7 @@ export default function Graph(props: Props) {
       pulses.push({ x: profile.x, y: profile.y, age: 0, color: blockColor });
       return;
     }
-    const upstream = placed.get("upstream");
+    const upstream = placed.get(upstreamNodeID(props.upstreams[0] ?? ""));
     if (!upstream) {
       return;
     }

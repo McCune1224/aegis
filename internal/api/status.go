@@ -9,7 +9,7 @@ type Sizer interface {
 }
 
 func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
-	body := map[string]any{"upstream": s.upstream}
+	body := map[string]any{"upstreams": s.upstreams}
 	if sizer, ok := s.reloader.(Sizer); ok {
 		body["rules"] = sizer.Size()
 	}

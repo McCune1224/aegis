@@ -25,6 +25,7 @@ import (
 	"aegis/internal/ratelimit"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
+	"aegis/internal/upstream"
 	"aegis/web"
 )
 
@@ -49,7 +50,7 @@ func newServeCmd() *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.String("dns-address", "127.0.0.1:53", "address to listen on, as host:port")
-	flags.String("upstream", "9.9.9.9:53", "upstream resolver, as host:port")
+	flags.StringArray("upstream", []string{"9.9.9.9:53"}, "upstream resolver as a URL: udp://, tcp://, tls://, or https://, repeatable")
 	flags.String("api-address", "127.0.0.1:8080", "address for the HTTP API, as host:port")
 	flags.String("db", "aegis.db", "path to the configuration database")
 	flags.String("blocking-mode", "nxdomain", "nxdomain, null-address, custom-address, or refused, for the default profile")
@@ -94,6 +95,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	specs, err := buildUpstreams(cfg.Upstreams)
+	if err != nil {
+		return err
+	}
 
 	lists := make([]runtime.ListFile, 0, len(cfg.Blocklists))
 	for _, path := range cfg.Blocklists {
@@ -131,7 +136,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	hub := api.NewHub(logger)
 	log := querylog.New(database, logger)
 
-	resolver, err := cache.New(cache.Config{Upstream: dns.NewForwarder(cfg.Upstream)})
+	pool, err := upstream.New(upstream.Config{Specs: specs})
+	if err != nil {
+		return err
+	}
+	resolver, err := cache.New(cache.Config{Upstream: pool})
 	if err != nil {
 		return err
 	}
@@ -164,15 +173,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	apiServer, err := api.Start(api.Config{
-		Store:    database,
-		Reloader: engine,
-		Sources:  sync,
-		Preview:  sync,
-		Hub:      hub,
-		Files:    web.Files(),
-		Upstream: cfg.Upstream,
-		Address:  cfg.APIAddress,
-		Logger:   logger,
+		Store:     database,
+		Reloader:  engine,
+		Sources:   sync,
+		Preview:   sync,
+		Hub:       hub,
+		Files:     web.Files(),
+		Upstreams: upstreamNames(specs),
+		Address:   cfg.APIAddress,
+		Logger:    logger,
 	})
 	if err != nil {
 		_ = server.Shutdown(context.Background())
@@ -183,7 +192,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		"udp", server.UDPAddr().String(),
 		"tcp", server.TCPAddr().String(),
 		"api", apiServer.Addr().String(),
-		"upstream", cfg.Upstream,
+		"upstreams", strings.Join(upstreamNames(specs), ", "),
 		"database", cfg.DB,
 		"rules", engine.Size(),
 	)
@@ -208,6 +217,32 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	return errors.Join(apiServer.Shutdown(shutdown), server.Shutdown(shutdown))
+}
+
+// buildUpstreams parses every configured resolver before the database is
+// touched, so a bad URL fails the start with the entry named.
+func buildUpstreams(raw []string) ([]upstream.Spec, error) {
+	if len(raw) == 0 {
+		return nil, errors.New("at least one --upstream is required")
+	}
+	specs := make([]upstream.Spec, 0, len(raw))
+	for _, entry := range raw {
+		spec, err := upstream.Parse(entry)
+		if err != nil {
+			return nil, err
+		}
+		specs = append(specs, spec)
+	}
+	return specs, nil
+}
+
+// upstreamNames lists the resolvers as written, for status and logs.
+func upstreamNames(specs []upstream.Spec) []string {
+	names := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		names = append(names, spec.Name)
+	}
+	return names
 }
 
 // buildLimiter reads the rate flags into a limiter whose buckets key on the

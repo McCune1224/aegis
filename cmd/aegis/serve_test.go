@@ -249,6 +249,7 @@ func TestServeCommandReportsWhatItCannotParse(t *testing.T) {
 		"unknown log level":     {"--log-level", "chatty"},
 		"bad custom address":    {"--custom-address", "not-an-address"},
 		"missing blocklist":     {"--blocklist", "/nonexistent/list.txt"},
+		"bad upstream scheme":   {"--upstream", "ftp://9.9.9.9"},
 	}
 	for name, extra := range cases {
 		args := append([]string{"serve", "--dns-address", "127.0.0.1:0"}, extra...)
