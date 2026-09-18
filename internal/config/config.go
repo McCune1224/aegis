@@ -29,6 +29,10 @@ type Config struct {
 	RateLimit     float64  `mapstructure:"rate-limit"`
 	RateBurst     int      `mapstructure:"rate-burst"`
 	LogLevel      string   `mapstructure:"log-level"`
+	DoTAddress    string   `mapstructure:"dot-address"`
+	DoHAddress    string   `mapstructure:"doh-address"`
+	TLSCert       string   `mapstructure:"tls-cert"`
+	TLSKey        string   `mapstructure:"tls-key"`
 }
 
 // Load reads the environment over the flag defaults, and a flag that was set
