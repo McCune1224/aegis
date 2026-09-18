@@ -62,8 +62,8 @@ func newServeCmd() *cobra.Command {
 	flags.String("db", "aegis.db", "path to the configuration database")
 	flags.String("blocking-mode", "nxdomain", "nxdomain, null-address, custom-address, or refused, for the default profile")
 	flags.String("custom-address", "", "the address to answer with when the default profile blocks")
-	flags.StringArray("blocklist", nil, "path to a blocklist file, repeatable")
-	flags.StringArray("source", nil, "blocklist source as name=url, repeatable")
+	flags.StringArray("blocklist", nil, "path to a blocklist file, repeatable, as [format:]path with format hosts, domains, or adblock")
+	flags.StringArray("source", nil, "blocklist source as name=[format:]url, repeatable")
 	flags.String("block-format", "hosts", "hosts, domains, or adblock, applied to every blocklist")
 	flags.StringArray("profile", nil, "extra profile as name=mode or name=mode=address, repeatable")
 	flags.StringArray("client", nil, "bind an address to a profile as address=profile, repeatable")
@@ -118,7 +118,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	lists := make([]runtime.ListFile, 0, len(cfg.Blocklists))
 	for _, path := range cfg.Blocklists {
-		lists = append(lists, runtime.ListFile{Path: path, Format: format})
+		lists = append(lists, parseBlocklistEntry(path, format))
 	}
 	if err := runtime.ValidateLists(lists); err != nil {
 		return err
@@ -344,6 +344,19 @@ func seed(ctx context.Context, database *store.Store, profiles []filter.ProfileS
 	return nil
 }
 
+// parseBlocklistEntry turns one --blocklist entry into the typed file. An
+// entry may name its format with an exact prefix — adblock:/path/list.txt —
+// and otherwise takes the global --block-format. A prefix only counts when it
+// is a format name, so drive-letter paths pass through untouched.
+func parseBlocklistEntry(raw string, fallback blocklist.Format) runtime.ListFile {
+	if prefix, rest, found := strings.Cut(raw, ":"); found {
+		if parsed, err := blocklist.ParseFormat(prefix); err == nil {
+			return runtime.ListFile{Path: rest, Format: parsed}
+		}
+	}
+	return runtime.ListFile{Path: raw, Format: fallback}
+}
+
 // seedSources stores the flag sources on first boot, so the database stays the
 // source of truth after that.
 func seedSources(ctx context.Context, database *store.Store, entries []string, format blocklist.Format, firstBoot bool, logger *slog.Logger) error {
@@ -397,11 +410,16 @@ func seedRewrites(ctx context.Context, database *store.Store, records []rewrite.
 }
 
 func parseSource(raw string, format blocklist.Format) (store.Source, error) {
-	name, url, found := strings.Cut(raw, "=")
-	if !found || name == "" || url == "" {
+	name, rest, found := strings.Cut(raw, "=")
+	if !found || name == "" || rest == "" {
 		return store.Source{}, fmt.Errorf("source %q must be name=url", raw)
 	}
-	return store.Source{Name: name, URL: url, Format: format, Enabled: true}, nil
+	if prefix, url, found := strings.Cut(rest, ":"); found {
+		if parsed, err := blocklist.ParseFormat(prefix); err == nil {
+			return store.Source{Name: name, URL: url, Format: parsed, Enabled: true}, nil
+		}
+	}
+	return store.Source{Name: name, URL: rest, Format: format, Enabled: true}, nil
 }
 
 // buildProfiles turns the default settings and any configured profiles into the
