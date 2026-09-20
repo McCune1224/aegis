@@ -58,9 +58,11 @@ type Gate interface {
 
 // Rewriter answers one query from the configured rewrite table, the seam the
 // runtime fills with one snapshot generation. Lookup maps a name to its
-// record; Reverse maps an address back to the name that pins it.
+// record, and takes the address the query came from because a per-profile
+// rewrite, such as SafeSearch, only answers for the profiles that enabled it.
+// Reverse maps an address back to the name that pins it.
 type Rewriter interface {
-	Lookup(name filter.Domain) (rewrite.Record, bool)
+	Lookup(name filter.Domain, address netip.Addr) (rewrite.Record, bool)
 	Reverse(address netip.Addr) (filter.Domain, bool)
 }
 
@@ -150,7 +152,7 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 	if h.rewriter != nil {
 		var pinned *rewrite.Record
 		for range maxRewriteHops {
-			record, ok := h.rewriter.Lookup(target)
+			record, ok := h.rewriter.Lookup(target, address)
 			if !ok {
 				break
 			}
@@ -168,7 +170,7 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 			h.publish(question, address, name, filter.Verdict{Action: filter.ActionRewrite}, rewritten)
 			return addressAnswer(req, question, pinned.Addr), nil
 		}
-		if _, looping := h.rewriter.Lookup(target); looping {
+		if _, looping := h.rewriter.Lookup(target, address); looping {
 			return reply(req, mdns.RcodeServerFailure), fmt.Errorf("dns: rewrite loop from %s", name)
 		}
 	}

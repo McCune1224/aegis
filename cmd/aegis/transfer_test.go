@@ -162,8 +162,8 @@ func TestAnExportImportsIntoAnEmptyStoreAndProducesTheSameVerdicts(t *testing.T)
 	}
 
 	name := parseName(t, "nas.example")
-	recordA, okA := rtA.Lookup(name)
-	recordB, okB := rtB.Lookup(name)
+	recordA, okA := rtA.Lookup(name, netip.Addr{})
+	recordB, okB := rtB.Lookup(name, netip.Addr{})
 	require.True(t, okA)
 	require.True(t, okB)
 	require.Equal(t, recordA, recordB)
