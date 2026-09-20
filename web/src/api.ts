@@ -472,6 +472,9 @@ export type Decision = {
   type: string;
   action: string;
   rule?: { id: string; source: string; pattern: string };
+  // client is the identity the resolver named for the address, absent when
+  // nothing claims it.
+  client?: string;
 };
 
 // streamQueries subscribes to the live decision stream and returns the

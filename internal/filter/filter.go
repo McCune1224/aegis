@@ -189,12 +189,16 @@ type Provenance struct {
 }
 
 // Verdict is the decision for one query. A nil Match means no rule matched and
-// the query is allowed by default. Policy belongs to the client, and it rides
-// here so the caller answers without a second lookup.
+// the query is allowed by default. Policy and Client belong to the client, and
+// they ride here so the caller answers, logs, and draws the answer without a
+// second lookup of who asked.
 type Verdict struct {
 	Action Action
 	Match  *Provenance
 	Policy Policy
+	// Client is the identity the rule set resolved for the address, empty when
+	// nothing claims it.
+	Client ClientKey
 	// Route names the upstream a routed query must use. The runtime fills it
 	// after Decide, from the same snapshot generation, and the filter itself
 	// never sets it; empty means the pool may choose.
@@ -542,7 +546,7 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 	policy := scope.policy
 
 	if best := rs.networkMatch(address); best != nil {
-		return Verdict{Action: best.action, Match: &best.provenance, Policy: policy}
+		return Verdict{Action: best.action, Match: &best.provenance, Policy: policy, Client: client}
 	}
 
 	var best *candidate
@@ -589,9 +593,9 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 	}
 
 	if best == nil {
-		return Verdict{Action: ActionAllow, Policy: policy}
+		return Verdict{Action: ActionAllow, Policy: policy, Client: client}
 	}
-	return Verdict{Action: best.action, Match: &best.provenance, Policy: policy}
+	return Verdict{Action: best.action, Match: &best.provenance, Policy: policy, Client: client}
 }
 
 // addScoped folds the candidates one name holds for the asking profile into

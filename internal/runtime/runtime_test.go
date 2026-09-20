@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
 	"path/filepath"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"aegis/internal/blocklist"
+	"aegis/internal/client"
 	"aegis/internal/filter"
 	"aegis/internal/rewrite"
 	"aegis/internal/runtime"
@@ -233,4 +235,37 @@ func TestStoredRewritesReachTheSnapshot(t *testing.T) {
 	host, ok := rt.Reverse(netip.MustParseAddr("192.168.7.7"))
 	require.True(t, ok)
 	require.Equal(t, "home.local", host.String())
+}
+
+// TestDecideNamesTheClientItResolved covers the key the stream and the graph draw
+// against. A consumer cannot resolve it from the address, because a hardware
+// address or a lease is what identifies some devices.
+func TestDecideNamesTheClientItResolved(t *testing.T) {
+	ctx := t.Context()
+	rt := runtime.New(configuredStore(t), nil, quietLogger())
+	require.NoError(t, rt.Reload(ctx))
+
+	got := rt.Decide(blockedName, tablet)
+
+	require.Equal(t, filter.ClientKey("tablet"), got.Client)
+
+	unclaimed := rt.Decide(blockedName, netip.MustParseAddr("10.9.9.9"))
+
+	require.Equal(t, filter.ClientKey(""), unclaimed.Client, "nothing claims this address")
+}
+
+func TestDecideNamesAClientTheLeaseTableIdentifies(t *testing.T) {
+	ctx := t.Context()
+	s := openStore(t)
+	hardware := net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01}
+	require.NoError(t, s.SaveClient(ctx, store.Client{Key: "phone", Profile: "default", MACs: []net.HardwareAddr{hardware}}))
+
+	leases := client.NewDynamic()
+	leases.Set(netip.MustParseAddr("10.9.9.44"), hardware)
+	rt := runtime.New(s, nil, quietLogger(), runtime.WithLeases(leases))
+	require.NoError(t, rt.Reload(ctx))
+
+	got := rt.Decide(blockedName, netip.MustParseAddr("10.9.9.44"))
+
+	require.Equal(t, filter.ClientKey("phone"), got.Client, "the lease names the device holding the address")
 }
