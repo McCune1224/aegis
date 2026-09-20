@@ -45,18 +45,25 @@ type Gesture =
 
 const CLICK_TRAVEL = 6;
 
-const kindColor: Record<NodeKind, number> = {
-  client: 0x7dd3fc,
-  profile: 0x6ee7b7,
-  upstream: 0xc4b5fd,
-  rule: 0xfbbf24,
+// One table for a star kind, so its tint cannot drift between the sprite and
+// the selection ring.
+const kindTint: Record<NodeKind, { css: string; hex: number }> = {
+  client: { css: "#7dd3fc", hex: 0x7dd3fc },
+  profile: { css: "#6ee7b7", hex: 0x6ee7b7 },
+  upstream: { css: "#c4b5fd", hex: 0xc4b5fd },
+  rule: { css: "#fcd34d", hex: 0xfcd34d },
 };
 
 const allowColor = 0x6ee7b7;
 const blockColor = 0xfb7185;
-const lineColor = 0x7dd3fc;
-const labelColor = 0xe9effc;
+// An edge is structure, so it is a desaturated slate rather than the client
+// tint. Threading the sky colour through the graph made a crossing edge count
+// as a client.
+const lineColor = 0x7f8db0;
+const labelColor = 0xeef2fa;
 const detailColor = 0x8b96b5;
+
+const fontStack = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 // margin is the room a fit leaves around the stars for their labels.
 const FIT_MARGIN = 220;
@@ -66,11 +73,23 @@ const REVEAL_MARGIN = 60;
 
 const elk = new ELK();
 
-// makeStarTexture bakes one star: a soft outer halo, a colored inner glow,
-// four diffraction spikes, and a hot core. Tint arrives as an rgb hex string
-// like "#7dd3fc" so the gradient stops can carry alpha.
-function makeStarTexture(tint: string, spikes: number): Texture {
-  const size = 160;
+// The sprite is baked this large once. The biggest star is 150 world px, which
+// the camera may draw at three times the scale on a 2x display, so a source
+// below this point would be visibly magnified; above it, more pixels buy
+// nothing on a soft glow.
+const STAR_TEXTURE_SIZE = 512;
+
+// displayResolution is the density the canvas renders at. It is clamped at 2
+// because the fourth pixel of a 3x panel is not worth the fill rate.
+function displayResolution(): number {
+  return Math.min(window.devicePixelRatio || 1, 2);
+}
+
+// makeStarTexture bakes one star: an atmosphere that reaches the tile edge, a
+// chromosphere, a four-point flare, and a hot core. Every stop is rgba so the
+// alpha and the tint stay independent.
+function makeStarTexture(tint: string, flare: number): Texture {
+  const size = STAR_TEXTURE_SIZE;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
@@ -79,61 +98,90 @@ function makeStarTexture(tint: string, spikes: number): Texture {
     return Texture.WHITE;
   }
   const center = size / 2;
+  const channels = [1, 3, 5].map((index) => parseInt(tint.slice(index, index + 2), 16));
+  const rgba = (alpha: number) => `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${alpha})`;
 
-  const halo = context.createRadialGradient(center, center, 0, center, center, center);
-  halo.addColorStop(0, `${tint}55`);
-  halo.addColorStop(0.4, `${tint}22`);
-  halo.addColorStop(1, `${tint}00`);
-  context.fillStyle = halo;
+  // The atmosphere. A falloff tuned so the tile edge is already clear, which
+  // is what stops a star reading as a grey smudge.
+  const atmosphere = context.createRadialGradient(center, center, 0, center, center, center);
+  atmosphere.addColorStop(0, rgba(0.17));
+  atmosphere.addColorStop(0.14, rgba(0.1));
+  atmosphere.addColorStop(0.4, rgba(0.03));
+  atmosphere.addColorStop(1, rgba(0));
+  context.fillStyle = atmosphere;
   context.fillRect(0, 0, size, size);
 
-  const glow = context.createRadialGradient(center, center, 0, center, center, 26);
-  glow.addColorStop(0, `${tint}cc`);
-  glow.addColorStop(0.6, `${tint}55`);
-  glow.addColorStop(1, `${tint}00`);
-  context.fillStyle = glow;
-  context.beginPath();
-  context.arc(center, center, 26, 0, Math.PI * 2);
-  context.fill();
+  const chromosphere = context.createRadialGradient(center, center, 0, center, center, size * 0.15);
+  chromosphere.addColorStop(0, rgba(0.9));
+  chromosphere.addColorStop(0.28, rgba(0.52));
+  chromosphere.addColorStop(0.62, rgba(0.14));
+  chromosphere.addColorStop(1, rgba(0));
+  context.fillStyle = chromosphere;
+  context.fillRect(0, 0, size, size);
 
-  context.lineCap = "round";
+  // A tapered ray reads as a diffraction spike; a constant-width stroke reads
+  // as a stick. Two long and two short is the cross flare.
+  const ray = (angle: number, length: number, halfWidth: number, alpha: number) => {
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    const nx = -dy;
+    const ny = dx;
+    const gradient = context.createLinearGradient(center, center, center + dx * length, center + dy * length);
+    gradient.addColorStop(0, rgba(alpha));
+    gradient.addColorStop(0.22, rgba(alpha * 0.4));
+    gradient.addColorStop(0.6, rgba(alpha * 0.1));
+    gradient.addColorStop(1, rgba(0));
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.moveTo(center + nx * halfWidth, center + ny * halfWidth);
+    context.lineTo(center + dx * length, center + dy * length);
+    context.lineTo(center - nx * halfWidth, center - ny * halfWidth);
+    context.closePath();
+    context.fill();
+  };
+
+  const long = size * flare;
+  const short = long * 0.5;
+  // The base half-width is what makes a ray visible. At a twentieth of a pixel
+  // after the sprite is scaled down, a hairline is not a flare, it is noise.
+  const base = size * 0.017;
   for (let index = 0; index < 4; index++) {
     const angle = (index * Math.PI) / 2;
-    const inner = 5;
-    const outer = index % 2 === 0 ? spikes : spikes * 0.55;
-    const gradient = context.createLinearGradient(
-      center + Math.cos(angle) * inner,
-      center + Math.sin(angle) * inner,
-      center + Math.cos(angle) * outer,
-      center + Math.sin(angle) * outer,
-    );
-    gradient.addColorStop(0, `${tint}dd`);
-    gradient.addColorStop(1, `${tint}00`);
-    context.strokeStyle = gradient;
-    context.lineWidth = 2.2;
-    context.beginPath();
-    context.moveTo(center + Math.cos(angle) * inner, center + Math.sin(angle) * inner);
-    context.lineTo(center + Math.cos(angle) * outer, center + Math.sin(angle) * outer);
-    context.stroke();
+    ray(angle, index % 2 === 0 ? long : short, base, 0.9);
+  }
+  for (let index = 0; index < 4; index++) {
+    const angle = (index * Math.PI) / 2 + Math.PI / 4;
+    ray(angle, short * 0.46, base * 0.55, 0.32);
   }
 
-  const core = context.createRadialGradient(center, center, 0, center, center, 7);
-  core.addColorStop(0, "#ffffff");
-  core.addColorStop(0.5, "#ffffffee");
-  core.addColorStop(1, "#ffffff00");
+  const core = context.createRadialGradient(center, center, 0, center, center, size * 0.062);
+  core.addColorStop(0, "rgba(255, 255, 255, 1)");
+  core.addColorStop(0.32, "rgba(255, 255, 255, 0.94)");
+  core.addColorStop(0.62, rgba(0.62));
+  core.addColorStop(1, rgba(0));
   context.fillStyle = core;
   context.beginPath();
-  context.arc(center, center, 7, 0, Math.PI * 2);
+  context.arc(center, center, size * 0.062, 0, Math.PI * 2);
   context.fill();
 
   return Texture.from(canvas);
 }
 
-const kindTint: Record<NodeKind, string> = {
-  client: "#7dd3fc",
-  profile: "#6ee7b7",
-  upstream: "#c4b5fd",
-  rule: "#fbbf24",
+// The flare length as a fraction of the sprite, by kind. A rule is a small
+// point of interest, an upstream is the brightest thing in the sky.
+const kindFlare: Record<NodeKind, number> = {
+  client: 0.3,
+  profile: 0.34,
+  upstream: 0.4,
+  rule: 0.26,
+};
+
+// The sprite's drawn width, in world units, by kind.
+const kindSize: Record<NodeKind, number> = {
+  client: 124,
+  profile: 140,
+  upstream: 168,
+  rule: 96,
 };
 
 export default function Graph(props: Props) {
@@ -193,6 +241,10 @@ export default function Graph(props: Props) {
   );
 
   onCleanup(() => {
+    for (const texture of starTextures?.values() ?? []) {
+      texture.destroy(true);
+    }
+    starTextures = new Map<NodeKind, Texture>();
     app?.destroy(true);
     app = undefined;
   });
@@ -207,15 +259,21 @@ export default function Graph(props: Props) {
       resizeTo: host,
       antialias: true,
       preserveDrawingBuffer: true,
+      // Pixi renders at a resolution of 1 by default and then stretches the
+      // canvas over its CSS box, so on a 2x display the stars, the labels, and
+      // the flow were all drawn at half density and upscaled. autoDensity keeps
+      // the CSS size while the backing store follows the display.
+      resolution: displayResolution(),
+      autoDensity: true,
     });
     host?.appendChild(instance.canvas);
 
-    starTextures = new Map<NodeKind, Texture>([
-      ["client", makeStarTexture(kindTint.client, 44)],
-      ["profile", makeStarTexture(kindTint.profile, 56)],
-      ["upstream", makeStarTexture(kindTint.upstream, 68)],
-      ["rule", makeStarTexture(kindTint.rule, 34)],
-    ]);
+    starTextures = new Map<NodeKind, Texture>(
+      (Object.keys(kindTint) as NodeKind[]).map((kind) => [
+        kind,
+        makeStarTexture(kindTint[kind].css, kindFlare[kind]),
+      ]),
+    );
     world = new Container();
     haloLayer = new Container();
     edgeLayer = new Graphics();
@@ -286,7 +344,7 @@ export default function Graph(props: Props) {
       edgeLayer
         .moveTo(from.x, from.y)
         .lineTo(to.x, to.y)
-        .stroke({ width: 1, color: lineColor, alpha: 0.16 });
+        .stroke({ width: 1, color: lineColor, alpha: 0.26 });
     }
 
     haloLayer?.removeChildren();
@@ -314,7 +372,7 @@ export default function Graph(props: Props) {
     if (!haloLayer || !nodeLayer) {
       return;
     }
-    const size = node.kind === "upstream" ? 150 : node.kind === "profile" ? 124 : node.kind === "rule" ? 84 : 108;
+    const size = kindSize[node.kind];
     const star = new Sprite(starTextures.get(node.kind) ?? Texture.WHITE);
     star.anchor.set(0.5);
     star.x = node.x;
@@ -323,17 +381,30 @@ export default function Graph(props: Props) {
     star.height = size;
     haloLayer.addChild(star);
 
+    // A shadow on the text is what keeps a label legible where it crosses the
+    // atmosphere of its own star.
+    const shadow = { color: 0x04060b, alpha: 0.85, blur: 4, distance: 1, angle: Math.PI / 2 };
     const label = new Text({
       text: node.label,
-      style: { fill: labelColor, fontSize: 13, fontWeight: "600", letterSpacing: 0.5 },
+      style: {
+        fill: labelColor,
+        fontFamily: fontStack,
+        fontSize: 15,
+        fontWeight: "600",
+        letterSpacing: 0.2,
+        dropShadow: shadow,
+      },
     });
     label.x = node.x + 16;
-    label.y = node.y - 12;
+    label.y = node.y - 17;
     nodeLayer.addChild(label);
 
-    const detail = new Text({ text: node.detail, style: { fill: detailColor, fontSize: 10.5 } });
+    const detail = new Text({
+      text: node.detail,
+      style: { fill: detailColor, fontFamily: fontStack, fontSize: 12.5, dropShadow: shadow },
+    });
     detail.x = node.x + 16;
-    detail.y = node.y + 4;
+    detail.y = node.y + 2;
     nodeLayer.addChild(detail);
   }
 
@@ -370,7 +441,7 @@ export default function Graph(props: Props) {
       return;
     }
     selection.position.set(node.x, node.y);
-    selection.tint = kindColor[node.kind];
+    selection.tint = kindTint[node.kind].hex;
   }
 
   // ── Live flow ─────────────────────────────────────────────────────────
@@ -443,7 +514,9 @@ export default function Graph(props: Props) {
     haloLayer?.children.forEach((child, index) => {
       const node = nodes[index];
       if (node) {
-        child.alpha = 0.45 + Math.sin(time * 0.9 + node.phase) * 0.12;
+        // A shallow pulse. The old swing took a star down to a third of its
+        // brightness, which read as flicker rather than as a sky.
+        child.alpha = 0.66 + Math.sin(time * 0.9 + node.phase) * 0.08;
       }
     });
     if (selection) {
