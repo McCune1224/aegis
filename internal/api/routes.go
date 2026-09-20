@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,14 +31,6 @@ type routeResponse struct {
 
 func routeResponseFrom(row store.Route) routeResponse {
 	return routeResponse{ID: row.ID, Domain: row.Domain, Client: row.Client, Upstream: row.Upstream}
-}
-
-func decodeRoute(r *http.Request) (routeRequest, error) {
-	var request routeRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return routeRequest{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return request, nil
 }
 
 func (r routeRequest) row() (store.Route, error) {
@@ -78,7 +69,7 @@ func (s *Server) listRoutes(w http.ResponseWriter, r *http.Request) {
 // postRoute stores one route, so the matching queries change upstreams on the
 // next reload.
 func (s *Server) postRoute(w http.ResponseWriter, r *http.Request) {
-	request, err := decodeRoute(r)
+	request, err := decodeJSON[routeRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return
@@ -116,7 +107,7 @@ func (s *Server) putRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, badRequest{err})
 		return
 	}
-	request, err := decodeRoute(r)
+	request, err := decodeJSON[routeRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return

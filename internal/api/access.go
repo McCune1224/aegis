@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -23,14 +22,6 @@ type accessRequest struct {
 type accessResponse struct {
 	Allowed    []string `json:"allowed"`
 	Disallowed []string `json:"disallowed"`
-}
-
-func decodeAccess(r *http.Request) (accessRequest, error) {
-	var request accessRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return accessRequest{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return request, nil
 }
 
 func parsePrefixes(rows []string) ([]netip.Prefix, error) {
@@ -65,7 +56,7 @@ func (s *Server) getAccess(w http.ResponseWriter, r *http.Request) {
 // putAccess replaces both client sets atomically, so the listener's gate
 // changes as one generation on the reload that follows the write.
 func (s *Server) putAccess(w http.ResponseWriter, r *http.Request) {
-	request, err := decodeAccess(r)
+	request, err := decodeJSON[accessRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return

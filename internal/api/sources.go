@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -56,14 +55,6 @@ func sourceResponseFrom(source store.Source) sourceResponse {
 	return response
 }
 
-func decodeSource(r *http.Request) (sourceRequest, error) {
-	var request sourceRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return sourceRequest{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return request, nil
-}
-
 func (s *Server) listSources(w http.ResponseWriter, r *http.Request) {
 	sources, err := s.store.Sources(r.Context())
 	if err != nil {
@@ -99,7 +90,7 @@ func (s *Server) putSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, badRequest{errors.New("a source needs a name")})
 		return
 	}
-	request, err := decodeSource(r)
+	request, err := decodeJSON[sourceRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return

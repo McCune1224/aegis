@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -24,14 +23,14 @@ func (s *Server) getDefaultProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) putDefaultProfile(w http.ResponseWriter, r *http.Request) {
-	var request defaultProfileRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, badRequest{fmt.Errorf("invalid JSON: %w", err)})
+	request, err := decodeJSON[defaultProfileRequest](r)
+	if err != nil {
+		writeError(w, badRequest{err})
 		return
 	}
 	id := filter.ProfileID(request.Profile)
 
-	err := s.apply(r.Context(),
+	err = s.apply(r.Context(),
 		func(cfg *store.Config) error {
 			for _, profile := range cfg.Profiles {
 				if profile.ID == id {
