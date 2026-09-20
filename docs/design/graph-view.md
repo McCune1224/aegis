@@ -8,8 +8,8 @@ record for #58.
 ## The decision
 
 The camera is `{x, y, scale}` in `web/src/camera.ts`, apart from the renderer.
-Four functions move it, and each is a pure function of the camera and a screen
-point:
+Five functions move it, and each is a pure function of the camera and a screen
+point (or, for `ensureVisible`, a world point):
 
 - `toWorld` undoes the transform, so hit-testing and the camera cannot disagree
   about where a star is.
@@ -19,6 +19,9 @@ point:
 - `pan` moves by a screen delta.
 - `frame` fits a world box into a viewport, centring it and leaving a margin for
   the labels that hang off a star.
+- `ensureVisible` pans the least distance that brings one world point inside the
+  viewport margins, which is how the node a create just placed comes into view
+  without the whole sky being re-framed (`docs/design/graph-editing.md`).
 
 The renderer owns no arithmetic beyond calling these and applying the result to
 the world container. That is what makes pan, zoom, and fit testable without a
