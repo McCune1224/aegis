@@ -20,9 +20,30 @@ type ClientAddress struct {
 	Client  string
 }
 
+type ClientMac struct {
+	Mac    string
+	Client string
+}
+
 type ClientPrefix struct {
 	Prefix string
 	Client string
+}
+
+type Discovery struct {
+	Mac      string
+	Address  string
+	Hostname string
+	First    int64
+	Last     int64
+}
+
+type Lease struct {
+	Address  string
+	Mac      string
+	Client   *string
+	Hostname string
+	Expires  int64
 }
 
 type Profile struct {
