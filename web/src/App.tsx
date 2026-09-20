@@ -1,28 +1,35 @@
 import type { JSX } from "@solidjs/web";
 import { createEffect, createSignal, Show } from "solid-js";
 import {
+  createRoute as postRoute,
   createRule as postRule,
   deleteClient as removeClient,
   deleteProfile as removeProfile,
   deleteRewrite as removeRewrite,
+  deleteRoute as removeRoute,
   deleteRule as removeRule,
   deleteSchedule as removeSchedule,
   deleteSource as removeSource,
+  deleteUpstream as removeUpstream,
   getDefaultProfile,
   getStatus,
   listCatalog,
   listClients,
   listProfiles,
   listRewrites,
+  listRoutes,
   listRules,
   listSchedules,
   listSources,
+  listUpstreams,
   saveClient as putClient,
   saveProfile as putProfile,
   saveRewrite as putRewrite,
   saveSchedule as putSchedule,
   saveSource as putSource,
+  saveUpstream as putUpstream,
   setDefaultProfile as putDefaultProfile,
+  updateRoute as patchRoute,
   updateRule as patchRule,
   type CatalogEntry,
   type Client,
@@ -30,14 +37,18 @@ import {
   type Profile,
   type ProfileInput,
   type Rewrite,
+  type Route,
+  type RouteInput,
   type Rule,
   type RuleInput,
   type Schedule,
   type ScheduleInput,
   type Source,
   type SourceInput,
+  type Upstream,
+  type UpstreamInput,
 } from "./api";
-import { IconClients, IconClock, IconDashboard, IconGear, IconGraph, IconLog, IconRewrite, IconRules, IconShield, IconSources } from "./Icons";
+import { IconClients, IconClock, IconDashboard, IconGear, IconGraph, IconLog, IconRewrite, IconRules, IconShield, IconSources, IconUpstream } from "./Icons";
 import Clients from "./Clients";
 import Dashboard from "./Dashboard";
 import Graph from "./Graph";
@@ -49,8 +60,9 @@ import Rewrites from "./Rewrites";
 import Rules from "./Rules";
 import Schedules from "./Schedules";
 import Sources from "./Sources";
+import Upstreams from "./Upstreams";
 
-type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "schedules" | "rewrites" | "settings" | "graph";
+type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "schedules" | "rewrites" | "upstreams" | "settings" | "graph";
 
 type NavItem = { id: Tab; label: string; icon: () => JSX.Element };
 
@@ -64,6 +76,7 @@ const NAV: NavItem[] = [
   { id: "schedules", label: "Schedules", icon: IconClock },
   { id: "rewrites", label: "Rewrites", icon: IconRewrite },
   { id: "sources", label: "Sources", icon: IconSources },
+  { id: "upstreams", label: "Upstreams", icon: IconUpstream },
   { id: "settings", label: "Settings", icon: IconGear },
 ];
 
@@ -77,6 +90,7 @@ const TITLES: Record<Tab, string> = {
   schedules: "Schedules",
   rewrites: "Rewrites",
   sources: "Sources",
+  upstreams: "Upstreams",
   settings: "Settings",
 };
 
@@ -89,6 +103,8 @@ export default function App() {
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [schedules, setSchedules] = createSignal<Schedule[]>([]);
   const [rewrites, setRewrites] = createSignal<Rewrite[]>([]);
+  const [upstreamRows, setUpstreamRows] = createSignal<Upstream[]>([]);
+  const [routes, setRoutes] = createSignal<Route[]>([]);
   const [defaultProfile, setDefaultProfile] = createSignal("");
   const [upstreams, setUpstreams] = createSignal<string[]>([]);
   const [ruleCount, setRuleCount] = createSignal(0);
@@ -100,7 +116,7 @@ export default function App() {
   const log = createQueryLog({ live: live() });
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextDefault, nextStatus] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextDefault, nextStatus] =
       await Promise.all([
         listProfiles(),
         listClients(),
@@ -109,6 +125,8 @@ export default function App() {
         listRules(),
         listSchedules(),
         listRewrites(),
+        listUpstreams(),
+        listRoutes(),
         getDefaultProfile(),
         getStatus(),
       ]);
@@ -119,6 +137,8 @@ export default function App() {
     setRules(nextRules);
     setSchedules(nextSchedules);
     setRewrites(nextRewrites);
+    setUpstreamRows(nextUpstreams);
+    setRoutes(nextRoutes);
     setDefaultProfile(nextDefault.profile);
     setUpstreams(nextStatus.upstreams);
     setRuleCount(nextStatus.rules ?? 0);
@@ -194,6 +214,31 @@ export default function App() {
 
   async function deleteRewrite(pattern: string) {
     await removeRewrite(pattern);
+    await refresh();
+  }
+
+  async function saveUpstream(name: string, input: UpstreamInput) {
+    await putUpstream(name, input);
+    await refresh();
+  }
+
+  async function deleteUpstream(name: string) {
+    await removeUpstream(name);
+    await refresh();
+  }
+
+  async function addRoute(input: RouteInput) {
+    await postRoute(input);
+    await refresh();
+  }
+
+  async function changeRoute(id: number, input: RouteInput) {
+    await patchRoute(id, input);
+    await refresh();
+  }
+
+  async function deleteRoute(id: number) {
+    await removeRoute(id);
     await refresh();
   }
 
@@ -329,6 +374,19 @@ export default function App() {
                   onSave={saveSource}
                   onDelete={deleteSource}
                   onReload={refresh}
+                />
+              </div>
+            </Show>
+            <Show when={tab() === "upstreams"}>
+              <div class="screen-inner">
+                <Upstreams
+                  upstreams={upstreamRows()}
+                  routes={routes()}
+                  onSaveUpstream={saveUpstream}
+                  onDeleteUpstream={deleteUpstream}
+                  onCreateRoute={addRoute}
+                  onUpdateRoute={changeRoute}
+                  onDeleteRoute={deleteRoute}
                 />
               </div>
             </Show>

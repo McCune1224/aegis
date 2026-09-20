@@ -92,6 +92,15 @@ export const IconGear = () =>
     </>,
   );
 
+export const IconUpstream = () =>
+  base(
+    <>
+      <circle cx="5" cy="11" r="2.6" />
+      <path d="M7 9 L12.5 3.5" />
+      <path d="M8.5 3.5 h4 v4" />
+    </>,
+  );
+
 export const IconRewrite = () =>
   base(
     <>
