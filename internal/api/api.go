@@ -188,6 +188,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/routes/{id}", s.deleteRoute)
 	mux.HandleFunc("GET /api/v1/stream/queries", s.streamQueries)
 	mux.HandleFunc("GET /api/v1/queries", s.listQueries)
+	mux.HandleFunc("GET /api/v1/threats/findings", s.listThreatFindings)
 	mux.HandleFunc("POST /api/v1/reload", s.reload)
 	if s.files != nil {
 		mux.Handle("GET /", http.FileServerFS(s.files))

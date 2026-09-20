@@ -32,6 +32,7 @@ import (
 	"aegis/internal/runtime"
 	"aegis/internal/services"
 	"aegis/internal/store"
+	"aegis/internal/threat"
 	"aegis/internal/upstream"
 	"aegis/web"
 )
@@ -181,6 +182,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	hub := api.NewHub(logger)
 	log := querylog.New(database, logger)
+	threats := threat.NewService(database, logger)
 
 	resolver, err := cache.New(cache.Config{Upstream: engine.Upstreams(), Prefetch: true})
 	if err != nil {
@@ -213,7 +215,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Upstream:  resolver,
 		Rewriter:  engine,
 		Gate:      engine,
-		Observers: []dns.Observer{hub, log, verdictCounter{counts}},
+		Observers: []dns.Observer{hub, log, verdictCounter{counts}, threats},
 	}
 	// A nil *ratelimit.Limiter inside the interface would look non-nil to the
 	// handler, so the field stays unset when limiting is off.
@@ -314,6 +316,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	logger.Info("aegis is shutting down")
 	if err := log.Close(); err != nil {
 		logger.Warn("querylog: final flush failed", "error", err)
+	}
+	if err := threats.Close(); err != nil {
+		logger.Warn("threat: final flush failed", "error", err)
 	}
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
