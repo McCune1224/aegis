@@ -115,7 +115,7 @@ func (s *Server) putProfileServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	set, err := normalizeServiceSet(request.Services)
+	set, err := normalizeIDSet(request.Services, "service")
 	if err != nil {
 		writeError(w, badRequest{err})
 		return
@@ -171,21 +171,22 @@ func (s *Server) refreshServices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "refreshed"})
 }
 
-// normalizeServiceSet trims, dedupes, and sorts the requested set, so the
-// stored set has one spelling and the rules it compiles to keep one order.
-func normalizeServiceSet(raw []string) ([]string, error) {
+// normalizeIDSet trims, dedupes, and sorts a requested set of record ids, so
+// the stored set has one spelling and the rows it writes keep one order. What
+// names the kind is only the error text.
+func normalizeIDSet(raw []string, what string) ([]string, error) {
 	seen := make(map[string]bool, len(raw))
 	set := make([]string, 0, len(raw))
 	for _, candidate := range raw {
-		service := strings.TrimSpace(candidate)
-		if service == "" {
-			return nil, fmt.Errorf("a service id cannot be empty")
+		id := strings.TrimSpace(candidate)
+		if id == "" {
+			return nil, fmt.Errorf("a %s id cannot be empty", what)
 		}
-		if seen[service] {
+		if seen[id] {
 			continue
 		}
-		seen[service] = true
-		set = append(set, service)
+		seen[id] = true
+		set = append(set, id)
 	}
 	sort.Strings(set)
 	return set, nil
