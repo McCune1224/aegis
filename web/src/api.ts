@@ -326,6 +326,22 @@ export function deleteRoute(id: number): Promise<void> {
   return request<void>(`/api/v1/routes/${id}`, { method: "DELETE" });
 }
 
+export type AccessSettings = {
+  allowed: string[];
+  disallowed: string[];
+};
+
+export function getAccess(): Promise<AccessSettings> {
+  return request<AccessSettings>("/api/v1/access");
+}
+
+export function saveAccess(input: AccessSettings): Promise<AccessSettings> {
+  return request<AccessSettings>("/api/v1/access", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
 export type QueryEntry = {
   time: string;
   client: string;

@@ -423,6 +423,44 @@ li strong {
   border: 1px solid var(--line-strong);
 }
 
+/* ── Access tags ─────────────────────────────────────────────────────── */
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.14rem 0.55rem;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--star);
+  background: var(--accent-soft);
+  border: 1px solid var(--line-strong);
+}
+
+.tag-remove {
+  border: 0;
+  background: none;
+  color: var(--star-dim);
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.tag-remove:hover {
+  color: var(--block);
+}
+
 /* ── Forms ───────────────────────────────────────────────────────────── */
 
 form {

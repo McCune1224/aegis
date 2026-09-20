@@ -11,6 +11,7 @@ import {
   deleteSchedule as removeSchedule,
   deleteSource as removeSource,
   deleteUpstream as removeUpstream,
+  getAccess,
   getDefaultProfile,
   getStatus,
   listCatalog,
@@ -28,6 +29,7 @@ import {
   saveSchedule as putSchedule,
   saveSource as putSource,
   saveUpstream as putUpstream,
+  saveAccess as putAccess,
   setDefaultProfile as putDefaultProfile,
   updateRoute as patchRoute,
   updateRule as patchRule,
@@ -47,6 +49,7 @@ import {
   type SourceInput,
   type Upstream,
   type UpstreamInput,
+  type AccessSettings,
 } from "./api";
 import { IconClients, IconClock, IconDashboard, IconGear, IconGraph, IconLog, IconRewrite, IconRules, IconShield, IconSources, IconUpstream } from "./Icons";
 import Clients from "./Clients";
@@ -105,6 +108,7 @@ export default function App() {
   const [rewrites, setRewrites] = createSignal<Rewrite[]>([]);
   const [upstreamRows, setUpstreamRows] = createSignal<Upstream[]>([]);
   const [routes, setRoutes] = createSignal<Route[]>([]);
+  const [access, setAccess] = createSignal<AccessSettings>({ allowed: [], disallowed: [] });
   const [defaultProfile, setDefaultProfile] = createSignal("");
   const [upstreams, setUpstreams] = createSignal<string[]>([]);
   const [ruleCount, setRuleCount] = createSignal(0);
@@ -116,7 +120,7 @@ export default function App() {
   const log = createQueryLog({ live: live() });
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextDefault, nextStatus] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus] =
       await Promise.all([
         listProfiles(),
         listClients(),
@@ -127,6 +131,7 @@ export default function App() {
         listRewrites(),
         listUpstreams(),
         listRoutes(),
+        getAccess(),
         getDefaultProfile(),
         getStatus(),
       ]);
@@ -139,6 +144,7 @@ export default function App() {
     setRewrites(nextRewrites);
     setUpstreamRows(nextUpstreams);
     setRoutes(nextRoutes);
+    setAccess(nextAccess);
     setDefaultProfile(nextDefault.profile);
     setUpstreams(nextStatus.upstreams);
     setRuleCount(nextStatus.rules ?? 0);
@@ -244,6 +250,11 @@ export default function App() {
 
   async function makeDefault(name: string) {
     await putDefaultProfile(name);
+    await refresh();
+  }
+
+  async function saveAccess(input: AccessSettings) {
+    await putAccess(input);
     await refresh();
   }
 
@@ -395,6 +406,8 @@ export default function App() {
                 profiles={profiles()}
                 defaultProfile={defaultProfile()}
                 onSetDefault={makeDefault}
+                access={access()}
+                onSaveAccess={saveAccess}
                 windowMinutes={windowMinutes()}
                 onSetWindow={setWindowMinutes}
                 live={live()}
