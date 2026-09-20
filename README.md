@@ -63,3 +63,16 @@ The tracker is the source of truth for what is done and what is next:
 [#61 Product goals](https://github.com/McCune1224/aegis/issues/61) is the
 index, and every open issue carries its own acceptance check. The target is a
 feature clone of AdGuard Home first, then a superset.
+
+## Docker
+
+    docker build -t aegis .
+    docker run -d --name aegis -p 53:53/udp -p 53:53/tcp -p 8080:8080 \
+      -v aegis:/var/lib/aegis ghcr.io/mccune1224/aegis:latest
+
+The image is a static binary on `scratch`, runs as an unprivileged user, and
+keeps everything it stores in the `/var/lib/aegis` volume: mount it and the
+configuration, blocklists, and query log survive upgrades. The web UI is on
+port 8080, DNS on 53 (UDP and TCP). The CI `docker` job builds and tests the
+image on amd64 and arm64 on every change, and a multi-arch publish for
+linux/amd64, linux/arm64, linux/arm/v7, and linux/arm/v6 runs on every tag.
