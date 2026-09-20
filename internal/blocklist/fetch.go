@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -49,9 +52,14 @@ func NewFetcher(timeout time.Duration) *Fetcher {
 	}}
 }
 
-// Fetch downloads url. An empty etag fetches the body. A matching etag makes the
-// request conditional, and a 304 comes back as NotModified with no body.
+// Fetch downloads url. A file url reads the local path it names, and an
+// http or https url goes over the wire. An empty etag fetches the body. A
+// matching etag makes the request conditional, and a 304 comes back as
+// NotModified with no body.
 func (f *Fetcher) Fetch(ctx context.Context, url, etag string) (FetchResult, error) {
+	if strings.HasPrefix(url, "file://") {
+		return fetchFile(url, etag)
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("blocklist: %w", err)
@@ -85,4 +93,40 @@ func (f *Fetcher) Fetch(ctx context.Context, url, etag string) (FetchResult, err
 		return FetchResult{}, ErrTooLarge
 	}
 	return FetchResult{Body: body, ETag: response.Header.Get("ETag")}, nil
+}
+
+// fetchFile reads one local list file. The etag is mtime and size, so an
+// unchanged file answers 304 without a re-read and any change refetches, the
+// same conditional round trip a remote source gets.
+func fetchFile(raw, etag string) (FetchResult, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return FetchResult{}, fmt.Errorf("blocklist: %w", err)
+	}
+	if parsed.Path == "" {
+		return FetchResult{}, fmt.Errorf("blocklist: file url %q names no path", raw)
+	}
+	info, err := os.Stat(parsed.Path)
+	if err != nil {
+		return FetchResult{}, fmt.Errorf("blocklist: fetch %s: %w", raw, err)
+	}
+	current := fmt.Sprintf(`"%d-%d"`, info.ModTime().UnixNano(), info.Size())
+	if etag == current {
+		return FetchResult{ETag: etag, NotModified: true}, nil
+	}
+
+	file, err := os.Open(parsed.Path)
+	if err != nil {
+		return FetchResult{}, fmt.Errorf("blocklist: fetch %s: %w", raw, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(file, maxListBytes+1))
+	if err != nil {
+		return FetchResult{}, fmt.Errorf("blocklist: read %s: %w", raw, err)
+	}
+	if len(body) > maxListBytes {
+		return FetchResult{}, ErrTooLarge
+	}
+	return FetchResult{Body: body, ETag: current}, nil
 }
