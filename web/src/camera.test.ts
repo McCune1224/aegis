@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frame, pan, toWorld, zoomAt, type Camera } from "./camera";
+import { ensureVisible, frame, pan, toWorld, zoomAt, type Camera } from "./camera";
 
 const identity: Camera = { x: 0, y: 0, scale: 1 };
 
@@ -67,5 +67,32 @@ describe("frame", () => {
     const middle = toWorld(camera, 400, 300);
     expect(middle.x).toBeCloseTo(200, 6);
     expect(middle.y).toBeCloseTo(100, 6);
+  });
+});
+
+describe("ensureVisible", () => {
+  it("keeps the camera when the point is already inside the margins", () => {
+    const camera: Camera = { x: 0, y: 0, scale: 1 };
+    expect(ensureVisible(camera, { x: 400, y: 300 }, 800, 600, 60)).toEqual(camera);
+  });
+
+  it("pans the least distance that brings a point past the right edge", () => {
+    const camera: Camera = { x: 0, y: 0, scale: 1 };
+    expect(ensureVisible(camera, { x: 900, y: 300 }, 800, 600, 60)).toEqual({ x: -160, y: 0, scale: 1 });
+  });
+
+  it("pans for a point above the top edge", () => {
+    const camera: Camera = { x: 0, y: 0, scale: 1 };
+    expect(ensureVisible(camera, { x: 100, y: -50 }, 800, 600, 60)).toEqual({ x: 0, y: 110, scale: 1 });
+  });
+
+  it("pans both axes at once", () => {
+    const camera: Camera = { x: 0, y: 0, scale: 1 };
+    expect(ensureVisible(camera, { x: 900, y: -50 }, 800, 600, 60)).toEqual({ x: -160, y: 110, scale: 1 });
+  });
+
+  it("respects the scale when measuring the point", () => {
+    const camera: Camera = { x: 0, y: 0, scale: 2 };
+    expect(ensureVisible(camera, { x: 500, y: 100 }, 800, 600, 60)).toEqual({ x: -260, y: 0, scale: 2 });
   });
 });
