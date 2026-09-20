@@ -130,6 +130,27 @@ type Source struct {
 	RefreshSeconds int64
 }
 
+type ThreatDomain struct {
+	Domain string
+	Kind   string
+	Feed   string
+}
+
+type ThreatFeed struct {
+	Name    string
+	Url     string
+	Enabled int64
+}
+
+type ThreatFinding struct {
+	ID       int64
+	Time     int64
+	Client   string
+	Kind     string
+	Summary  string
+	Evidence string
+}
+
 type Upstream struct {
 	Name    string
 	Url     string
