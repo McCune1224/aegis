@@ -82,6 +82,7 @@ type decisionEvent struct {
 	Time    time.Time  `json:"time"`
 	Address string     `json:"address"`
 	Name    string     `json:"name"`
+	Type    string     `json:"type"`
 	Action  string     `json:"action"`
 	Rule    *ruleEvent `json:"rule,omitempty"`
 }
@@ -97,6 +98,7 @@ func decisionEventFrom(decision dns.Decision) decisionEvent {
 		Time:    decision.Time,
 		Address: decision.Address.String(),
 		Name:    decision.Name.String(),
+		Type:    decision.Type,
 		Action:  "allow",
 	}
 	if decision.Action == filter.ActionBlock {
