@@ -1,6 +1,6 @@
 import uPlot, { type Options } from "uplot";
 import { createEffect, createSignal, For, Show } from "solid-js";
-import type { Discovery, QueryEntry } from "./api";
+import type { Discovery, QueryEntry, ThreatFinding } from "./api";
 import Discoveries from "./Discoveries";
 import "uplot/dist/uPlot.min.css";
 import { aggregate } from "./stats";
@@ -8,6 +8,7 @@ import { aggregate } from "./stats";
 type Props = {
   entries: QueryEntry[];
   discoveries: Discovery[];
+  threats: ThreatFinding[];
   onClaimDiscovery: (discovery: Discovery, name: string) => Promise<void>;
   onDismissDiscovery: (mac: string) => Promise<void>;
   windowMinutes: number;
@@ -44,6 +45,26 @@ export default function Dashboard(props: Props) {
         onClaim={props.onClaimDiscovery}
         onDismiss={props.onDismissDiscovery}
       />
+      <Show when={props.threats.length > 0}>
+        <section class="panel" data-testid="threat-panel">
+          <header>
+            <h2>Threat activity</h2>
+          </header>
+          <ol class="top-list" data-testid="threat-list">
+            <For each={props.threats}>
+              {(finding) => (
+                <li>
+                  <div>
+                    <strong>{finding.client}</strong>
+                    <span class="muted">{finding.summary}</span>
+                  </div>
+                  <span class="badge block">{finding.kind}</span>
+                </li>
+              )}
+            </For>
+          </ol>
+        </section>
+      </Show>
       <div class="card-row">
         <div class="panel stat">
           <div class="value" data-testid="stat-total">{stats().total}</div>

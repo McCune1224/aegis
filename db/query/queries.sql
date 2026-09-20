@@ -1,9 +1,9 @@
 -- name: InsertQueries :execresult
-INSERT INTO queries (time, client, name, type, verdict, rule)
-VALUES (?, ?, ?, ?, ?, ?);
+INSERT INTO queries (time, client, name, type, verdict, rule, threat)
+VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- name: ListQueries :many
-SELECT id, time, client, name, type, verdict, rule
+SELECT id, time, client, name, type, verdict, rule, threat
 FROM queries
 WHERE (@client = '' OR client = @client)
   AND (@verdict = '' OR verdict = @verdict)

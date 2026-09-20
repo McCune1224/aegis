@@ -11,8 +11,8 @@ import (
 )
 
 const insertQueries = `-- name: InsertQueries :execresult
-INSERT INTO queries (time, client, name, type, verdict, rule)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO queries (time, client, name, type, verdict, rule, threat)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertQueriesParams struct {
@@ -22,6 +22,7 @@ type InsertQueriesParams struct {
 	Type    string
 	Verdict string
 	Rule    string
+	Threat  string
 }
 
 func (q *Queries) InsertQueries(ctx context.Context, arg InsertQueriesParams) (sql.Result, error) {
@@ -32,11 +33,12 @@ func (q *Queries) InsertQueries(ctx context.Context, arg InsertQueriesParams) (s
 		arg.Type,
 		arg.Verdict,
 		arg.Rule,
+		arg.Threat,
 	)
 }
 
 const listQueries = `-- name: ListQueries :many
-SELECT id, time, client, name, type, verdict, rule
+SELECT id, time, client, name, type, verdict, rule, threat
 FROM queries
 WHERE (?1 = '' OR client = ?1)
   AND (?2 = '' OR verdict = ?2)
@@ -76,6 +78,7 @@ func (q *Queries) ListQueries(ctx context.Context, arg ListQueriesParams) ([]Que
 			&i.Type,
 			&i.Verdict,
 			&i.Rule,
+			&i.Threat,
 		); err != nil {
 			return nil, err
 		}

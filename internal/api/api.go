@@ -51,6 +51,10 @@ type Config struct {
 	Reloader Reloader
 	Sources  SourceRefresher
 	Preview  SourcePreviewer
+	// Threats is optional: a server without it still lists, saves, and
+	// deletes threat feeds, and only the per-feed refresh endpoint is
+	// unavailable.
+	Threats ThreatRefresher
 	// Catalog is optional: a server without it still serves the stored
 	// catalog, and only the refresh endpoint is unavailable.
 	Catalog ServiceRefresher
@@ -71,6 +75,7 @@ type Server struct {
 	reloader  Reloader
 	sources   SourceRefresher
 	preview   SourcePreviewer
+	threats   ThreatRefresher
 	catalog   ServiceRefresher
 	hub       *Hub
 	files     fs.FS
@@ -114,7 +119,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, preview: cfg.Preview, catalog: cfg.Catalog, hub: cfg.Hub, files: cfg.Files, metrics: cfg.Metrics, upstreams: cfg.Upstreams, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, preview: cfg.Preview, threats: cfg.Threats, catalog: cfg.Catalog, hub: cfg.Hub, files: cfg.Files, metrics: cfg.Metrics, upstreams: cfg.Upstreams, listener: listener}
 	s.http = &http.Server{
 		Handler:  s.routes(),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
@@ -188,6 +193,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/routes/{id}", s.deleteRoute)
 	mux.HandleFunc("GET /api/v1/stream/queries", s.streamQueries)
 	mux.HandleFunc("GET /api/v1/queries", s.listQueries)
+	mux.HandleFunc("GET /api/v1/threats/findings", s.listThreatFindings)
+	mux.HandleFunc("GET /api/v1/threats/feeds", s.listThreatFeeds)
+	mux.HandleFunc("PUT /api/v1/threats/feeds/{name}", s.putThreatFeed)
+	mux.HandleFunc("DELETE /api/v1/threats/feeds/{name}", s.deleteThreatFeed)
+	if s.threats != nil {
+		mux.HandleFunc("POST /api/v1/threats/feeds/{name}/refresh", s.refreshThreatFeed)
+	}
 	mux.HandleFunc("POST /api/v1/reload", s.reload)
 	if s.files != nil {
 		mux.Handle("GET /", http.FileServerFS(s.files))

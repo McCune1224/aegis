@@ -11,7 +11,8 @@ import (
 )
 
 // QueryEntry is one resolved query as the log records it. The rule is empty
-// when no rule matched, which means the default policy allowed the query.
+// when no rule matched, which means the default policy allowed the query, and
+// the threat is empty when no feed claims the name.
 type QueryEntry struct {
 	Time    time.Time
 	Client  netip.Addr
@@ -19,6 +20,7 @@ type QueryEntry struct {
 	Type    string
 	Verdict filter.Action
 	Rule    string
+	Threat  string
 }
 
 // QueryFilter narrows a log read. A nil Verdict, an empty Client or Name, and
@@ -42,6 +44,7 @@ func (s *Store) RecordQueries(ctx context.Context, entries []QueryEntry) error {
 				Type:    entry.Type,
 				Verdict: entry.Verdict.String(),
 				Rule:    entry.Rule,
+				Threat:  entry.Threat,
 			}
 			if _, err := q.InsertQueries(ctx, params); err != nil {
 				return err
@@ -83,6 +86,7 @@ func (s *Store) Queries(ctx context.Context, filter QueryFilter) ([]QueryEntry, 
 		if err != nil {
 			return nil, err
 		}
+		entry.Threat = row.Threat
 		entries = append(entries, entry)
 	}
 	return entries, nil

@@ -19,6 +19,7 @@ type queryRow struct {
 	Type    string `json:"type"`
 	Verdict string `json:"verdict"`
 	Rule    string `json:"rule,omitempty"`
+	Threat  string `json:"threat,omitempty"`
 }
 
 // listQueries serves the query log, newest first. Filters: client (an address),
@@ -60,6 +61,7 @@ func (s *Server) listQueries(w http.ResponseWriter, r *http.Request) {
 			Type:    entry.Type,
 			Verdict: entry.Verdict.String(),
 			Rule:    entry.Rule,
+			Threat:  entry.Threat,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string][]queryRow{"queries": rows})
