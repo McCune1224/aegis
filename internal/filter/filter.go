@@ -207,7 +207,7 @@ type Verdict struct {
 type RuleSet struct {
 	exact      map[string]*entry
 	subdomains map[string]*entry
-	patterns   []patternRule
+	patterns   patternIndex
 	networks   []networkRule
 	schedules  []compiledSchedule
 	minutes    [minutesPerWeek]uint16
@@ -253,6 +253,70 @@ type patternRule struct {
 	re        *regexp.Regexp
 }
 
+// patternIndex holds the pattern rules. A wildcard compiles to an anchored
+// regexp whose literal tail every name it matches must end with, so those rules
+// are bucketed on that tail and a name tests only the buckets its own labels
+// name. A regex is unanchored by design and a wildcard ending in * has no literal
+// tail, so both sit in always, which every name tests.
+type patternIndex struct {
+	byTail map[string][]patternRule
+	always []patternRule
+}
+
+// add files one pattern rule under the bucket its literal tail names.
+func (p *patternIndex) add(rule patternRule, kind MatchKind, pattern string) {
+	tail := ""
+	if kind == MatchWildcard {
+		tail = fixedTail(pattern)
+	}
+	if tail == "" {
+		p.always = append(p.always, rule)
+		return
+	}
+	p.byTail[tail] = append(p.byTail[tail], rule)
+}
+
+// match returns the winner among the pattern rules that can match name: the ones
+// in the buckets name's own labels name, plus the ones every name tests.
+func (p *patternIndex) match(name string, profile ProfileID) *candidate {
+	var best *candidate
+	for start := 0; ; {
+		label := name[start:]
+		if bucket, held := p.byTail[label]; held {
+			for i := range bucket {
+				rule := &bucket[i]
+				if rule.candidate.applies(profile) && rule.re.MatchString(name) {
+					best = better(best, &rule.candidate)
+				}
+			}
+		}
+		dot := strings.IndexByte(label, '.')
+		if dot < 0 {
+			break
+		}
+		start += dot + 1
+	}
+	for i := range p.always {
+		rule := &p.always[i]
+		if rule.candidate.applies(profile) && rule.re.MatchString(name) {
+			best = better(best, &rule.candidate)
+		}
+	}
+	return best
+}
+
+// fixedTail is the run of literal labels at the end of a wildcard pattern, which
+// every name the pattern matches must end with. A pattern whose last label is *
+// has none, so no name can be skipped against it.
+func fixedTail(pattern string) string {
+	labels := strings.Split(pattern, ".")
+	end := len(labels)
+	for end > 0 && labels[end-1] != "*" {
+		end--
+	}
+	return strings.Join(labels[end:], ".")
+}
+
 // networkRule is one CIDR rule. The slice is sorted longest prefix first, so
 // the first prefix that contains the address is the most specific one.
 type networkRule struct {
@@ -280,6 +344,7 @@ func Compile(cfg Config) (*RuleSet, error) {
 	rs := &RuleSet{
 		exact:           make(map[string]*entry, len(cfg.Rules)),
 		subdomains:      make(map[string]*entry, len(cfg.Rules)),
+		patterns:        patternIndex{byTail: make(map[string][]patternRule)},
 		schedules:       schedules,
 		minutes:         minutes,
 		clients:         clients,
@@ -398,7 +463,7 @@ func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int, kn
 				}
 				continue
 			}
-			rs.patterns = append(rs.patterns, patternRule{candidate: candidate, re: re})
+			rs.patterns.add(patternRule{candidate: candidate, re: re}, spec.Kind, spec.Pattern)
 		case MatchCIDR:
 			if spec.Schedule != "" || spec.Client != "" || spec.Profile != "" {
 				return fmt.Errorf("filter: rule %q cannot scope a cidr rule", spec.ID)
@@ -503,14 +568,7 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 	// A pattern ranks below an indexed rule of the same tier, since a pattern
 	// carries no specificity to compare. The action is the tier winner either
 	// way, so this orders only the provenance.
-	for i := range rs.patterns {
-		if !rs.patterns[i].candidate.applies(scope.profile) {
-			continue
-		}
-		if rs.patterns[i].re.MatchString(name.name) {
-			best = better(best, &rs.patterns[i].candidate)
-		}
-	}
+	best = better(best, rs.patterns.match(name.name, scope.profile))
 
 	// The minute table names the schedule that owns this minute of the week;
 	// its rules join the comparison like any other candidate.
