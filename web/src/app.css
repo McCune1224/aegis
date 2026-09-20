@@ -941,3 +941,10 @@ form .row-actions {
   font-size: 0.75rem;
   color: var(--star-dim);
 }
+
+.graph-tools {
+  position: absolute;
+  top: 0.8rem;
+  left: 0.8rem;
+  z-index: 2;
+}

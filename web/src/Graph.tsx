@@ -2,6 +2,7 @@ import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { Client, Profile } from "./api";
+import { frame, pan, toWorld, zoomAt, type Box, type Camera } from "./camera";
 import type { Decision } from "./api";
 import { effectiveMode } from "./resolve";
 import type { QueryLog } from "./querylog";
@@ -53,8 +54,8 @@ const lineColor = 0x7dd3fc;
 const labelColor = 0xe9effc;
 const detailColor = 0x8b96b5;
 
-const minScale = 0.4;
-const maxScale = 3;
+// margin is the room a fit leaves around the stars for their labels.
+const FIT_MARGIN = 220;
 
 const elk = new ELK();
 
@@ -142,7 +143,11 @@ export default function Graph(props: Props) {
   let nodeLayer: Container | undefined;
   let fxLayer: Graphics | undefined;
   let selection: Graphics | undefined;
-  let camera = { x: 0, y: 0, scale: 1 };
+  let camera: Camera = { x: 0, y: 0, scale: 1 };
+  // framed is whether the view has been placed once. A later redraw keeps the
+  // camera, so adding a client does not throw away where the operator was
+  // looking; the fit control is how they ask for it back.
+  let framed = false;
   let starTextures: Map<Kind, Texture>;
 
   createEffect(
@@ -163,7 +168,11 @@ export default function Graph(props: Props) {
       if (!host) {
         return;
       }
-      const observer = new ResizeObserver(() => fitToView());
+      const observer = new ResizeObserver(() => {
+        if (!framed) {
+          fitToView();
+        }
+      });
       observer.observe(host);
       onCleanup(() => observer.disconnect());
     },
@@ -265,7 +274,9 @@ export default function Graph(props: Props) {
       drawStar(node);
     }
     drawSelection();
-    fitToView();
+    if (!framed) {
+      fitToView();
+    }
   }
 
   function drawStar(node: Placed) {
@@ -295,29 +306,23 @@ export default function Graph(props: Props) {
     nodeLayer.addChild(detail);
   }
 
-  // fitToView centers the constellation in the viewport on every layout, so a
-  // fresh page lands with the whole sky in frame.
+  // fitToView frames the whole constellation, which is where a fresh page
+  // lands and what the fit control asks for.
   function fitToView() {
     if (!host || placed.size === 0) {
       return;
     }
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
+    let box: Box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
     for (const node of placed.values()) {
-      minX = Math.min(minX, node.x);
-      minY = Math.min(minY, node.y);
-      maxX = Math.max(maxX, node.x);
-      maxY = Math.max(maxY, node.y);
+      box = {
+        minX: Math.min(box.minX, node.x),
+        minY: Math.min(box.minY, node.y),
+        maxX: Math.max(box.maxX, node.x),
+        maxY: Math.max(box.maxY, node.y),
+      };
     }
-    const width = host.clientWidth;
-    const height = host.clientHeight;
-    const contentWidth = maxX - minX + 220;
-    const contentHeight = maxY - minY + 160;
-    camera.scale = Math.min(1.4, Math.min(width / contentWidth, height / contentHeight));
-    camera.x = (width - (minX + maxX) * camera.scale) / 2;
-    camera.y = (height - (minY + maxY) * camera.scale) / 2;
+    camera = frame(box, host.clientWidth, host.clientHeight, FIT_MARGIN);
+    framed = true;
     applyCamera();
   }
 
@@ -503,19 +508,19 @@ export default function Graph(props: Props) {
         if (!current || current.startDistance === 0) {
           return;
         }
-        const next = Math.min(maxScale, Math.max(minScale, pinch.startScale * (current.startDistance / pinch.startDistance)));
-        const applied = next / camera.scale;
-        camera.x = pinch.midX - applied * (pinch.midX - camera.x);
-        camera.y = pinch.midY - applied * (pinch.midY - camera.y);
-        camera.scale = next;
+        camera = zoomAt(
+          { x: camera.x, y: camera.y, scale: pinch.startScale },
+          current.startDistance / pinch.startDistance,
+          pinch.midX,
+          pinch.midY,
+        );
         applyCamera();
         return;
       }
       const dx = event.global.x - last.x;
       const dy = event.global.y - last.y;
       moved += Math.abs(dx) + Math.abs(dy);
-      camera.x += dx;
-      camera.y += dy;
+      camera = pan(camera, dx, dy);
       last = { x: event.global.x, y: event.global.y };
       applyCamera();
     });
@@ -538,18 +543,13 @@ export default function Graph(props: Props) {
     canvas.addEventListener("wheel", (event) => {
       event.preventDefault();
       const factor = Math.pow(1.0015, -event.deltaY);
-      const next = Math.min(maxScale, Math.max(minScale, camera.scale * factor));
-      const applied = next / camera.scale;
-      camera.x = event.offsetX - applied * (event.offsetX - camera.x);
-      camera.y = event.offsetY - applied * (event.offsetY - camera.y);
-      camera.scale = next;
+      camera = zoomAt(camera, factor, event.offsetX, event.offsetY);
       applyCamera();
     });
   }
 
   function pick(screenX: number, screenY: number): string | undefined {
-    const worldX = (screenX - camera.x) / camera.scale;
-    const worldY = (screenY - camera.y) / camera.scale;
+    const { x: worldX, y: worldY } = toWorld(camera, screenX, screenY);
     let best: { id: string; distance: number } | undefined;
     for (const node of placed.values()) {
       const distance = Math.hypot(node.x - worldX, node.y - worldY);
@@ -599,7 +599,12 @@ export default function Graph(props: Props) {
         host = element as HTMLDivElement;
       }}
     >
-      <span class="hint">drag to pan · scroll to zoom · click a star</span>
+      <div class="graph-tools">
+        <span class="hint">drag to pan · scroll to zoom · click a star</span>
+        <button type="button" class="btn-ghost" data-testid="graph-fit" onClick={() => fitToView()}>
+          Fit
+        </button>
+      </div>
       <Show when={selectedClient()}>
         {(client) => (
           <div class="graph-panel" data-testid="graph-panel">
