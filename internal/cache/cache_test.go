@@ -42,7 +42,7 @@ type stubUpstream struct {
 
 func (s *stubUpstream) saw() int { return int(s.calls.Load()) }
 
-func (s *stubUpstream) Resolve(_ context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+func (s *stubUpstream) Resolve(_ context.Context, req *mdns.Msg, _ string) (*mdns.Msg, error) {
 	n := int(s.calls.Add(1))
 	if s.err != nil {
 		return nil, s.err
@@ -127,12 +127,12 @@ func TestResolveAnswersARepeatFromTheCacheAndTheUpstreamSeesOneRequest(t *testin
 	upstream := &stubUpstream{}
 	resolver := newResolver(t, upstream, nil)
 
-	first, err := resolver.Resolve(context.Background(), query("allowed.example.net.", mdns.TypeA))
+	first, err := resolver.Resolve(context.Background(), query("allowed.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw())
 	requireA(t, first, "203.0.113.1")
 
-	second, err := resolver.Resolve(context.Background(), query("allowed.example.net.", mdns.TypeA))
+	second, err := resolver.Resolve(context.Background(), query("allowed.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw(), "the repeat must come from the cache")
 	requireA(t, second, "203.0.113.1")
@@ -146,7 +146,7 @@ func TestResolveServesTheCachedNegativeAnswer(t *testing.T) {
 	resolver := newResolver(t, upstream, nil)
 
 	for i := 0; i < 2; i++ {
-		resp, err := resolver.Resolve(context.Background(), query("gone.example.net.", mdns.TypeA))
+		resp, err := resolver.Resolve(context.Background(), query("gone.example.net.", mdns.TypeA), "")
 		require.NoError(t, err)
 		require.Equal(t, mdns.RcodeNameError, resp.Rcode)
 		require.Len(t, resp.Ns, 1, "the SOA reaches the client so it can cache the negative too")
@@ -161,18 +161,18 @@ func TestResolveDecaysTheCachedTtlByAge(t *testing.T) {
 	fake := newClock()
 	resolver := newResolver(t, upstream, func(cfg *cache.Config) { cfg.Now = fake.Now })
 
-	_, err := resolver.Resolve(context.Background(), query("aged.example.net.", mdns.TypeA))
+	_, err := resolver.Resolve(context.Background(), query("aged.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw())
 
 	fake.Advance(40 * time.Second)
-	aged, err := resolver.Resolve(context.Background(), query("aged.example.net.", mdns.TypeA))
+	aged, err := resolver.Resolve(context.Background(), query("aged.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw())
 	require.Equal(t, uint32(260), aged.Answer[0].Header().Ttl)
 
 	fake.Advance(300 * time.Second)
-	_, err = resolver.Resolve(context.Background(), query("aged.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("aged.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 2, upstream.saw(), "an expired entry asks upstream again")
 }
@@ -185,18 +185,18 @@ func TestResolveClampsTheTtlToTheFloor(t *testing.T) {
 		cfg.MinTTL = 5 * time.Second
 	})
 
-	_, err := resolver.Resolve(context.Background(), query("churn.example.net.", mdns.TypeA))
+	_, err := resolver.Resolve(context.Background(), query("churn.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw())
 
 	fake.Advance(2 * time.Second)
-	early, err := resolver.Resolve(context.Background(), query("churn.example.net.", mdns.TypeA))
+	early, err := resolver.Resolve(context.Background(), query("churn.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw(), "the floor holds a one second answer for five seconds")
 	require.Equal(t, uint32(3), early.Answer[0].Header().Ttl)
 
 	fake.Advance(4 * time.Second)
-	_, err = resolver.Resolve(context.Background(), query("churn.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("churn.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 2, upstream.saw(), "expiry follows the clamped TTL, not the upstream one")
 }
@@ -209,18 +209,18 @@ func TestResolveClampsTheTtlToTheCeiling(t *testing.T) {
 		cfg.MaxTTL = time.Hour
 	})
 
-	_, err := resolver.Resolve(context.Background(), query("stable.example.net.", mdns.TypeA))
+	_, err := resolver.Resolve(context.Background(), query("stable.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw())
 
 	fake.Advance(3599 * time.Second)
-	late, err := resolver.Resolve(context.Background(), query("stable.example.net.", mdns.TypeA))
+	late, err := resolver.Resolve(context.Background(), query("stable.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw())
 	require.Equal(t, uint32(1), late.Answer[0].Header().Ttl)
 
 	fake.Advance(2 * time.Second)
-	_, err = resolver.Resolve(context.Background(), query("stable.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("stable.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 2, upstream.saw(), "a day-long TTL still expires at the ceiling")
 }
@@ -230,7 +230,7 @@ func TestResolveNeverCachesServfail(t *testing.T) {
 	resolver := newResolver(t, upstream, nil)
 
 	for i := 0; i < 2; i++ {
-		resp, err := resolver.Resolve(context.Background(), query("down.example.net.", mdns.TypeA))
+		resp, err := resolver.Resolve(context.Background(), query("down.example.net.", mdns.TypeA), "")
 		require.NoError(t, err)
 		require.Equal(t, mdns.RcodeServerFailure, resp.Rcode)
 	}
@@ -241,11 +241,11 @@ func TestResolveNeverCachesAnError(t *testing.T) {
 	upstream := &stubUpstream{err: errors.New("upstream unreachable")}
 	resolver := newResolver(t, upstream, nil)
 
-	_, err := resolver.Resolve(context.Background(), query("dark.example.net.", mdns.TypeA))
+	_, err := resolver.Resolve(context.Background(), query("dark.example.net.", mdns.TypeA), "")
 	require.Error(t, err)
 	require.Equal(t, 1, upstream.saw())
 
-	_, err = resolver.Resolve(context.Background(), query("dark.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("dark.example.net.", mdns.TypeA), "")
 	require.Error(t, err)
 	require.Equal(t, 2, upstream.saw())
 }
@@ -254,13 +254,13 @@ func TestResolveKeysOnNameAndTypeCaseInsensitively(t *testing.T) {
 	upstream := &stubUpstream{}
 	resolver := newResolver(t, upstream, nil)
 
-	_, err := resolver.Resolve(context.Background(), query("Mixed.Case.Example.NET.", mdns.TypeA))
+	_, err := resolver.Resolve(context.Background(), query("Mixed.Case.Example.NET.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(context.Background(), query("mixed.case.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("mixed.case.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw(), "the name key ignores case")
 
-	_, err = resolver.Resolve(context.Background(), query("mixed.case.example.net.", mdns.TypeAAAA))
+	_, err = resolver.Resolve(context.Background(), query("mixed.case.example.net.", mdns.TypeAAAA), "")
 	require.NoError(t, err)
 	require.Equal(t, 2, upstream.saw(), "each record type holds its own entry")
 }
@@ -269,23 +269,23 @@ func TestResolveEvictsTheLeastRecentlyUsedEntry(t *testing.T) {
 	upstream := &stubUpstream{}
 	resolver := newResolver(t, upstream, func(cfg *cache.Config) { cfg.MaxEntries = 2 })
 
-	_, err := resolver.Resolve(context.Background(), query("a.example.net.", mdns.TypeA))
+	_, err := resolver.Resolve(context.Background(), query("a.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(context.Background(), query("b.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("b.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(context.Background(), query("a.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("a.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 2, upstream.saw(), "a was touched, so a stays")
 
-	_, err = resolver.Resolve(context.Background(), query("c.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("c.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 3, upstream.saw())
 
-	_, err = resolver.Resolve(context.Background(), query("a.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("a.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 3, upstream.saw(), "a survived the eviction")
 
-	_, err = resolver.Resolve(context.Background(), query("b.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("b.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 4, upstream.saw(), "b was the least recently used and was evicted")
 }
@@ -301,7 +301,7 @@ func TestConcurrentResolveSharesEntries(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 25; i++ {
-				resp, err := resolver.Resolve(ctx, query(fmt.Sprintf("host%d.example.net.", i%3), mdns.TypeA))
+				resp, err := resolver.Resolve(ctx, query(fmt.Sprintf("host%d.example.net.", i%3), mdns.TypeA), "")
 				require.NoError(t, err)
 				a, ok := resp.Answer[0].(*mdns.A)
 				require.True(t, ok)
@@ -319,9 +319,9 @@ func TestResolveCachesAZeroTTLAnswerAtTheFloor(t *testing.T) {
 	upstream := &stubUpstream{answer: func(req *mdns.Msg) *mdns.Msg { return aAnswer(req, 1, 0) }}
 	resolver := newResolver(t, upstream, nil)
 
-	_, err := resolver.Resolve(context.Background(), query("zero.example.net.", mdns.TypeA))
+	_, err := resolver.Resolve(context.Background(), query("zero.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(context.Background(), query("zero.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("zero.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 1, upstream.saw(), "the floor holds a zero-TTL answer for five seconds")
 }
@@ -334,7 +334,7 @@ func TestResolveDoesNotCacheAnEmptyAnswerWithoutASOA(t *testing.T) {
 	resolver := newResolver(t, upstream, nil)
 
 	for i := 0; i < 2; i++ {
-		_, err := resolver.Resolve(context.Background(), query("nodata.example.net.", mdns.TypeA))
+		_, err := resolver.Resolve(context.Background(), query("nodata.example.net.", mdns.TypeA), "")
 		require.NoError(t, err)
 	}
 	require.Equal(t, 2, upstream.saw(), "no answer records and no SOA is no guidance, so nothing is cached")
@@ -347,9 +347,9 @@ func TestResolveKeysOnClass(t *testing.T) {
 	ch := query("chaos.example.net.", mdns.TypeA)
 	ch.Question[0].Qclass = mdns.ClassCHAOS
 
-	_, err := resolver.Resolve(context.Background(), query("chaos.example.net.", mdns.TypeA))
+	_, err := resolver.Resolve(context.Background(), query("chaos.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(context.Background(), ch)
+	_, err = resolver.Resolve(context.Background(), ch, "")
 	require.NoError(t, err)
 	require.Equal(t, 2, upstream.saw(), "each class holds its own entry")
 }
@@ -362,11 +362,11 @@ func TestResolveKeepsTheSlotWhenTheUpstreamEchoesAnotherName(t *testing.T) {
 	}}
 	resolver := newResolver(t, upstream, func(cfg *cache.Config) { cfg.MaxEntries = 1 })
 
-	_, err := resolver.Resolve(context.Background(), query("right.example.net.", mdns.TypeA))
+	_, err := resolver.Resolve(context.Background(), query("right.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(context.Background(), query("other.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("other.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(context.Background(), query("right.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(context.Background(), query("right.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 	require.Equal(t, 3, upstream.saw(), "the evicted slot must not survive under its request key")
 }

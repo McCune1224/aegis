@@ -146,7 +146,7 @@ func dohClient(t *testing.T, pool *x509.CertPool) *http.Client {
 
 func TestStartServesDoTThroughThePinnedCertificate(t *testing.T) {
 	pair, pool := pinning(t)
-	upstream := resolverFunc(func(_ context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+	upstream := resolverFunc(func(_ context.Context, req *mdns.Msg, _ string) (*mdns.Msg, error) {
 		return upstreamA(req, "203.0.113.7"), nil
 	})
 	identity := &clientIdentity{answer: true}
@@ -167,7 +167,7 @@ func TestStartServesDoTThroughThePinnedCertificate(t *testing.T) {
 
 func TestStartServesDoHThroughThePinnedCertificate(t *testing.T) {
 	pair, pool := pinning(t)
-	upstream := resolverFunc(func(_ context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+	upstream := resolverFunc(func(_ context.Context, req *mdns.Msg, _ string) (*mdns.Msg, error) {
 		return upstreamA(req, "203.0.113.8"), nil
 	})
 	identity := &clientIdentity{answer: true}
@@ -244,7 +244,7 @@ func TestStartRejectsATLSListenerWithoutACertificate(t *testing.T) {
 }
 
 func TestStartBindsNoTLSListenersWithoutAddresses(t *testing.T) {
-	upstream := resolverFunc(func(_ context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+	upstream := resolverFunc(func(_ context.Context, req *mdns.Msg, _ string) (*mdns.Msg, error) {
 		return upstreamA(req, "203.0.113.9"), nil
 	})
 	handler := handlerFor(t, deciderFor(t, defaultPolicy), upstream)

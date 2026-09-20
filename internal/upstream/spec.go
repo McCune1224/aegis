@@ -12,10 +12,13 @@ import (
 )
 
 // Spec is one configured resolver. Name is the URL as the operator wrote it,
-// for logs and status; URL is the parsed form every transport reads.
+// for logs, status, and routes; URL is the parsed form every transport reads.
 type Spec struct {
 	Name string
 	URL  *url.URL
+	// Backup keeps the resolver out of the pool's rotation while a primary
+	// is eligible; it answers only when every primary is down.
+	Backup bool
 }
 
 // defaultPorts fill in the port an operator left off, per scheme.

@@ -59,7 +59,7 @@ func aRecord(name, address string) *mdns.A {
 func resolverFor(t *testing.T, handle mdns.HandlerFunc) dns.Resolver {
 	t.Helper()
 	address := startUpstream(t, handle)
-	return resolverFunc(func(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+	return resolverFunc(func(ctx context.Context, req *mdns.Msg, _ string) (*mdns.Msg, error) {
 		client := &mdns.Client{Net: "udp"}
 		resp, _, err := client.ExchangeContext(ctx, req, address)
 		return resp, err
@@ -69,15 +69,15 @@ func resolverFor(t *testing.T, handle mdns.HandlerFunc) dns.Resolver {
 // deadResolver fails every exchange, for tests where the upstream is never
 // meant to be reached.
 func deadResolver() dns.Resolver {
-	return resolverFunc(func(_ context.Context, _ *mdns.Msg) (*mdns.Msg, error) {
+	return resolverFunc(func(_ context.Context, _ *mdns.Msg, _ string) (*mdns.Msg, error) {
 		return nil, errors.New("no upstream configured")
 	})
 }
 
-type resolverFunc func(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error)
+type resolverFunc func(ctx context.Context, req *mdns.Msg, route string) (*mdns.Msg, error)
 
-func (f resolverFunc) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
-	return f(ctx, req)
+func (f resolverFunc) Resolve(ctx context.Context, req *mdns.Msg, route string) (*mdns.Msg, error) {
+	return f(ctx, req, route)
 }
 
 func answerWith(address string) mdns.HandlerFunc {

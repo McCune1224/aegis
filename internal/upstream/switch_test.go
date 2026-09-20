@@ -13,7 +13,7 @@ import (
 func TestASwitchWithoutAPoolNamesTheProblem(t *testing.T) {
 	sw := upstream.NewSwitch()
 
-	_, err := sw.Resolve(context.Background(), new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA))
+	_, err := sw.Resolve(context.Background(), new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA), "")
 
 	require.EqualError(t, err, "upstream: no resolvers are loaded")
 }
@@ -34,6 +34,22 @@ func TestASwitchServesThePoolItWasGivenLast(t *testing.T) {
 	require.Equal(t, "203.0.113.11", whoAnswered(t, resolveThrough(t, sw)), "the same handle answers through the new pool")
 }
 
+func TestASwitchResolvesARoutedQueryThroughOnlyTheNamedPeer(t *testing.T) {
+	first := startStub(t, answerWith("203.0.113.10"))
+	second := startStub(t, answerWith("203.0.113.11"))
+	sw := upstream.NewSwitch()
+	pool, err := upstream.New(upstream.Config{Specs: specs(t, first.address, second.address)})
+	require.NoError(t, err)
+	sw.Swap(pool)
+
+	req := new(mdns.Msg).SetQuestion("internal.example.", mdns.TypeA)
+	resp, err := sw.Resolve(context.Background(), req, second.address)
+
+	require.NoError(t, err)
+	require.Equal(t, "203.0.113.11", whoAnswered(t, resp))
+	require.EqualValues(t, 0, first.attempts.Load())
+}
+
 func specs(t *testing.T, raw ...string) []upstream.Spec {
 	t.Helper()
 	parsed := make([]upstream.Spec, 0, len(raw))
@@ -48,7 +64,7 @@ func specs(t *testing.T, raw ...string) []upstream.Spec {
 func resolveThrough(t *testing.T, sw *upstream.Switch) *mdns.Msg {
 	t.Helper()
 	req := new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA)
-	resp, err := sw.Resolve(context.Background(), req)
+	resp, err := sw.Resolve(context.Background(), req, "")
 	require.NoError(t, err)
 	return resp
 }

@@ -22,7 +22,7 @@ type stubResolver struct {
 	asked  string
 }
 
-func (s *stubResolver) Resolve(_ context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+func (s *stubResolver) Resolve(_ context.Context, req *mdns.Msg, _ string) (*mdns.Msg, error) {
 	s.calls++
 	s.asked = req.Question[0].Name
 	if s.err != nil {

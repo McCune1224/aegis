@@ -22,11 +22,16 @@ func NewSwitch() *Switch { return &Switch{} }
 // Swap publishes the pool every later Resolve reads.
 func (s *Switch) Swap(p *Pool) { s.pool.Store(p) }
 
-// Resolve hands the query to the current pool.
-func (s *Switch) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+// Resolve hands the query to the current pool. An empty route resolves
+// through the pool's health ranking; a named route goes to that peer only,
+// never to the rest of the pool.
+func (s *Switch) Resolve(ctx context.Context, req *mdns.Msg, route string) (*mdns.Msg, error) {
 	pool := s.pool.Load()
 	if pool == nil {
 		return nil, errors.New("upstream: no resolvers are loaded")
 	}
-	return pool.Resolve(ctx, req)
+	if route == "" {
+		return pool.Resolve(ctx, req)
+	}
+	return pool.ResolveUpstream(ctx, req, route)
 }

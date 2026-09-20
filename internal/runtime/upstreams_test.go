@@ -67,7 +67,7 @@ func whoAnswered(t *testing.T, resp *mdns.Msg) string {
 func resolveThrough(t *testing.T, sw *upstream.Switch, name string) *mdns.Msg {
 	t.Helper()
 	req := new(mdns.Msg).SetQuestion(name, mdns.TypeA)
-	resp, err := sw.Resolve(t.Context(), req)
+	resp, err := sw.Resolve(t.Context(), req, "")
 	require.NoError(t, err)
 	return resp
 }
@@ -104,7 +104,7 @@ func TestReloadRefusesAStoreWithoutAnEnabledUpstream(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "at least one resolver is required")
 	require.EqualError(t, func() error {
-		_, err := rt.Upstreams().Resolve(t.Context(), new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA))
+		_, err := rt.Upstreams().Resolve(t.Context(), new(mdns.Msg).SetQuestion("example.com.", mdns.TypeA), "")
 		return err
 	}(), "upstream: no resolvers are loaded", "nothing was published")
 }

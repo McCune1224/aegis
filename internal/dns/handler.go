@@ -19,9 +19,10 @@ import (
 // name or removing a rewrite takes effect without waiting out a long cache.
 const localAnswerTTL = 60
 
-// Resolver answers a query that the filter allowed.
+// Resolver answers a query that the filter allowed. Route names the upstream
+// route the query must take, empty when the pool may choose.
 type Resolver interface {
-	Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error)
+	Resolve(ctx context.Context, req *mdns.Msg, route string) (*mdns.Msg, error)
 }
 
 // Decider answers a query for the client at one address. The runtime implements
@@ -181,7 +182,7 @@ func (h *Handler) forward(ctx context.Context, req *mdns.Msg, ask mdns.Question,
 		outbound = req.Copy()
 		outbound.Question = []mdns.Question{ask}
 	}
-	resp, err := h.upstream.Resolve(ctx, outbound)
+	resp, err := h.upstream.Resolve(ctx, outbound, "")
 	if err != nil {
 		return reply(req, mdns.RcodeServerFailure), fmt.Errorf("dns: upstream: %w", err)
 	}

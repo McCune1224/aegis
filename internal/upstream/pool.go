@@ -101,23 +101,67 @@ func (p *Pool) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
 	return nil, fmt.Errorf("upstream: every resolver failed: %w", lastErr)
 }
 
+// ResolveUpstream resolves through only the peer whose name matches, with no
+// failover. A routed query names one resolver because the operator knows
+// something about that name the pool cannot discover, so trying another peer
+// would send the name to a resolver it must not reach.
+func (p *Pool) ResolveUpstream(ctx context.Context, req *mdns.Msg, name string) (*mdns.Msg, error) {
+	peer := p.peerNamed(name)
+	if peer == nil {
+		return nil, fmt.Errorf("upstream: no resolver is named %q", name)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	start := p.now()
+	attempt, cancel := context.WithTimeout(ctx, p.attempt)
+	resp, err := peer.transport.Exchange(attempt, req)
+	cancel()
+	p.record(peer, p.now().Sub(start), err)
+	if err != nil {
+		return nil, fmt.Errorf("upstream: %q: %w", name, err)
+	}
+	return resp, nil
+}
+
+// peerNamed finds the one peer a routed query may speak to.
+func (p *Pool) peerNamed(name string) *peer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, peer := range p.peers {
+		if peer.spec.Name == name {
+			return peer
+		}
+	}
+	return nil
+}
+
 // candidates orders the resolvers one query may use. Healthy peers rank by
 // measured latency, an unmeasured peer first so a new resolver is probed,
-// ties broken by configured order. When every peer is down, the best-ranked
-// one still gets tried, so a pool of dead resolvers degrades to one attempt
-// per query instead of a new hard-failure mode.
+// ties broken by configured order. A backup peer sits out while a primary is
+// eligible and joins only when every primary is down. When every peer is
+// down, the best-ranked one still gets tried, so a pool of dead resolvers
+// degrades to one attempt per query instead of a new hard-failure mode.
 func (p *Pool) candidates() []*peer {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
 	eligible := make([]*peer, 0, len(p.peers))
+	primary := make([]*peer, 0, len(p.peers))
 	for _, peer := range p.peers {
-		if peer.failures < failureThreshold || !now.Before(peer.downUntil) {
-			eligible = append(eligible, peer)
+		if peer.failures >= failureThreshold && now.Before(peer.downUntil) {
+			continue
+		}
+		eligible = append(eligible, peer)
+		if !peer.spec.Backup {
+			primary = append(primary, peer)
 		}
 	}
 	if len(eligible) == 0 {
 		return []*peer{slices.MinFunc(p.peers, func(a, b *peer) int { return rank(a) - rank(b) })}
+	}
+	if len(primary) > 0 {
+		eligible = primary
 	}
 	slices.SortStableFunc(eligible, func(a, b *peer) int { return rank(a) - rank(b) })
 	return eligible
