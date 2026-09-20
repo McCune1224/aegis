@@ -145,6 +145,11 @@ scoped rules for that name, and folds the scoped ones in at query time, because
 who wins depends on who asks and compile time does not know. A name with no
 scoped rules costs one nil-slice check.
 
+`RuleSet.ProfileOf` exposes that resolution, so a table outside the filter that
+keys on the profile, such as the per-profile SafeSearch rewrite index
+(`docs/design/safesearch.md`), cannot disagree with the rules about who is
+asking.
+
 Profile scope is the foundation for blocked services (`docs/design/services.md`).
 That is where Aegis first diverges from AdGuard Home here: AGH keys blocked
 services on the client with a separate global set, while Aegis keys them on the
