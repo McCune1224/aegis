@@ -336,6 +336,32 @@ func TestTheQueryStreamCarriesADecisionFromARealQuery(t *testing.T) {
 	require.Equal(t, "ads.example.com", event.Rule.Pattern)
 }
 
+// TestTheQueryStreamNamesTheClientItResolved covers the key a consumer draws the
+// answer against. The browser used to resolve the address itself, which cannot
+// see a hardware address or a lease, so a device identified that way landed on
+// the wrong policy in the graph.
+func TestTheQueryStreamNamesTheClientItResolved(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/clients/phone", `{"profile":"default","addresses":["127.0.0.2"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.apiURL+"/api/v1/stream/queries", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.Equal(t, mdns.RcodeNameError, queryFrom(t, "127.0.0.2", h.dnsAddress).Rcode)
+
+	line, err := bufio.NewReader(resp.Body).ReadString('\n')
+	require.NoError(t, err)
+	var event decisionEventJSON
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &event))
+	require.Equal(t, "127.0.0.2", event.Address)
+	require.Equal(t, "phone", event.Client)
+}
+
 func TestAStalledConsumerCannotBlockAQuery(t *testing.T) {
 	h := startHarness(t)
 	decisions, cancel := h.hub.Subscribe()
@@ -354,10 +380,12 @@ func TestAStalledConsumerCannotBlockAQuery(t *testing.T) {
 }
 
 type decisionEventJSON struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`
-	Action string `json:"action"`
-	Rule   *struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Address string `json:"address"`
+	Client  string `json:"client"`
+	Action  string `json:"action"`
+	Rule    *struct {
 		ID      string `json:"id"`
 		Pattern string `json:"pattern"`
 	} `json:"rule"`

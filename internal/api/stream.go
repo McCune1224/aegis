@@ -85,6 +85,11 @@ type decisionEvent struct {
 	Type    string     `json:"type"`
 	Action  string     `json:"action"`
 	Rule    *ruleEvent `json:"rule,omitempty"`
+	// Client is the identity the resolver named for the address, empty when
+	// nothing claims it. A consumer draws the answer against this rather than
+	// resolving the address itself, which cannot see a hardware address or a
+	// lease.
+	Client string `json:"client,omitempty"`
 }
 
 type ruleEvent struct {
@@ -100,6 +105,7 @@ func decisionEventFrom(decision dns.Decision) decisionEvent {
 		Name:    decision.Name.String(),
 		Type:    decision.Type,
 		Action:  "allow",
+		Client:  string(decision.Client),
 	}
 	if decision.Action == filter.ActionBlock {
 		event.Action = "block"

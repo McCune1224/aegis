@@ -85,7 +85,10 @@ type Config struct {
 // it. The handler publishes it for a blocked name and for an allowed one, so
 // the stream shows the whole pipeline rather than only what it stopped. Type is
 // the question's record type as its mnemonic, such as A or AAAA. Rewritten
-// names the rewrite target when a rewrite took part, empty otherwise.
+// names the rewrite target when a rewrite took part, empty otherwise. Client is
+// the identity the rule set resolved for the address, empty when nothing claims
+// it, and it is what a consumer draws the answer against rather than resolving
+// the address a second time.
 type Decision struct {
 	Time      time.Time
 	Address   netip.Addr
@@ -94,6 +97,7 @@ type Decision struct {
 	Action    filter.Action
 	Match     *filter.Provenance
 	Rewritten string
+	Client    filter.ClientKey
 }
 
 // Handler answers one DNS message. It holds no mutable state, so one Handler
@@ -223,6 +227,7 @@ func (h *Handler) publish(question mdns.Question, address netip.Addr, name filte
 		Action:    verdict.Action,
 		Match:     verdict.Match,
 		Rewritten: rewritten,
+		Client:    verdict.Client,
 	}
 	for _, observer := range h.observers {
 		observer.Observe(decision)

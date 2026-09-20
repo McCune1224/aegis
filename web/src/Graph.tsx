@@ -6,7 +6,7 @@ import { frame, pan, toWorld, zoomAt, type Box, type Camera } from "./camera";
 import type { Decision } from "./api";
 import { effectiveMode } from "./resolve";
 import type { QueryLog } from "./querylog";
-import { buildTopology, matchClient, upstreamNodeID, type Topology } from "./topology";
+import { buildTopology, clientFor, upstreamNodeID, type Topology } from "./topology";
 
 type Props = {
   profiles: Profile[];
@@ -345,12 +345,12 @@ export default function Graph(props: Props) {
   // ── Live flow ─────────────────────────────────────────────────────────
 
   function route(decision: Decision) {
-    const profileName = resolveProfile(decision.address);
-    if (!profileName) {
+    const resolved = clientFor(decision.client ?? "", props.clients, props.defaultProfile);
+    if (!resolved) {
       return;
     }
-    const from = placed.get(`client:${profileName.clientName}`);
-    const profile = placed.get(`profile:${profileName.profile}`);
+    const from = placed.get(resolved.clientID);
+    const profile = placed.get(resolved.profileID);
     if (!from || !profile) {
       return;
     }
@@ -365,19 +365,6 @@ export default function Graph(props: Props) {
       return;
     }
     particles.push(streak([segment(from, profile), segment(profile, upstream)], allowColor, 200));
-  }
-
-  function resolveProfile(address: string): { clientName: string; profile: string } | undefined {
-    const id = matchClient(props.clients, address);
-    if (id) {
-      const name = id.slice("client:".length);
-      const client = props.clients.find((candidate) => candidate.name === name);
-      return client ? { clientName: client.name, profile: client.profile } : undefined;
-    }
-    if (props.defaultProfile) {
-      return { clientName: "unidentified", profile: props.defaultProfile };
-    }
-    return undefined;
   }
 
   function streak(segments: Segment[], color: number, speed: number): Particle {
