@@ -2,6 +2,7 @@ package filter_test
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -63,6 +64,80 @@ func TestWildcardStarMaySitInTheMiddle(t *testing.T) {
 	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "ads.cdn.example"), "", noAddress, testNow).Action)
 	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "ads.example"), "", noAddress, testNow).Action)
 	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "ads.cdn.host.example"), "", noAddress, testNow).Action)
+}
+
+func TestWildcardRulesMatchOnTheirTrailingLabels(t *testing.T) {
+	cases := []struct {
+		pattern string
+		name    string
+		want    filter.Action
+	}{
+		{"*.b.c", "x.b.c", filter.ActionBlock},
+		{"*.b.c", "b.c", filter.ActionAllow},
+		{"*.b.c", "x.y.b.c", filter.ActionAllow},
+		{"*.b.c", "x.b.c.d", filter.ActionAllow},
+		{"a.*.d.e", "a.x.d.e", filter.ActionBlock},
+		{"a.*.d.e", "d.e", filter.ActionAllow},
+		{"a.*.d.e", "x.a.x.d.e", filter.ActionAllow},
+		{"open.*", "open.x", filter.ActionBlock},
+		{"open.*", "open.x.y", filter.ActionAllow},
+		{"open.*", "x.open", filter.ActionAllow},
+		{"literal.example", "literal.example", filter.ActionBlock},
+		{"literal.example", "x.literal.example", filter.ActionAllow},
+		{"*.*.tail.example", "a.b.tail.example", filter.ActionBlock},
+		{"*.*.tail.example", "b.tail.example", filter.ActionAllow},
+		{"tail.example", "tail.example", filter.ActionBlock},
+	}
+	for _, c := range cases {
+		t.Run(c.pattern+" "+c.name, func(t *testing.T) {
+			rs := compile(t, ruleSpec("wild", filter.MatchWildcard, filter.ActionBlock, c.pattern))
+
+			got := rs.Decide(domain(t, c.name), "", noAddress, testNow)
+
+			require.Equal(t, c.want, got.Action)
+		})
+	}
+}
+
+// TestEveryWildcardFiresForANameItCanMatch builds a name from each pattern by
+// giving every * a label. A rule the index skips for a name it can match is the
+// failure this guards, and it is the one a tail bucket can introduce.
+func TestEveryWildcardFiresForANameItCanMatch(t *testing.T) {
+	patterns := []string{
+		"*",
+		"*.b.c",
+		"a.*.c",
+		"a.*.*.b",
+		"*.b.c.d.e",
+		"a.*.d.e",
+		"open.*",
+		"literal.example",
+	}
+	for _, pattern := range patterns {
+		t.Run(pattern, func(t *testing.T) {
+			rs := compile(t, ruleSpec("wild", filter.MatchWildcard, filter.ActionBlock, pattern))
+			matched := strings.ReplaceAll(pattern, "*", "x")
+
+			got := rs.Decide(domain(t, matched), "", noAddress, testNow)
+
+			require.Equal(t, filter.ActionBlock, got.Action, "pattern=%q name=%q", pattern, matched)
+			require.NotNil(t, got.Match)
+			require.Equal(t, pattern, got.Match.Pattern)
+		})
+	}
+}
+
+// TestRegexRulesAreNotSkippedByALiteralTail keeps a regex on the path that every
+// name tests, since its match is unanchored and no literal tail can narrow it.
+func TestRegexRulesAreNotSkippedByALiteralTail(t *testing.T) {
+	rs := compile(t,
+		ruleSpec("wild", filter.MatchWildcard, filter.ActionBlock, "*.track.example"),
+		ruleSpec("re", filter.MatchRegex, filter.ActionBlock, `^beacon-[0-9]+$`),
+	)
+
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "x.track.example"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionBlock, rs.Decide(domain(t, "beacon-12"), "", noAddress, testNow).Action)
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "x.example"), "", noAddress, testNow).Action)
 }
 
 func TestWildcardAllowBeatsBlockList(t *testing.T) {
