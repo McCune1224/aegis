@@ -330,6 +330,7 @@ func TestTheQueryStreamCarriesADecisionFromARealQuery(t *testing.T) {
 	var event decisionEventJSON
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &event))
 	require.Equal(t, "ads.example.com", event.Name)
+	require.Equal(t, "A", event.Type)
 	require.Equal(t, "block", event.Action)
 	require.NotNil(t, event.Rule)
 	require.Equal(t, "ads.example.com", event.Rule.Pattern)
@@ -354,6 +355,7 @@ func TestAStalledConsumerCannotBlockAQuery(t *testing.T) {
 
 type decisionEventJSON struct {
 	Name   string `json:"name"`
+	Type   string `json:"type"`
 	Action string `json:"action"`
 	Rule   *struct {
 		ID      string `json:"id"`
