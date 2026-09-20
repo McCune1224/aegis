@@ -147,6 +147,45 @@ export function deleteProfile(name: string): Promise<void> {
   return request<void>(`/api/v1/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
+export type BlockedService = {
+  id: string;
+  name: string;
+  group: string;
+  rule_count: number;
+  profiles: string[];
+};
+
+export type ServiceCatalog = {
+  services: BlockedService[];
+  groups: string[];
+  fetched_at?: string;
+};
+
+export type ProfileServices = {
+  profile: string;
+  services: string[];
+};
+
+export function listServices(): Promise<ServiceCatalog> {
+  return request<ServiceCatalog>("/api/v1/services");
+}
+
+export function listProfileServices(name: string): Promise<ProfileServices> {
+  return request<ProfileServices>(`/api/v1/profiles/${encodeURIComponent(name)}/services`);
+}
+
+// saveProfileServices replaces the whole set of services one profile blocks.
+export function saveProfileServices(name: string, services: string[]): Promise<ProfileServices> {
+  return request<ProfileServices>(`/api/v1/profiles/${encodeURIComponent(name)}/services`, {
+    method: "PUT",
+    body: JSON.stringify({ services }),
+  });
+}
+
+export function refreshServices(): Promise<void> {
+  return request<void>("/api/v1/services/refresh", { method: "POST" });
+}
+
 export function getDefaultProfile(): Promise<{ profile: string }> {
   return request<{ profile: string }>("/api/v1/default-profile");
 }

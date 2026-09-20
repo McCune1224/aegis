@@ -1,14 +1,19 @@
 import { createSignal, For, Show } from "solid-js";
-import type { Profile, ProfileInput } from "./api";
+import type { BlockedService, Profile, ProfileInput } from "./api";
+import { groupServices, toggled } from "./services";
 
 const modes = ["nxdomain", "null-address", "custom-address", "refused"];
 
 type Props = {
   profiles: Profile[];
   defaultProfile: string;
+  services: BlockedService[];
+  serviceGroups: string[];
   onSave: (name: string, input: ProfileInput) => Promise<void>;
   onDelete: (name: string) => Promise<void>;
   onSetDefault: (name: string) => Promise<void>;
+  onSaveServices: (name: string, services: string[]) => Promise<void>;
+  onRefreshServices: () => Promise<void>;
 };
 
 export default function Profiles(props: Props) {
@@ -71,6 +76,39 @@ export default function Profiles(props: Props) {
     setError(undefined);
     try {
       await props.onSetDefault(target);
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }
+
+  function enabledServices(): string[] {
+    const profile = editing();
+    if (!profile) {
+      return [];
+    }
+    return props.services.filter((service) => service.profiles.includes(profile)).map((service) => service.id);
+  }
+
+  async function toggleService(id: string) {
+    const profile = editing();
+    if (!profile) {
+      return;
+    }
+    setBusy(true);
+    setError(undefined);
+    try {
+      await props.onSaveServices(profile, toggled(enabledServices(), id));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshCatalog() {
+    setError(undefined);
+    try {
+      await props.onRefreshServices();
     } catch (cause) {
       setError(String(cause));
     }
@@ -171,6 +209,38 @@ export default function Profiles(props: Props) {
             </button>
           </Show>
         </div>
+        <Show when={editing()}>
+          <fieldset class="services" data-testid="profile-services">
+            <legend>Blocked services</legend>
+            <Show when={props.services.length === 0}>
+              <p class="muted">No services in the catalog yet.</p>
+            </Show>
+            <For each={groupServices(props.services, props.serviceGroups)}>
+              {(group) => (
+                <div class="service-group">
+                  <h3>{group.group || "Other"}</h3>
+                  <For each={group.services}>
+                    {(service) => (
+                      <label class="toggle">
+                        <input
+                          type="checkbox"
+                          data-testid={`service-${service.id}`}
+                          checked={enabledServices().includes(service.id)}
+                          disabled={busy()}
+                          onChange={() => void toggleService(service.id)}
+                        />
+                        {service.name}
+                      </label>
+                    )}
+                  </For>
+                </div>
+              )}
+            </For>
+            <button type="button" data-testid="services-refresh" onClick={() => void refreshCatalog()}>
+              Refresh catalog
+            </button>
+          </fieldset>
+        </Show>
         {error() ? <p class="error">{error()}</p> : null}
       </form>
     </section>
