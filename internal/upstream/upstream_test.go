@@ -47,18 +47,7 @@ func startStub(t *testing.T, handler mdns.HandlerFunc) *stub {
 }
 
 func (s *stub) serve() {
-	desired := s.address
-	if desired == "" {
-		desired = "127.0.0.1:0"
-	}
-	var listen net.ListenConfig
-	pc, err := listen.ListenPacket(context.Background(), "udp", desired)
-	require.NoError(s.t, err)
-	ln, err := listen.Listen(context.Background(), "tcp", pc.LocalAddr().String())
-	if err != nil {
-		_ = pc.Close()
-		require.NoError(s.t, err)
-	}
+	pc, ln := s.bind()
 	s.address = pc.LocalAddr().String()
 
 	counting := mdns.HandlerFunc(func(w mdns.ResponseWriter, req *mdns.Msg) {
@@ -70,6 +59,33 @@ func (s *stub) serve() {
 	go func() { _ = udp.ActivateAndServe() }()
 	go func() { _ = tcp.ActivateAndServe() }()
 	s.packet, s.listener, s.servers = pc, ln, []*mdns.Server{udp, tcp}
+}
+
+// bind opens the UDP socket and the TCP listener on one address. The kernel
+// picks a port for the UDP socket, and nothing holds that port while the TCP
+// listener binds, so a loaded machine can hand it to someone else first. Losing
+// that race is retried with a fresh port rather than reported, because it says
+// nothing about the code under test.
+func (s *stub) bind() (net.PacketConn, net.Listener) {
+	var listen net.ListenConfig
+	for attempt := range 10 {
+		desired := s.address
+		if desired == "" {
+			desired = "127.0.0.1:0"
+		}
+		pc, err := listen.ListenPacket(context.Background(), "udp", desired)
+		require.NoError(s.t, err)
+
+		ln, err := listen.Listen(context.Background(), "tcp", pc.LocalAddr().String())
+		if err == nil {
+			return pc, ln
+		}
+		_ = pc.Close()
+		if desired != "127.0.0.1:0" || attempt == 9 {
+			require.NoError(s.t, err)
+		}
+	}
+	panic("unreachable")
 }
 
 func (s *stub) stop() {

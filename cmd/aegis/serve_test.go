@@ -25,14 +25,28 @@ import (
 	"aegis/internal/store"
 )
 
+// freeAddress picks a port the DNS server can have both transports on. The
+// kernel hands out a UDP port, and the caller binds TCP on it later, so the
+// port is checked for both before it is returned; a port something else took in
+// the meantime is a retry, not a failure.
 func freeAddress(t *testing.T) string {
 	t.Helper()
 	var listen net.ListenConfig
-	packet, err := listen.ListenPacket(t.Context(), "udp", "127.0.0.1:0")
-	require.NoError(t, err)
-	address := packet.LocalAddr().String()
-	require.NoError(t, packet.Close())
-	return address
+	for range 10 {
+		packet, err := listen.ListenPacket(t.Context(), "udp", "127.0.0.1:0")
+		require.NoError(t, err)
+		address := packet.LocalAddr().String()
+		require.NoError(t, packet.Close())
+
+		probe, err := listen.Listen(t.Context(), "tcp", address)
+		if err != nil {
+			continue
+		}
+		require.NoError(t, probe.Close())
+		return address
+	}
+	t.Fatal("no port was free for both transports")
+	return ""
 }
 
 func freeTCPAddress(t *testing.T) string {
