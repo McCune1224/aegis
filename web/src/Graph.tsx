@@ -452,8 +452,6 @@ export default function Graph(props: Props) {
     }
   }
 
-  // ── Pan, zoom, link, selection ────────────────────────────────────────
-
   function attachControls(instance: Application) {
     let gesture: Gesture = { kind: "idle" };
     let moved = 0;
