@@ -1,4 +1,4 @@
-import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
+import ELK from "elkjs/lib/elk.bundled.js";
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import type { Client, Profile, ProfileInput, Rule } from "./api";
@@ -9,6 +9,7 @@ import { effectiveMode } from "./resolve";
 import type { QueryLog } from "./querylog";
 import { buildTopology, clientFor, upstreamNodeID, type NodeKind, type Topology } from "./topology";
 import { admit, advance, emptyFlow, PULSE_LIFE_SECONDS, segment, streak, trail, type Flow } from "./flow";
+import { cellWidth, fitLabel, LABEL_MAX, ROW_HEIGHT, STAR_CELL, type Measure } from "./label";
 import { linkIntent, type LinkIntent } from "./edit";
 
 type Props = {
@@ -28,8 +29,11 @@ type Placed = {
   kind: NodeKind;
   label: string;
   detail: string;
+  // x and y are the star's centre. The cell is the whole layout box, star and
+  // label together, and it is what a fit frames so no label is cropped.
   x: number;
   y: number;
+  cell: Box;
   phase: number;
 };
 
@@ -64,14 +68,15 @@ const labelColor = 0xeef2fa;
 const detailColor = 0x8b96b5;
 
 const fontStack = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const labelFont = `600 15px ${fontStack}`;
+const detailFont = `400 12.5px ${fontStack}`;
 
-// margin is the room a fit leaves around the stars for their labels.
-const FIT_MARGIN = 220;
+// margin is the room a fit leaves around the constellation. The cells already
+// hold their own labels, so this is breathing room rather than a label gutter.
+const FIT_MARGIN = 40;
 
 // margin is how close to the edge a revealed node may land.
 const REVEAL_MARGIN = 60;
-
-const elk = new ELK();
 
 // The sprite is baked this large once. The biggest star is 150 world px, which
 // the camera may draw at three times the scale on a 2x display, so a source
@@ -79,11 +84,28 @@ const elk = new ELK();
 // nothing on a soft glow.
 const STAR_TEXTURE_SIZE = 512;
 
+const elk = new ELK();
+
 // displayResolution is the density the canvas renders at. It is clamped at 2
 // because the fourth pixel of a 3x panel is not worth the fill rate.
 function displayResolution(): number {
   return Math.min(window.devicePixelRatio || 1, 2);
 }
+
+// One offscreen context measures label widths, so the layout box can hold the
+// text the graph will actually print instead of a guess at it.
+let ruler: CanvasRenderingContext2D | undefined;
+
+function measureText(text: string, font: string): number {
+  ruler ??= document.createElement("canvas").getContext("2d") ?? undefined;
+  if (!ruler) {
+    return text.length * 7.6;
+  }
+  ruler.font = font;
+  return ruler.measureText(text).width;
+}
+
+const measureWith = (font: string): Measure => (text: string) => measureText(text, font);
 
 // makeStarTexture bakes one star: an atmosphere that reaches the tile edge, a
 // chromosphere, a four-point flare, and a hot core. Every stop is rgba so the
@@ -305,31 +327,48 @@ export default function Graph(props: Props) {
 
   async function draw(topology: Topology) {
     const instance = await ensureApp();
+
+    const measureLabel = measureWith(labelFont);
+    const measureDetail = measureWith(detailFont);
+    const cells = topology.nodes.map((node) => {
+      const label = fitLabel(node.label, measureLabel, LABEL_MAX);
+      const detail = fitLabel(node.detail, measureDetail, LABEL_MAX);
+      return {
+        node,
+        label,
+        detail,
+        width: cellWidth(measureLabel(label), measureDetail(detail)),
+      };
+    });
+
     const layout = await elk.layout({
       id: "root",
       layoutOptions: {
         "elk.algorithm": "layered",
         "elk.direction": "DOWN",
-        "elk.spacing.nodeNode": "40",
-        "elk.layered.spacing.nodeNodeBetweenLayers": "120",
+        "elk.spacing.nodeNode": "28",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "96",
       },
-      children: topology.nodes.map((node) => ({ id: node.id, width: 120, height: 44 })),
+      children: cells.map((cell) => ({ id: cell.node.id, width: cell.width, height: ROW_HEIGHT })),
       edges: topology.edges.map((edge) => ({ id: edge.id, sources: [edge.from], targets: [edge.to] })),
     });
 
     placed.clear();
     for (const child of layout.children ?? []) {
-      const node = topology.nodes.find((candidate) => candidate.id === child.id);
-      if (!node) {
+      const cell = cells.find((candidate) => candidate.node.id === child.id);
+      if (!cell) {
         continue;
       }
-      placed.set(node.id, {
-        id: node.id,
-        kind: node.kind,
-        label: node.label,
-        detail: node.detail,
-        x: (child.x ?? 0) + 60,
-        y: (child.y ?? 0) + 22,
+      const minX = child.x ?? 0;
+      const minY = child.y ?? 0;
+      placed.set(cell.node.id, {
+        id: cell.node.id,
+        kind: cell.node.kind,
+        label: cell.label,
+        detail: cell.detail,
+        x: minX + STAR_CELL / 2,
+        y: minY + ROW_HEIGHT / 2,
+        cell: { minX, minY, maxX: minX + cell.width, maxY: minY + ROW_HEIGHT },
         phase: Math.random() * Math.PI * 2,
       });
     }
@@ -381,6 +420,7 @@ export default function Graph(props: Props) {
     star.height = size;
     haloLayer.addChild(star);
 
+    const anchorX = node.x + STAR_CELL / 2;
     // A shadow on the text is what keeps a label legible where it crosses the
     // atmosphere of its own star.
     const shadow = { color: 0x04060b, alpha: 0.85, blur: 4, distance: 1, angle: Math.PI / 2 };
@@ -395,7 +435,7 @@ export default function Graph(props: Props) {
         dropShadow: shadow,
       },
     });
-    label.x = node.x + 16;
+    label.x = anchorX;
     label.y = node.y - 17;
     nodeLayer.addChild(label);
 
@@ -403,7 +443,7 @@ export default function Graph(props: Props) {
       text: node.detail,
       style: { fill: detailColor, fontFamily: fontStack, fontSize: 12.5, dropShadow: shadow },
     });
-    detail.x = node.x + 16;
+    detail.x = anchorX;
     detail.y = node.y + 2;
     nodeLayer.addChild(detail);
   }
@@ -417,10 +457,10 @@ export default function Graph(props: Props) {
     let box: Box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
     for (const node of placed.values()) {
       box = {
-        minX: Math.min(box.minX, node.x),
-        minY: Math.min(box.minY, node.y),
-        maxX: Math.max(box.maxX, node.x),
-        maxY: Math.max(box.maxY, node.y),
+        minX: Math.min(box.minX, node.cell.minX),
+        minY: Math.min(box.minY, node.cell.minY),
+        maxX: Math.max(box.maxX, node.cell.maxX),
+        maxY: Math.max(box.maxY, node.cell.maxY),
       };
     }
     camera = frame(box, host.clientWidth, host.clientHeight, FIT_MARGIN);
