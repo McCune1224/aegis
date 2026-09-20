@@ -70,6 +70,7 @@ import Graph from "./Graph";
 import QueryLog from "./QueryLog";
 import Settings from "./Settings";
 import { createQueryLog } from "./querylog";
+import { starField } from "./sky";
 import Profiles from "./Profiles";
 import Rewrites from "./Rewrites";
 import Rules from "./Rules";
@@ -108,6 +109,10 @@ const TITLES: Record<Tab, string> = {
   upstreams: "Upstreams",
   settings: "Settings",
 };
+
+const sky = starField();
+// The two tiles travel as custom properties so app.css owns the layering.
+const skyLayers = { "--sky-far": sky.far, "--sky-near": sky.near } as JSX.CSSProperties;
 
 export default function App() {
   const [tab, setTab] = createSignal<Tab>("dashboard");
@@ -315,7 +320,7 @@ export default function App() {
 
   return (
     <>
-      <div class="sky" />
+      <div class="sky" style={skyLayers} />
       <div class="shell">
         <aside class="sidebar">
           <div class="brand">
