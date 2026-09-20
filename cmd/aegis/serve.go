@@ -81,6 +81,7 @@ func newServeCmd() *cobra.Command {
 	flags.String("custom-address", "", "the address to answer with when the default profile blocks")
 	flags.StringArray("blocklist", nil, "path to a blocklist file, repeatable, as [format:]path with format hosts, domains, or adblock")
 	flags.StringArray("source", nil, "blocklist source as name=[format:]url, repeatable")
+	flags.StringArray("threat-feed", nil, "threat feed as name=url, repeatable")
 	flags.String("block-format", "hosts", "hosts, domains, or adblock, applied to every blocklist")
 	flags.StringArray("profile", nil, "extra profile as name=mode or name=mode=address, repeatable")
 	flags.StringArray("client", nil, "bind an address to a profile as address=profile, repeatable")
@@ -156,6 +157,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := seedSources(ctx, database, cfg.Sources, format, firstBoot, logger); err != nil {
 		return err
 	}
+	if err := seedThreatFeeds(ctx, database, cfg.ThreatFeeds, firstBoot, logger); err != nil {
+		return err
+	}
 	if err := seedRewrites(ctx, database, rewrites, firstBoot, logger); err != nil {
 		return err
 	}
@@ -181,8 +185,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	catalog := runtime.NewServiceSync(database, blocklist.NewFetcher(sourceTimeout), services.DefaultCatalogURL, engine, logger)
 
 	hub := api.NewHub(logger)
-	log := querylog.New(database, logger)
 	threats := threat.NewService(database, logger)
+	log := querylog.New(database, logger, querylog.WithThreats(threats.ThreatFor))
+	threatSync := runtime.NewThreatSync(database, blocklist.NewFetcher(sourceTimeout), threats, logger)
+	if err := threatSync.RefreshFeeds(ctx); err != nil {
+		return err
+	}
 
 	resolver, err := cache.New(cache.Config{Upstream: engine.Upstreams(), Prefetch: true})
 	if err != nil {
@@ -250,6 +258,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Sources:   sync,
 		Preview:   sync,
 		Catalog:   catalog,
+		Threats:   threatSync,
 		Hub:       hub,
 		Files:     web.Files(),
 		Address:   cfg.APIAddress,
@@ -305,6 +314,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer refreshCancel()
 	go runSourceRefreshLoop(refreshCtx, sync, refreshInterval, logger)
 	go runCatalogRefreshLoop(refreshCtx, catalog, logger)
+	go runThreatRefreshLoop(refreshCtx, threatSync, refreshInterval, logger)
 
 	dhcpDone := make(chan error, 1)
 	if dhcpServer != nil {
@@ -316,6 +326,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	logger.Info("aegis is shutting down")
 	if err := log.Close(); err != nil {
 		logger.Warn("querylog: final flush failed", "error", err)
+	}
+	if err := threats.Close(); err != nil {
+		logger.Warn("threat: final flush failed", "error", err)
 	}
 	if err := threats.Close(); err != nil {
 		logger.Warn("threat: final flush failed", "error", err)
@@ -686,4 +699,38 @@ func newLogger(level string, out io.Writer) (*slog.Logger, error) {
 		return nil, fmt.Errorf("unknown log level %q", level)
 	}
 	return slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: parsed})), nil
+}
+
+func runThreatRefreshLoop(ctx context.Context, sync *runtime.ThreatSync, defaultInterval time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(sourceRefreshTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := sync.RefreshFeeds(ctx); err != nil {
+				logger.Warn("threat feed refresh failed", "error", err)
+			}
+		}
+	}
+}
+
+// seedThreatFeeds stores the flag feeds on first boot, the way blocklist
+// sources seed: the database stays the source of truth after that.
+func seedThreatFeeds(ctx context.Context, database *store.Store, entries []string, firstBoot bool, logger *slog.Logger) error {
+	if !firstBoot || len(entries) == 0 {
+		return nil
+	}
+	for _, raw := range entries {
+		name, url, found := strings.Cut(raw, "=")
+		if !found || name == "" || url == "" {
+			return fmt.Errorf("threat-feed %q must be name=url", raw)
+		}
+		if err := database.SaveThreatFeed(ctx, store.ThreatFeed{Name: name, URL: url, Enabled: true}); err != nil {
+			return err
+		}
+	}
+	logger.Info("seeded threat feeds from the flags", "feeds", len(entries))
+	return nil
 }

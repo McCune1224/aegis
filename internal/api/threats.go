@@ -1,10 +1,21 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
+
+	"aegis/internal/store"
 )
+
+// ThreatRefresher refreshes threat feeds on demand. The sync in the runtime
+// implements it, and the API calls it after a feed write so a new feed is
+// fetched without a restart.
+type ThreatRefresher interface {
+	RefreshFeeds(ctx context.Context) error
+	RefreshFeed(ctx context.Context, name string) error
+}
 
 // threatFindingRow is one analyser finding on the wire. Evidence is the sample
 // of names or intervals that earned the finding.
@@ -44,4 +55,87 @@ func (s *Server) listThreatFindings(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"findings": rows})
+}
+
+// threatFeedRow is one configured feed on the wire.
+type threatFeedRow struct {
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
+}
+
+// threatFeedRequest is one feed as it arrives. A nil enabled keeps what is
+// stored on an update and means enabled on a create.
+type threatFeedRequest struct {
+	URL     string `json:"url"`
+	Enabled *bool  `json:"enabled"`
+}
+
+func (s *Server) listThreatFeeds(w http.ResponseWriter, r *http.Request) {
+	feeds, err := s.store.ThreatFeeds(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	rows := make([]threatFeedRow, 0, len(feeds))
+	for _, feed := range feeds {
+		rows = append(rows, threatFeedRow{Name: feed.Name, URL: feed.URL, Enabled: feed.Enabled})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"feeds": rows})
+}
+
+func (s *Server) putThreatFeed(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	request, err := decodeJSON[threatFeedRequest](r)
+	if err != nil {
+		writeError(w, badRequest{err})
+		return
+	}
+	if request.URL == "" {
+		writeError(w, badRequest{fmt.Errorf("api: a threat feed needs a url")})
+		return
+	}
+	existing, err := s.store.ThreatFeeds(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	enabled := true
+	for _, feed := range existing {
+		if feed.Name == name {
+			enabled = feed.Enabled
+		}
+	}
+	if request.Enabled != nil {
+		enabled = *request.Enabled
+	}
+	if err := s.store.SaveThreatFeed(r.Context(), store.ThreatFeed{Name: name, URL: request.URL, Enabled: enabled}); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, threatFeedRow{Name: name, URL: request.URL, Enabled: enabled})
+}
+
+func (s *Server) deleteThreatFeed(w http.ResponseWriter, r *http.Request) {
+	err := s.store.DeleteThreatFeed(r.Context(), r.PathValue("name"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// refreshThreatFeed fetches one feed now and republishes the index, so a new
+// classification reaches the log without a restart.
+func (s *Server) refreshThreatFeed(w http.ResponseWriter, r *http.Request) {
+	if s.threats == nil {
+		writeError(w, errNotFound)
+		return
+	}
+	name := r.PathValue("name")
+	if err := s.threats.RefreshFeed(r.Context(), name); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "refreshed", "feed": name})
 }
