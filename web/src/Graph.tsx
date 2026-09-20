@@ -1,17 +1,18 @@
 import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
-import type { Client, Profile } from "./api";
+import type { Client, Profile, Rule } from "./api";
 import { frame, pan, toWorld, zoomAt, type Box, type Camera } from "./camera";
 import type { Decision } from "./api";
 import { effectiveMode } from "./resolve";
 import type { QueryLog } from "./querylog";
-import { buildTopology, clientFor, upstreamNodeID, type Topology } from "./topology";
+import { buildTopology, clientFor, upstreamNodeID, type NodeKind, type Topology } from "./topology";
 import { admit, advance, emptyFlow, PULSE_LIFE_SECONDS, segment, streak, trail, type Flow } from "./flow";
 
 type Props = {
   profiles: Profile[];
   clients: Client[];
+  rules: Rule[];
   defaultProfile: string;
   upstreams: string[];
   log: QueryLog;
@@ -19,11 +20,9 @@ type Props = {
   onSetDefault: (name: string) => Promise<void>;
 };
 
-type Kind = "client" | "profile" | "upstream";
-
 type Placed = {
   id: string;
-  kind: Kind;
+  kind: NodeKind;
   label: string;
   detail: string;
   x: number;
@@ -31,10 +30,11 @@ type Placed = {
   phase: number;
 };
 
-const kindColor: Record<Kind, number> = {
+const kindColor: Record<NodeKind, number> = {
   client: 0x7dd3fc,
   profile: 0x6ee7b7,
   upstream: 0xc4b5fd,
+  rule: 0xfbbf24,
 };
 
 const allowColor = 0x6ee7b7;
@@ -111,10 +111,11 @@ function makeStarTexture(tint: string, spikes: number): Texture {
   return Texture.from(canvas);
 }
 
-const kindTint: Record<Kind, string> = {
+const kindTint: Record<NodeKind, string> = {
   client: "#7dd3fc",
   profile: "#6ee7b7",
   upstream: "#c4b5fd",
+  rule: "#fbbf24",
 };
 
 export default function Graph(props: Props) {
@@ -136,10 +137,10 @@ export default function Graph(props: Props) {
   // camera, so adding a client does not throw away where the operator was
   // looking; the fit control is how they ask for it back.
   let framed = false;
-  let starTextures: Map<Kind, Texture>;
+  let starTextures: Map<NodeKind, Texture>;
 
   createEffect(
-    () => [buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams)] as const,
+    () => [buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams, props.rules)] as const,
     ([topology]) => {
       void draw(topology);
     },
@@ -184,10 +185,11 @@ export default function Graph(props: Props) {
     });
     host?.appendChild(instance.canvas);
 
-    starTextures = new Map<Kind, Texture>([
+    starTextures = new Map<NodeKind, Texture>([
       ["client", makeStarTexture(kindTint.client, 44)],
       ["profile", makeStarTexture(kindTint.profile, 56)],
       ["upstream", makeStarTexture(kindTint.upstream, 68)],
+      ["rule", makeStarTexture(kindTint.rule, 34)],
     ]);
     world = new Container();
     haloLayer = new Container();
@@ -271,7 +273,7 @@ export default function Graph(props: Props) {
     if (!haloLayer || !nodeLayer) {
       return;
     }
-    const size = node.kind === "upstream" ? 150 : node.kind === "profile" ? 124 : 108;
+    const size = node.kind === "upstream" ? 150 : node.kind === "profile" ? 124 : node.kind === "rule" ? 84 : 108;
     const star = new Sprite(starTextures.get(node.kind) ?? Texture.WHITE);
     star.anchor.set(0.5);
     star.x = node.x;
@@ -522,6 +524,14 @@ export default function Graph(props: Props) {
     return props.profiles.find((profile) => profile.name === node.label);
   };
 
+  const selectedRule = () => {
+    const node = selectedNode();
+    if (!node || node.kind !== "rule") {
+      return undefined;
+    }
+    return props.rules.find((rule) => `rule:${rule.id}` === node.id);
+  };
+
   return (
     <div
       class="graph"
@@ -578,6 +588,32 @@ export default function Graph(props: Props) {
                 <button type="button" class="btn" onClick={() => void props.onSetDefault(profile().name)}>
                   Make default
                 </button>
+              </Show>
+            </div>
+          </div>
+        )}
+      </Show>
+      <Show when={selectedRule()}>
+        {(rule) => (
+          <div class="graph-panel" data-testid="graph-panel">
+            <header>
+              <h2>{rule().domain}</h2>
+              <button type="button" class="btn-ghost" onClick={() => setSelected(undefined)}>
+                ×
+              </button>
+            </header>
+            <div class="graph-panel-body">
+              <p class="muted">
+                {rule().action} · {rule().kind}
+              </p>
+              <Show when={rule().client}>
+                <p class="muted">client {rule().client}</p>
+              </Show>
+              <Show when={rule().schedule}>
+                <p class="muted">schedule {rule().schedule}</p>
+              </Show>
+              <Show when={rule().notes}>
+                <p class="muted">{rule().notes}</p>
               </Show>
             </div>
           </div>
