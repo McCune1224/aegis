@@ -32,6 +32,11 @@ type Profile struct {
 	Custom  *string
 }
 
+type ProfileSafesearch struct {
+	Profile string
+	Engine  string
+}
+
 type ProfileService struct {
 	Profile string
 	Service string
