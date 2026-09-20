@@ -23,12 +23,21 @@ import (
 	"aegis/internal/upstream"
 )
 
-// ListFile is one blocklist file the operator named at boot. The runtime reads
-// it on every publish, so an edit reaches a running server on the next reload
-// without a restart.
+// ListFile is one blocklist file the operator named at boot. The runtime re-reads
+// a file whose size or modification time changed, so an edit reaches a running
+// server on the next reload without a restart. A rewrite that keeps both the size
+// and the modification time is the one case that waits for a restart.
 type ListFile struct {
 	Path   string
 	Format blocklist.Format
+}
+
+// parsedList is one blocklist file's rules with the on-disk form they were read
+// from, so a publish can tell a file nobody edited from one that changed.
+type parsedList struct {
+	modTime time.Time
+	size    int64
+	result  blocklist.ParseResult
 }
 
 // snapshot is one generation of everything a query needs. The rule set, the
@@ -61,6 +70,9 @@ type Runtime struct {
 	// lists are the blocklist files given at boot. publish reads them on every
 	// reload, so the file contents are inputs rather than frozen rules.
 	lists []ListFile
+	// parsedLists holds each file's last read, keyed on its path, so a reload
+	// that follows a configuration write does not re-parse a file nobody edited.
+	parsedLists map[string]parsedList
 	// sourceRules come from the enabled rows of the sources table and are
 	// replaced by SourceSync on every refresh.
 	sourceRules []filter.RuleSpec
@@ -92,7 +104,7 @@ func New(s *store.Store, lists []ListFile, logger *slog.Logger, opts ...Option) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	r := &Runtime{store: s, lists: lists, logger: logger, now: time.Now, switcher: upstream.NewSwitch()}
+	r := &Runtime{store: s, lists: lists, logger: logger, now: time.Now, switcher: upstream.NewSwitch(), parsedLists: make(map[string]parsedList, len(lists))}
 	for _, opt := range opts {
 		opt(r)
 	}
@@ -289,20 +301,43 @@ func ValidateLists(lists []ListFile) error {
 	return nil
 }
 
-// readLists parses every blocklist file fresh. A file that cannot be read
-// fails the publish, so the previous generation keeps serving rather than the
-// resolver quietly dropping the rules the operator asked for.
+// readLists parses every blocklist file, reusing the last read of a file whose
+// size and modification time are unchanged. A file that cannot be read fails the
+// publish, so the previous generation keeps serving rather than the resolver
+// quietly dropping the rules the operator asked for.
 func (r *Runtime) readLists() ([]filter.RuleSpec, error) {
 	var rules []filter.RuleSpec
 	for _, list := range r.lists {
-		result, err := readListFile(list)
+		result, read, err := r.readList(list)
 		if err != nil {
 			return nil, err
 		}
-		r.logger.Info("blocklist loaded", "path", list.Path, "rules", len(result.Rules), "skipped", result.Skipped)
+		if read {
+			r.logger.Info("blocklist loaded", "path", list.Path, "rules", len(result.Rules), "skipped", result.Skipped)
+		}
 		rules = append(rules, result.Rules...)
 	}
 	return rules, nil
+}
+
+// readList returns one file's parsed rules, reading it only when it changed since
+// the last read. The returned bool reports whether the file was read, so a caller
+// can log a load rather than a reuse.
+func (r *Runtime) readList(list ListFile) (blocklist.ParseResult, bool, error) {
+	info, err := os.Stat(list.Path)
+	if err != nil {
+		return blocklist.ParseResult{}, false, fmt.Errorf("runtime: %w", err)
+	}
+	if cached, held := r.parsedLists[list.Path]; held && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
+		return cached.result, false, nil
+	}
+
+	result, err := readListFile(list)
+	if err != nil {
+		return blocklist.ParseResult{}, false, err
+	}
+	r.parsedLists[list.Path] = parsedList{modTime: info.ModTime(), size: info.Size(), result: result}
+	return result, true, nil
 }
 
 func readListFile(list ListFile) (blocklist.ParseResult, error) {
