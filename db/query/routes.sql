@@ -5,10 +5,10 @@ SELECT id, domain, client, upstream FROM routes ORDER BY id;
 INSERT INTO routes (domain, client, upstream) VALUES (?, ?, ?)
 RETURNING id;
 
--- name: UpdateRoute :exec
+-- name: UpdateRoute :execrows
 UPDATE routes
 SET domain = ?, client = ?, upstream = ?
 WHERE id = ?;
 
--- name: DeleteRoute :exec
+-- name: DeleteRoute :execrows
 DELETE FROM routes WHERE id = ?;

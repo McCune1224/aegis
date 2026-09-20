@@ -102,6 +102,13 @@ func (c Config) Validate() error {
 	return validateRoutes(c.Routes, c.Upstreams, c.Clients)
 }
 
+// ValidateRoute reports whether one route could join this configuration, which
+// is the rule a reload applies to the whole route list. The API calls it before
+// storing a route, so the rule has one home.
+func (c Config) ValidateRoute(row Route) error {
+	return validateRoutes([]Route{row}, c.Upstreams, c.Clients)
+}
+
 // validateRoutes refuses a route whose upstream is missing or disabled,
 // whose client does not exist, or whose domain no query can carry. A route
 // that fails here would fail every reload, because the router has nowhere to

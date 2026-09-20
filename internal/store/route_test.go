@@ -37,7 +37,9 @@ func TestRoutesRoundTripThroughTheStore(t *testing.T) {
 		{ID: 2, Client: "tablet", Upstream: "quad9"},
 	}, rows)
 
-	require.NoError(t, s.UpdateRoute(ctx, store.Route{ID: 2, Domain: "other.example", Upstream: "backup"}))
+	updated, err := s.UpdateRoute(ctx, store.Route{ID: 2, Domain: "other.example", Upstream: "backup"})
+	require.NoError(t, err)
+	require.True(t, updated, "the route the test just wrote is there to update")
 	rows, err = s.Routes(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []store.Route{
@@ -49,7 +51,9 @@ func TestRoutesRoundTripThroughTheStore(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, rows, cfg.Routes)
 
-	require.NoError(t, s.DeleteRoute(ctx, 1))
+	deleted, err := s.DeleteRoute(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, deleted)
 	rows, err = s.Routes(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []store.Route{{ID: 2, Domain: "other.example", Upstream: "backup"}}, rows)
