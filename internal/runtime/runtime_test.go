@@ -218,7 +218,7 @@ func TestStoredRewritesReachTheSnapshot(t *testing.T) {
 	ctx := t.Context()
 	rt := runtime.New(s, nil, quietLogger())
 
-	_, ok := rt.Lookup(mustDomain(t, "home.local"))
+	_, ok := rt.Lookup(mustDomain(t, "home.local"), netip.Addr{})
 	require.False(t, ok, "an empty table rewrites nothing")
 
 	record, err := rewrite.Parse("home.local", "192.168.7.7")
@@ -226,7 +226,7 @@ func TestStoredRewritesReachTheSnapshot(t *testing.T) {
 	require.NoError(t, s.SaveRewrite(ctx, record))
 	require.NoError(t, rt.Reload(ctx))
 
-	got, ok := rt.Lookup(mustDomain(t, "home.local"))
+	got, ok := rt.Lookup(mustDomain(t, "home.local"), netip.Addr{})
 	require.True(t, ok)
 	require.Equal(t, "192.168.7.7", got.Addr.String())
 

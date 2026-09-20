@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from "solid-js";
-import type { BlockedService, Profile, ProfileInput } from "./api";
+import type { BlockedService, Profile, ProfileInput, SafesearchEngine } from "./api";
 import { groupServices, toggled } from "./services";
 
 const modes = ["nxdomain", "null-address", "custom-address", "refused"];
@@ -9,11 +9,13 @@ type Props = {
   defaultProfile: string;
   services: BlockedService[];
   serviceGroups: string[];
+  safesearch: SafesearchEngine[];
   onSave: (name: string, input: ProfileInput) => Promise<void>;
   onDelete: (name: string) => Promise<void>;
   onSetDefault: (name: string) => Promise<void>;
   onSaveServices: (name: string, services: string[]) => Promise<void>;
   onRefreshServices: () => Promise<void>;
+  onSaveSafesearch: (name: string, engines: string[]) => Promise<void>;
 };
 
 export default function Profiles(props: Props) {
@@ -111,6 +113,30 @@ export default function Profiles(props: Props) {
       await props.onRefreshServices();
     } catch (cause) {
       setError(String(cause));
+    }
+  }
+
+  function enabledEngines(): string[] {
+    const profile = editing();
+    if (!profile) {
+      return [];
+    }
+    return props.safesearch.filter((engine) => engine.profiles.includes(profile)).map((engine) => engine.id);
+  }
+
+  async function toggleEngine(id: string) {
+    const profile = editing();
+    if (!profile) {
+      return;
+    }
+    setBusy(true);
+    setError(undefined);
+    try {
+      await props.onSaveSafesearch(profile, toggled(enabledEngines(), id));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -239,6 +265,23 @@ export default function Profiles(props: Props) {
             <button type="button" data-testid="services-refresh" onClick={() => void refreshCatalog()}>
               Refresh catalog
             </button>
+          </fieldset>
+          <fieldset class="services" data-testid="profile-safesearch">
+            <legend>Safe search</legend>
+            <For each={props.safesearch}>
+              {(engine) => (
+                <label class="toggle">
+                  <input
+                    type="checkbox"
+                    data-testid={`safesearch-${engine.id}`}
+                    checked={enabledEngines().includes(engine.id)}
+                    disabled={busy()}
+                    onChange={() => void toggleEngine(engine.id)}
+                  />
+                  {engine.name}
+                </label>
+              )}
+            </For>
           </fieldset>
         </Show>
         {error() ? <p class="error">{error()}</p> : null}

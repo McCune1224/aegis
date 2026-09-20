@@ -19,7 +19,7 @@ type stubRewriter struct {
 	table *rewrite.Table
 }
 
-func (r stubRewriter) Lookup(name filter.Domain) (rewrite.Record, bool) {
+func (r stubRewriter) Lookup(name filter.Domain, _ netip.Addr) (rewrite.Record, bool) {
 	return r.table.Lookup(name)
 }
 

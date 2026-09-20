@@ -18,6 +18,7 @@ import (
 	"aegis/internal/filter"
 	"aegis/internal/metrics"
 	"aegis/internal/rewrite"
+	"aegis/internal/safesearch"
 	"aegis/internal/store"
 	"aegis/internal/upstream"
 )
@@ -35,11 +36,12 @@ type ListFile struct {
 // load, so a query cannot pair the new rules with the old selectors while a
 // reload is in flight.
 type snapshot struct {
-	set      *filter.RuleSet
-	identity *client.Resolver
-	rewrites *rewrite.Table
-	routes   *upstream.Router
-	gate     gate
+	set        *filter.RuleSet
+	identity   *client.Resolver
+	rewrites   *rewrite.Table
+	safeSearch *safesearch.Table
+	routes     *upstream.Router
+	gate       gate
 }
 
 // Runtime owns the engine's contents and rebuilds them when the configuration
@@ -158,13 +160,17 @@ func (r *Runtime) publish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	safeSearch, err := safesearch.New(safesearchEnables(cfg.Safesearch), safesearch.Catalog())
+	if err != nil {
+		return err
+	}
 	routes := make([]upstream.RouteSpec, 0, len(cfg.Routes))
 	for _, route := range cfg.Routes {
 		routes = append(routes, upstream.RouteSpec{ID: route.ID, Client: route.Client, Domain: route.Domain, Upstream: route.Upstream})
 	}
 
 	r.switcher.Swap(pool)
-	r.current.Store(&snapshot{set: set, identity: identity, rewrites: rewrite.New(cfg.Rewrites), routes: upstream.NewRouter(routes), gate: gate{allowed: cfg.Allowed, disallowed: cfg.Disallowed}})
+	r.current.Store(&snapshot{set: set, identity: identity, rewrites: rewrite.New(cfg.Rewrites), safeSearch: safeSearch, routes: upstream.NewRouter(routes), gate: gate{allowed: cfg.Allowed, disallowed: cfg.Disallowed}})
 	return nil
 }
 
@@ -222,15 +228,23 @@ func (r *Runtime) ClientKey(address netip.Addr) filter.ClientKey {
 	return current.identity.Key(address)
 }
 
-// Lookup maps one name through the rewrite table, from the same generation
+// Lookup maps one name through the rewrite tables, from the same generation
 // the filter reads, so a query cannot be rewritten by new rules and filtered
 // by old ones. The handler calls it through the Rewriter seam.
-func (r *Runtime) Lookup(name filter.Domain) (rewrite.Record, bool) {
+//
+// An operator's own rewrite wins over a profile's SafeSearch answer, and the
+// profile is resolved the same way the filter resolves rule scope, so the two
+// cannot disagree about who is asking.
+func (r *Runtime) Lookup(name filter.Domain, address netip.Addr) (rewrite.Record, bool) {
 	current := r.current.Load()
 	if current == nil {
 		return rewrite.Record{}, false
 	}
-	return current.rewrites.Lookup(name)
+	if record, ok := current.rewrites.Lookup(name); ok {
+		return record, true
+	}
+	key := current.identity.Key(address)
+	return current.safeSearch.Lookup(name, current.set.ProfileOf(key))
 }
 
 // Reverse maps one address back to the name that pins it, from the same

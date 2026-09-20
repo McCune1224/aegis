@@ -44,6 +44,8 @@ type Config struct {
 	// ProfileServices is which profiles block which of them.
 	Services        []BlockedService
 	ProfileServices []ProfileService
+	// Safesearch is which profiles enforce which search engines' safe mode.
+	Safesearch []ProfileSafesearch
 	// Allowed and Disallowed gate the listener itself: a disallowed client is
 	// refused before any processing, and a non-empty allowed set makes the
 	// listener serve only the clients it lists.
@@ -81,6 +83,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := validateProfileServices(c.ProfileServices, c.Services, c.Profiles); err != nil {
+		return err
+	}
+	if err := validateProfileSafesearch(c.Safesearch, c.Profiles); err != nil {
 		return err
 	}
 	if _, err := filter.Compile(filter.Config{
@@ -249,6 +254,11 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 
+	safeEnables, err := s.ProfileSafesearch(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Profiles:        profiles,
 		Clients:         clients,
@@ -259,6 +269,7 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		Routes:          routes,
 		Services:        catalog,
 		ProfileServices: enables,
+		Safesearch:      safeEnables,
 		Allowed:         allowed,
 		Disallowed:      disallowed,
 		Default:         filter.ProfileID(defaultProfile),

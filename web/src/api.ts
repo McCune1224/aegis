@@ -186,6 +186,34 @@ export function refreshServices(): Promise<void> {
   return request<void>("/api/v1/services/refresh", { method: "POST" });
 }
 
+export type SafesearchEngine = {
+  id: string;
+  name: string;
+  rule_count: number;
+  profiles: string[];
+};
+
+export type SafesearchCatalog = {
+  engines: SafesearchEngine[];
+};
+
+export type ProfileSafesearch = {
+  profile: string;
+  engines: string[];
+};
+
+export function listSafesearch(): Promise<SafesearchCatalog> {
+  return request<SafesearchCatalog>("/api/v1/safesearch");
+}
+
+// saveProfileSafesearch replaces the whole set of engines one profile enforces.
+export function saveProfileSafesearch(name: string, engines: string[]): Promise<ProfileSafesearch> {
+  return request<ProfileSafesearch>(`/api/v1/profiles/${encodeURIComponent(name)}/safesearch`, {
+    method: "PUT",
+    body: JSON.stringify({ engines }),
+  });
+}
+
 export function getDefaultProfile(): Promise<{ profile: string }> {
   return request<{ profile: string }>("/api/v1/default-profile");
 }

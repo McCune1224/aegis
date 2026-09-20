@@ -304,6 +304,17 @@ func Compile(cfg Config) (*RuleSet, error) {
 // of index keys when several rules claim one name.
 func (rs *RuleSet) Len() int { return rs.rules }
 
+// ProfileOf is the profile a query from this client is scoped against: the
+// profile the client names, or the default profile for an address nothing
+// claims. It is the same resolution Decide performs, exposed so a caller that
+// keys its own table on the profile cannot disagree with the filter.
+func (rs *RuleSet) ProfileOf(client ClientKey) ProfileID {
+	if scope, exists := rs.clients[client]; exists {
+		return scope.profile
+	}
+	return rs.fallbackProfile
+}
+
 func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int, knownProfiles map[ProfileID]bool) error {
 	rs.rules = len(specs)
 	byNetwork := make(map[netip.Prefix]*entry)
