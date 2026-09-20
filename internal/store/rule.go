@@ -44,6 +44,33 @@ func (r Rule) Value() string {
 	return ""
 }
 
+// SetValue is the inverse of Value: it parses the text a rule matches on into the
+// payload its kind takes, which is the one place rule text stops being text. It
+// clears the payloads the kind does not use, so a rule that changes kind cannot
+// keep the one it had. Every path that reads rule text, from a stored row, an
+// export document, or an HTTP request, comes here.
+func (r *Rule) SetValue(kind filter.MatchKind, raw string) error {
+	var err error
+	switch kind {
+	case filter.MatchExact, filter.MatchSubdomains:
+		r.Domain, err = filter.ParseDomain(raw)
+		r.Pattern, r.Network = "", netip.Prefix{}
+	case filter.MatchWildcard, filter.MatchRegex:
+		r.Pattern, err = filter.ParsePattern(kind, raw)
+		r.Domain, r.Network = filter.Domain{}, netip.Prefix{}
+	case filter.MatchCIDR:
+		r.Network, err = filter.ParseNetwork(raw)
+		r.Domain, r.Pattern = filter.Domain{}, ""
+	default:
+		return fmt.Errorf("store: rule %d has unknown match kind %d", r.ID, kind)
+	}
+	if err != nil {
+		return err
+	}
+	r.Kind = kind
+	return nil
+}
+
 // Spec is the rule in the shape filter.Compile takes.
 func (r Rule) Spec() filter.RuleSpec {
 	return filter.RuleSpec{
@@ -94,15 +121,7 @@ func parseRule(row storedb.Rule) (Rule, error) {
 		Notes:    row.Notes,
 		Created:  unixSeconds(row.Created),
 	}
-	switch kind {
-	case filter.MatchExact, filter.MatchSubdomains:
-		rule.Domain, err = filter.ParseDomain(row.Domain)
-	case filter.MatchWildcard, filter.MatchRegex:
-		rule.Pattern, err = filter.ParsePattern(kind, row.Domain)
-	case filter.MatchCIDR:
-		rule.Network, err = filter.ParseNetwork(row.Domain)
-	}
-	if err != nil {
+	if err := rule.SetValue(kind, row.Domain); err != nil {
 		return Rule{}, fmt.Errorf("store: rule %d: %w", row.ID, err)
 	}
 	if rule.Action, err = filter.ParseAction(row.Action); err != nil {

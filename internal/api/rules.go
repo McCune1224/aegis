@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -165,7 +164,7 @@ func (s *Server) putRule(w http.ResponseWriter, r *http.Request) {
 		if request.Domain != nil {
 			value = *request.Domain
 		}
-		if err = parseRuleValue(&rule, kind, value); err != nil {
+		if err = rule.SetValue(kind, value); err != nil {
 			writeError(w, badRequest{err})
 			return
 		}
@@ -256,7 +255,7 @@ func parseRuleFields(request ruleRequest) (store.Rule, error) {
 		return store.Rule{}, err
 	}
 	rule := store.Rule{Kind: kind, Action: action}
-	if err := parseRuleValue(&rule, kind, *request.Domain); err != nil {
+	if err := rule.SetValue(kind, *request.Domain); err != nil {
 		return store.Rule{}, err
 	}
 	if request.Schedule != nil {
@@ -266,30 +265,6 @@ func parseRuleFields(request ruleRequest) (store.Rule, error) {
 		rule.Client = filter.ClientKey(strings.TrimSpace(*request.Client))
 	}
 	return rule, nil
-}
-
-// parseRuleValue parses the text a rule matches on into the payload its kind
-// takes, which is the one place rule text stops being text.
-func parseRuleValue(rule *store.Rule, kind filter.MatchKind, raw string) error {
-	var err error
-	switch kind {
-	case filter.MatchExact, filter.MatchSubdomains:
-		rule.Domain, err = filter.ParseDomain(raw)
-		rule.Pattern, rule.Network = "", netip.Prefix{}
-	case filter.MatchWildcard, filter.MatchRegex:
-		rule.Pattern, err = filter.ParsePattern(kind, raw)
-		rule.Domain, rule.Network = filter.Domain{}, netip.Prefix{}
-	case filter.MatchCIDR:
-		rule.Network, err = filter.ParseNetwork(raw)
-		rule.Domain, rule.Pattern = filter.Domain{}, ""
-	default:
-		err = fmt.Errorf("unknown match kind %q", kind)
-	}
-	if err != nil {
-		return err
-	}
-	rule.Kind = kind
-	return nil
 }
 
 // scheduleExists refuses a rule that names a schedule the store does not hold,
