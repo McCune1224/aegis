@@ -91,8 +91,8 @@ func (q *Queries) ListQueries(ctx context.Context, arg ListQueriesParams) ([]Que
 }
 
 const trimQueries = `-- name: TrimQueries :exec
-DELETE FROM queries WHERE id NOT IN (
-    SELECT id FROM queries ORDER BY id DESC LIMIT ?1
+DELETE FROM queries WHERE id <= (
+    SELECT id FROM queries ORDER BY id DESC LIMIT 1 OFFSET ?1
 )
 `
 
