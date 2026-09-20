@@ -1,0 +1,9 @@
+web/node_modules
+web/dist
+bin
+dist
+*.db
+*.db-shm
+*.db-wal
+aegis
+.git
