@@ -31,6 +31,9 @@ type Config struct {
 	// next to a sinkhole: the device is told to ask the sinkhole.
 	DNS       []netip.Addr
 	LeaseTime time.Duration
+	// Now names where lease expiry reads the wall clock, so a test can state the
+	// moment it asks about. A nil Now uses time.Now.
+	Now func() time.Time
 	// Identity answers which client a device belongs to, from the address and
 	// hardware address a request carries. An empty key means no client record
 	// claims the device, which is what makes a discovery.
@@ -62,10 +65,15 @@ type Server struct {
 	control *ipv4.PacketConn
 }
 
-// New returns a server. A nil logger uses the default.
+// New returns a server. A nil logger uses the default, and a nil Config.Now uses
+// the wall clock.
 func New(config Config, database *store.Store, leases *client.Dynamic, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	now := config.Now
+	if now == nil {
+		now = time.Now
 	}
 	return &Server{
 		config:   config,
@@ -74,7 +82,7 @@ func New(config Config, database *store.Store, leases *client.Dynamic, logger *s
 		logger:   logger,
 		table:    make(map[netip.Addr]store.Lease),
 		byMAC:    make(map[string]netip.Addr),
-		now:      time.Now,
+		now:      now,
 	}
 }
 

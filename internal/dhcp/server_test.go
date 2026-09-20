@@ -304,14 +304,22 @@ func TestAReleaseGivesTheAddressBack(t *testing.T) {
 }
 
 func TestAnExpiredLeaseGoesBackIntoThePool(t *testing.T) {
-	h := start(t, func(config *dhcp.Config) { config.LeaseTime = 50 * time.Millisecond })
+	// The lease is long enough that the two exchanges cannot outlive it, and the
+	// clock the server reads is one the test advances, so nothing here depends on
+	// how fast the machine is.
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixNano())
+	h := start(t, func(config *dhcp.Config) {
+		config.LeaseTime = time.Hour
+		config.Now = func() time.Time { return time.Unix(0, clock.Load()) }
+	})
 	first := hardware(t, "aa:bb:cc:dd:ee:01")
 	second := hardware(t, "aa:bb:cc:dd:ee:02")
 
 	h.exchange(t, packet(dhcp.Discover, 18, first))
 	h.expectNoAnswer(t, packet(dhcp.Discover, 99, second))
 
-	time.Sleep(80 * time.Millisecond)
+	clock.Store(time.Now().Add(2 * time.Hour).UnixNano())
 	removed, err := h.server.Sweep(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, int64(1), removed)
