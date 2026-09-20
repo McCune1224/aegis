@@ -110,6 +110,14 @@ The schema is also the migration. `db/migrations` holds goose files, applied at
 startup from the embedded copy, and sqlc reads the same files as its schema, so
 the two cannot drift.
 
+### Wait on state, never on a clock
+
+Never sleep longer than 30 seconds in one command. When waiting on CI, a
+container, or a background process, use the tool that watches the thing itself
+(`gh pr checks --watch`, `gh run watch`) or poll with a short sleep between
+checks. A long blocking sleep burns wall clock and hides the moment the state
+actually changed.
+
 ### Commits
 
 Use Conventional Commits, `type(scope): subject`, short and imperative. One
