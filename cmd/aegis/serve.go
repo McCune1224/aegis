@@ -65,7 +65,7 @@ func newServeCmd() *cobra.Command {
 	flags.String("tls-cert", "", "path to the PEM certificate chain the encrypted listeners serve")
 	flags.String("tls-key", "", "path to the PEM private key the encrypted listeners serve")
 	flags.StringArray("upstream", []string{"9.9.9.9:53"}, "upstream resolver as a URL: udp://, tcp://, tls://, or https://, repeatable")
-	flags.String("api-address", "127.0.0.1:8080", "address for the HTTP API, as host:port")
+	flags.String("api-address", defaultAPIAddress, "address for the HTTP API, as host:port")
 	flags.String("db", "aegis.db", "path to the configuration database")
 	flags.String("blocking-mode", "nxdomain", "nxdomain, null-address, custom-address, or refused, for the default profile")
 	flags.String("custom-address", "", "the address to answer with when the default profile blocks")
