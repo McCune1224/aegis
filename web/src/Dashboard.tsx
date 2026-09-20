@@ -1,11 +1,15 @@
 import uPlot, { type Options } from "uplot";
 import { createEffect, createSignal, For, Show } from "solid-js";
-import type { QueryEntry } from "./api";
+import type { Discovery, QueryEntry } from "./api";
+import Discoveries from "./Discoveries";
 import "uplot/dist/uPlot.min.css";
 import { aggregate } from "./stats";
 
 type Props = {
   entries: QueryEntry[];
+  discoveries: Discovery[];
+  onClaimDiscovery: (discovery: Discovery, name: string) => Promise<void>;
+  onDismissDiscovery: (mac: string) => Promise<void>;
   windowMinutes: number;
   onSetWindow: (minutes: number) => void;
   onOpenLog: () => void;
@@ -35,6 +39,11 @@ export default function Dashboard(props: Props) {
 
   return (
     <div class="screen-inner wide">
+      <Discoveries
+        discoveries={props.discoveries}
+        onClaim={props.onClaimDiscovery}
+        onDismiss={props.onDismissDiscovery}
+      />
       <div class="card-row">
         <div class="panel stat">
           <div class="value" data-testid="stat-total">{stats().total}</div>

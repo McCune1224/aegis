@@ -916,3 +916,28 @@ form .row-actions {
 .preview p {
   margin: 0;
 }
+
+.discovery {
+  border-color: var(--accent-glow);
+}
+
+.discovery p {
+  padding: 0.6rem 1rem 0;
+  margin: 0;
+}
+
+.discovery .row-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem 1rem;
+  flex-wrap: wrap;
+}
+
+.discovery label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--star-dim);
+}
