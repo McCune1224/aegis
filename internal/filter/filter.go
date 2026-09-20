@@ -192,6 +192,10 @@ type Verdict struct {
 	Action Action
 	Match  *Provenance
 	Policy Policy
+	// Route names the upstream a routed query must use. The runtime fills it
+	// after Decide, from the same snapshot generation, and the filter itself
+	// never sets it; empty means the pool may choose.
+	Route string
 }
 
 // RuleSet is an immutable rule index and policy table. Build it with Compile,

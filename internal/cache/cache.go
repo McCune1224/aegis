@@ -63,6 +63,7 @@ type key struct {
 	name   string
 	qclass uint16
 	qtype  uint16
+	route  string
 }
 
 // entry is one stored upstream answer. resp is a private template whose ID and
@@ -157,7 +158,7 @@ func (c *Cache) Resolve(ctx context.Context, req *mdns.Msg, route string) (*mdns
 		return c.upstream.Resolve(ctx, req, route)
 	}
 	question := req.Question[0]
-	k := key{name: strings.ToLower(question.Name), qclass: question.Qclass, qtype: question.Qtype}
+	k := key{name: strings.ToLower(question.Name), qclass: question.Qclass, qtype: question.Qtype, route: route}
 
 	c.mu.Lock()
 	if el, ok := c.items[k]; ok {
@@ -206,7 +207,7 @@ func (c *Cache) refresh(k key) {
 	req.SetQuestion(k.name, k.qtype)
 	req.Question[0].Qclass = k.qclass
 
-	resp, err := c.upstream.Resolve(ctx, req, "")
+	resp, err := c.upstream.Resolve(ctx, req, k.route)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

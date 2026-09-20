@@ -38,6 +38,7 @@ type snapshot struct {
 	set      *filter.RuleSet
 	identity *client.Resolver
 	rewrites *rewrite.Table
+	routes   *upstream.Router
 }
 
 // Runtime owns the engine's contents and rebuilds them when the configuration
@@ -151,9 +152,13 @@ func (r *Runtime) publish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	routes := make([]upstream.RouteSpec, 0, len(cfg.Routes))
+	for _, route := range cfg.Routes {
+		routes = append(routes, upstream.RouteSpec{ID: route.ID, Client: route.Client, Domain: route.Domain, Upstream: route.Upstream})
+	}
 
 	r.switcher.Swap(pool)
-	r.current.Store(&snapshot{set: set, identity: identity, rewrites: rewrite.New(cfg.Rewrites)})
+	r.current.Store(&snapshot{set: set, identity: identity, rewrites: rewrite.New(cfg.Rewrites), routes: upstream.NewRouter(routes)})
 	return nil
 }
 
@@ -171,6 +176,8 @@ func upstreamPool(cfg store.Config) (*upstream.Pool, error) {
 		if err != nil {
 			return nil, fmt.Errorf("runtime: upstream %q: %w", row.Name, err)
 		}
+		spec.Name = row.Name
+		spec.Backup = row.Backup
 		specs = append(specs, spec)
 	}
 	return upstream.New(upstream.Config{Specs: specs})
@@ -182,7 +189,10 @@ func (r *Runtime) Decide(name filter.Domain, address netip.Addr) filter.Verdict 
 	if current == nil {
 		return filter.Verdict{Action: filter.ActionAllow}
 	}
-	return current.set.Decide(name, current.identity.Key(address), address, r.now())
+	key := current.identity.Key(address)
+	verdict := current.set.Decide(name, key, address, r.now())
+	verdict.Route = current.routes.Lookup(string(key), name.String())
+	return verdict
 }
 
 // ClientKey names the identity policy keys on for one address, from the same

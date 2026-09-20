@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
+	"aegis/internal/filter"
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 	"aegis/internal/upstream"
@@ -92,6 +93,34 @@ func TestThePoolFollowsTheStoredUpstreams(t *testing.T) {
 		"the same switch serves the pool the store now names")
 	require.EqualValues(t, 1, a.attempts.Load())
 	require.EqualValues(t, 1, b.attempts.Load())
+}
+
+func TestDecideNamesTheStoredRouteForTheQueriedDomain(t *testing.T) {
+	ctx := t.Context()
+	a := startStub(t, "203.0.113.10")
+	b := startStub(t, "203.0.113.11")
+	s := openStore(t)
+	require.NoError(t, s.DeleteUpstream(ctx, deadUpstream))
+	require.NoError(t, s.SaveUpstream(ctx, store.Upstream{Name: "primary", URL: a.address, Enabled: true}))
+	require.NoError(t, s.SaveUpstream(ctx, store.Upstream{Name: "second", URL: b.address, Enabled: true}))
+	_, err := s.SaveRoute(ctx, store.Route{Domain: "target.example", Upstream: "second"})
+	require.NoError(t, err)
+	rt := runtime.New(s, nil, quietLogger())
+	require.NoError(t, rt.Reload(ctx))
+
+	routed, err := filter.ParseDomain("x.target.example.")
+	require.NoError(t, err)
+	verdict := rt.Decide(routed, netip.Addr{})
+	require.Equal(t, "second", verdict.Route)
+
+	resp, err := rt.Upstreams().Resolve(ctx, new(mdns.Msg).SetQuestion(mdns.Fqdn(routed.String()), mdns.TypeA), verdict.Route)
+	require.NoError(t, err)
+	require.Equal(t, "203.0.113.11", whoAnswered(t, resp))
+	require.EqualValues(t, 0, a.attempts.Load(), "a routed query never touches the other resolver")
+
+	plain, err := filter.ParseDomain("other.example.com")
+	require.NoError(t, err)
+	require.Equal(t, "", rt.Decide(plain, netip.Addr{}).Route)
 }
 
 func TestReloadRefusesAStoreWithoutAnEnabledUpstream(t *testing.T) {

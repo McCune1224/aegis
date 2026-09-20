@@ -250,6 +250,35 @@ func TestResolveNeverCachesAnError(t *testing.T) {
 	require.Equal(t, 2, upstream.saw())
 }
 
+// routeDispatch hands each query to the stub its route names, so a test can
+// tell which upstream a cached or fresh answer came from.
+type routeDispatch struct{ byRoute map[string]*stubUpstream }
+
+func (d routeDispatch) Resolve(ctx context.Context, req *mdns.Msg, route string) (*mdns.Msg, error) {
+	return d.byRoute[route].Resolve(ctx, req, route)
+}
+
+func TestResolveKeysOnTheRoute(t *testing.T) {
+	internal := &stubUpstream{}
+	public := &stubUpstream{}
+	resolver := newResolver(t, routeDispatch{byRoute: map[string]*stubUpstream{
+		"internal": internal,
+		"":         public,
+	}}, nil)
+	ctx := context.Background()
+
+	_, err := resolver.Resolve(ctx, query("split.example.net.", mdns.TypeA), "internal")
+	require.NoError(t, err)
+	_, err = resolver.Resolve(ctx, query("split.example.net.", mdns.TypeA), "internal")
+	require.NoError(t, err)
+	require.Equal(t, 1, internal.saw(), "the same route shares one entry")
+
+	_, err = resolver.Resolve(ctx, query("split.example.net.", mdns.TypeA), "")
+	require.NoError(t, err)
+	require.Equal(t, 1, public.saw(),
+		"the same question under another route is another question, so the other upstream is asked")
+}
+
 func TestResolveKeysOnNameAndTypeCaseInsensitively(t *testing.T) {
 	upstream := &stubUpstream{}
 	resolver := newResolver(t, upstream, nil)

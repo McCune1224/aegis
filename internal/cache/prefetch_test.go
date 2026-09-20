@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,21 +18,37 @@ import (
 // prefetchStub is an upstream for the prefetch tests. The call count is
 // atomic because the background refresh rings it from its own goroutine.
 // arrived carries one ring per call, dropped when full, so a test waits for
-// a call to start instead of sleeping for it.
+// a call to start instead of sleeping for it. routes records the route each
+// call came in with.
 type prefetchStub struct {
-	calls   atomic.Int64
+	calls  atomic.Int64
+	routes struct {
+		sync.Mutex
+		byCall map[int64]string
+	}
 	arrived chan struct{}
 	behave  func(n int64, req *mdns.Msg) (*mdns.Msg, error)
 }
 
 func newPrefetchStub() *prefetchStub {
-	return &prefetchStub{arrived: make(chan struct{}, 16)}
+	s := &prefetchStub{arrived: make(chan struct{}, 16)}
+	s.routes.byCall = map[int64]string{}
+	return s
 }
 
 func (s *prefetchStub) saw() int { return int(s.calls.Load()) }
 
-func (s *prefetchStub) Resolve(_ context.Context, req *mdns.Msg, _ string) (*mdns.Msg, error) {
+func (s *prefetchStub) routeOf(n int64) string {
+	s.routes.Lock()
+	defer s.routes.Unlock()
+	return s.routes.byCall[n]
+}
+
+func (s *prefetchStub) Resolve(_ context.Context, req *mdns.Msg, route string) (*mdns.Msg, error) {
 	n := s.calls.Add(1)
+	s.routes.Lock()
+	s.routes.byCall[n] = route
+	s.routes.Unlock()
 	select {
 	case s.arrived <- struct{}{}:
 	default:
@@ -277,6 +294,35 @@ func TestPrefetchKeepsTheOldEntryWhenTheRefreshFails(t *testing.T) {
 	require.Equal(t, uint64(2), stats.Misses)
 	require.Equal(t, uint64(2), stats.Hits)
 	require.Equal(t, uint64(2), stats.Prefetches)
+}
+
+func TestPrefetchRefreshesWithTheRouteTheEntryWasFetchedWith(t *testing.T) {
+	stub := newPrefetchStub()
+	fake := newClock()
+	resolver := newPrefetchResolver(t, stub, func(cfg *cache.Config) { cfg.Now = fake.Now })
+	ctx := context.Background()
+	name := query("routed.example.net.", mdns.TypeA)
+
+	_, err := resolver.Resolve(ctx, name, "internal")
+	require.NoError(t, err)
+	require.Equal(t, 1, stub.saw())
+	require.Equal(t, "internal", stub.routeOf(1))
+	stub.drainArrived()
+
+	fake.Advance(241 * time.Second)
+	_, err = resolver.Resolve(ctx, name, "internal")
+	require.NoError(t, err)
+	stub.waitArrived(t)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for stub.saw() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("the prefetch never landed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.Equal(t, "internal", stub.routeOf(2),
+		"the refresh re-resolves with the route the entry was fetched with")
 }
 
 func TestPrefetchDisabledKeepsTheUpstreamQuiet(t *testing.T) {

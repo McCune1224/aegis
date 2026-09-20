@@ -119,7 +119,7 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 	name, err := filter.ParseDomain(question.Name)
 	if err != nil {
 		// A name we cannot parse cannot match a rule, so it is none of ours.
-		return h.forward(ctx, req, question, address, nil)
+		return h.forward(ctx, req, question, address, nil, "")
 	}
 
 	if h.rewriter != nil && question.Qtype == mdns.TypePTR {
@@ -170,10 +170,10 @@ func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr)
 	if target.String() != name.String() {
 		ask = mdns.Question{Name: mdns.Fqdn(target.String()), Qtype: question.Qtype, Qclass: question.Qclass}
 	}
-	return h.forward(ctx, req, ask, address, chain)
+	return h.forward(ctx, req, ask, address, chain, verdict.Route)
 }
 
-func (h *Handler) forward(ctx context.Context, req *mdns.Msg, ask mdns.Question, address netip.Addr, chain []mdns.RR) (*mdns.Msg, error) {
+func (h *Handler) forward(ctx context.Context, req *mdns.Msg, ask mdns.Question, address netip.Addr, chain []mdns.RR, route string) (*mdns.Msg, error) {
 	if h.limiter != nil && !h.limiter.Allow(address) {
 		return reply(req, mdns.RcodeRefused), nil
 	}
@@ -182,7 +182,7 @@ func (h *Handler) forward(ctx context.Context, req *mdns.Msg, ask mdns.Question,
 		outbound = req.Copy()
 		outbound.Question = []mdns.Question{ask}
 	}
-	resp, err := h.upstream.Resolve(ctx, outbound, "")
+	resp, err := h.upstream.Resolve(ctx, outbound, route)
 	if err != nil {
 		return reply(req, mdns.RcodeServerFailure), fmt.Errorf("dns: upstream: %w", err)
 	}
