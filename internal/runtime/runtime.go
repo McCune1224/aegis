@@ -19,6 +19,7 @@ import (
 	"aegis/internal/metrics"
 	"aegis/internal/rewrite"
 	"aegis/internal/store"
+	"aegis/internal/upstream"
 )
 
 // ListFile is one blocklist file the operator named at boot. The runtime reads
@@ -42,10 +43,11 @@ type snapshot struct {
 // Runtime owns the engine's contents and rebuilds them when the configuration
 // changes. It is the only writer.
 type Runtime struct {
-	store  *store.Store
-	logger *slog.Logger
-	now    func() time.Time
-	counts *metrics.Metrics
+	store    *store.Store
+	logger   *slog.Logger
+	now      func() time.Time
+	counts   *metrics.Metrics
+	switcher *upstream.Switch
 
 	mu sync.Mutex
 	// lists are the blocklist files given at boot. publish reads them on every
@@ -76,12 +78,17 @@ func New(s *store.Store, lists []ListFile, logger *slog.Logger, opts ...Option) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	r := &Runtime{store: s, lists: lists, logger: logger, now: time.Now}
+	r := &Runtime{store: s, lists: lists, logger: logger, now: time.Now, switcher: upstream.NewSwitch()}
 	for _, opt := range opts {
 		opt(r)
 	}
 	return r
 }
+
+// Upstreams is the resolver handle the cache and the DNS handler wire to once
+// at boot. Reload swaps the pool it holds, so a stored change reaches every
+// later query through the same handle.
+func (r *Runtime) Upstreams() *upstream.Switch { return r.switcher }
 
 // Reload reads the stored configuration, compiles it with the current rules,
 // and publishes the result in one store. A query in flight finishes against the
@@ -140,8 +147,33 @@ func (r *Runtime) publish(ctx context.Context) error {
 		return err
 	}
 
+	pool, err := upstreamPool(cfg)
+	if err != nil {
+		return err
+	}
+
+	r.switcher.Swap(pool)
 	r.current.Store(&snapshot{set: set, identity: identity, rewrites: rewrite.New(cfg.Rewrites)})
 	return nil
+}
+
+// upstreamPool builds the resolver pool from the enabled rows. A disabled row
+// drops out; a stored URL that no longer parses fails the reload with the row
+// named, and a store without an enabled row fails the same way a pool built
+// from nothing would.
+func upstreamPool(cfg store.Config) (*upstream.Pool, error) {
+	specs := make([]upstream.Spec, 0, len(cfg.Upstreams))
+	for _, row := range cfg.Upstreams {
+		if !row.Enabled {
+			continue
+		}
+		spec, err := upstream.Parse(row.URL)
+		if err != nil {
+			return nil, fmt.Errorf("runtime: upstream %q: %w", row.Name, err)
+		}
+		specs = append(specs, spec)
+	}
+	return upstream.New(upstream.Config{Specs: specs})
 }
 
 // Decide answers one query for the client at address, from a single generation.

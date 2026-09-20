@@ -23,6 +23,7 @@ func openStore(t *testing.T) *store.Store {
 	s, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "aegis.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
+	require.NoError(t, s.SaveUpstream(t.Context(), store.Upstream{Name: deadUpstream, URL: deadUpstream, Enabled: true}))
 	return s
 }
 
