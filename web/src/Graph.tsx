@@ -530,12 +530,10 @@ export default function Graph(props: Props) {
         host = element as HTMLDivElement;
       }}
     >
-      <div class="graph-tools">
-        <span class="hint">drag to pan · scroll to zoom · click a star</span>
-        <button type="button" class="btn-ghost" data-testid="graph-fit" onClick={() => fitToView()}>
-          Fit
-        </button>
-      </div>
+      <span class="hint">drag to pan · scroll to zoom · click a star</span>
+      <button type="button" class="btn-ghost fit" data-testid="graph-fit" onClick={() => fitToView()}>
+        Fit
+      </button>
       <Show when={selectedClient()}>
         {(client) => (
           <div class="graph-panel" data-testid="graph-panel">
