@@ -4,6 +4,11 @@
 
 package storedb
 
+type Access struct {
+	Kind string
+	Cidr string
+}
+
 type Client struct {
 	Name    string
 	Profile string
