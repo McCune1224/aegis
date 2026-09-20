@@ -64,6 +64,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 		Decider:   rt,
 		Upstream:  rt.Upstreams(),
 		Rewriter:  rt,
+		Gate:      rt,
 		Observers: []dns.Observer{hub, log},
 	})
 	require.NoError(t, err)
