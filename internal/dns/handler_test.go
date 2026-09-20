@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -470,6 +471,51 @@ func TestHandleNeverAsksTheLimiterAboutABlockedName(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, mdns.RcodeSuccess, allowed.Rcode)
 	require.Equal(t, 1, limiter.asked, "the allowed path asks once")
+}
+
+// gateStub refuses exactly the addresses its table denies and counts how often
+// the handler asked, so a test can prove the gate ran alone on the refused path.
+type gateStub struct {
+	denied map[netip.Addr]bool
+	asked  atomic.Int32
+}
+
+func (g *gateStub) Allows(address netip.Addr) bool {
+	g.asked.Add(1)
+	return !g.denied[address.Unmap()]
+}
+
+func TestHandleRefusesADisallowedClientBeforeAnythingElseRuns(t *testing.T) {
+	upstream := &stubResolver{}
+	limiter := &stubLimiter{allowed: []bool{true}}
+	observer := &captureObserver{}
+	gate := &gateStub{denied: map[netip.Addr]bool{netip.MustParseAddr("10.9.9.9"): true}}
+	handler, err := dns.NewHandler(dns.Config{
+		Decider:   deciderFor(t, defaultPolicy),
+		Upstream:  upstream,
+		Limiter:   limiter,
+		Observers: []dns.Observer{observer},
+		Gate:      gate,
+	})
+	require.NoError(t, err)
+
+	refused, err := handler.Handle(context.Background(), query("example.com.", mdns.TypeA), netip.MustParseAddr("10.9.9.9"))
+
+	require.NoError(t, err)
+	require.Equal(t, mdns.RcodeRefused, refused.Rcode)
+	require.Zero(t, upstream.calls, "a refused query never reaches the resolver")
+	require.Equal(t, int32(1), gate.asked.Load())
+	require.Equal(t, 0, limiter.asked, "a refused query spends no rate limit")
+	require.Empty(t, observer.decisions, "a refused query publishes nothing")
+
+	req := query("example.com.", mdns.TypeA)
+	upstream.answer = upstreamA(req, "203.0.113.9")
+	served, err := handler.Handle(context.Background(), req, netip.MustParseAddr("10.9.9.8"))
+
+	require.NoError(t, err)
+	require.Equal(t, mdns.RcodeSuccess, served.Rcode)
+	require.Equal(t, 1, limiter.asked, "the allowed path runs as before")
+	require.Len(t, observer.decisions, 1)
 }
 
 func TestHandleLimitsAnUnparseableNameToo(t *testing.T) {
