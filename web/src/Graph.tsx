@@ -395,9 +395,13 @@ export default function Graph(props: Props) {
     if (!framed) {
       fitToView();
     }
-    if (reveal) {
-      const node = placed.get(reveal);
+    // A reveal is a claim on a node a save has not placed yet. A draw whose
+    // topology does not carry the node leaves the claim for the next one, so a
+    // redraw that races the save cannot swallow it and drop the selection.
+    if (reveal && topology.nodes.some((node) => node.id === reveal)) {
+      const id = reveal;
       reveal = undefined;
+      const node = placed.get(id);
       if (node && host) {
         setSelected(node.id);
         drawSelection();
