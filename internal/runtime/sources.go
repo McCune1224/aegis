@@ -200,6 +200,14 @@ func (s *SourceSync) refreshOne(ctx context.Context, source store.Source) error 
 	if err := s.store.RecordSourceFetch(ctx, source.Name, etag, fetchedAt, fetchErr, ruleCount, skipped, body); err != nil {
 		return err
 	}
+	if _, mirrored := s.rules[source.Name]; !mirrored {
+		// A 304 or a failure keeps the stored body, so the mirror is rebuilt
+		// from it instead of the fetch, and a restarted sync serves the list
+		// the store already holds.
+		if result, parseErr := blocklist.ParseList(bytes.NewReader(body), filter.Source{ID: source.Name, Name: source.Name}, source.Format); parseErr == nil {
+			s.rules[source.Name] = result.Rules
+		}
+	}
 	return nil
 }
 

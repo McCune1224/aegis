@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +81,40 @@ func TestFetchedBodyParsesIntoRules(t *testing.T) {
 	require.Len(t, result.Rules, 1)
 	require.Equal(t, "ads.example.com", result.Rules[0].Domain.String())
 	require.Equal(t, filter.ActionBlock, result.Rules[0].Action)
+}
+
+func TestFetchReadsAFileSourceConditionally(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "list.txt")
+	require.NoError(t, os.WriteFile(path, []byte("0.0.0.0 ads.example.com\n"), 0o644))
+	fetcher := blocklist.NewFetcher(5 * time.Second)
+
+	first, err := fetcher.Fetch(context.Background(), "file://"+path, "")
+
+	require.NoError(t, err)
+	require.False(t, first.NotModified)
+	require.Contains(t, string(first.Body), "ads.example.com")
+	require.NotEmpty(t, first.ETag)
+
+	second, err := fetcher.Fetch(context.Background(), "file://"+path, first.ETag)
+
+	require.NoError(t, err)
+	require.True(t, second.NotModified, "an unchanged file answers 304 like a remote source")
+	require.Empty(t, second.Body)
+
+	require.NoError(t, os.WriteFile(path, []byte("0.0.0.0 ads.example.com\n0.0.0.0 more.example\n"), 0o644))
+	third, err := fetcher.Fetch(context.Background(), "file://"+path, first.ETag)
+
+	require.NoError(t, err)
+	require.False(t, third.NotModified)
+	require.Contains(t, string(third.Body), "more.example")
+	require.NotEqual(t, first.ETag, third.ETag)
+}
+
+func TestFetchOfAMissingFileIsAnError(t *testing.T) {
+	_, err := blocklist.NewFetcher(5*time.Second).Fetch(context.Background(), "file:///no/such/list.txt", "")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no such file")
 }
 
 func TestTheCatalogIsWellFormed(t *testing.T) {

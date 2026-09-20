@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -201,4 +204,34 @@ func TestConsecutiveFailuresCountAndClear(t *testing.T) {
 	sources, err = database.Sources(ctx)
 	require.NoError(t, err)
 	require.Zero(t, sources[0].Failures, "a good fetch clears the failure streak")
+}
+
+func TestARestartedSyncRepublishesTheStoredListAfterA304(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "list.txt")
+	require.NoError(t, os.WriteFile(path, []byte("0.0.0.0 listed.example.com\n"), 0o644))
+
+	database := openStore(t)
+	require.NoError(t, database.SaveSource(ctx, store.Source{
+		Name:    "local",
+		URL:     "file://" + path,
+		Format:  blocklist.FormatHosts,
+		Enabled: true,
+	}))
+
+	booted := runtime.New(database, nil, quietLogger())
+	first := runtime.NewSourceSync(database, blocklist.NewFetcher(time.Second), booted, quietLogger())
+	require.NoError(t, first.RefreshSources(ctx))
+
+	listed, err := filter.ParseDomain("listed.example.com")
+	require.NoError(t, err)
+	require.Equal(t, filter.ActionBlock, booted.Decide(listed, netip.Addr{}).Action)
+
+	// A second sync reads the same stored source: the etag matches, the fetch
+	// answers 304, and the stored list must keep serving.
+	second := runtime.New(database, nil, quietLogger())
+	restarted := runtime.NewSourceSync(database, blocklist.NewFetcher(time.Second), second, quietLogger())
+	require.NoError(t, restarted.RefreshSources(ctx))
+	require.Equal(t, filter.ActionBlock, second.Decide(listed, netip.Addr{}).Action,
+		"a 304 must republish the stored list, not empty the source rules")
 }
