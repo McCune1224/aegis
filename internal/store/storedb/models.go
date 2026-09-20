@@ -32,6 +32,11 @@ type Profile struct {
 	Custom  *string
 }
 
+type ProfileService struct {
+	Profile string
+	Service string
+}
+
 type Query struct {
 	ID      int64
 	Time    int64
@@ -69,6 +74,14 @@ type Schedule struct {
 	Name     string
 	Priority int64
 	Windows  string
+}
+
+type Service struct {
+	ID        string
+	Name      string
+	GroupName string
+	Rules     string
+	FetchedAt int64
 }
 
 type Setting struct {

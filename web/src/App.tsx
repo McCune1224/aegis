@@ -21,10 +21,13 @@ import {
   listRoutes,
   listRules,
   listSchedules,
+  listServices,
   listSources,
   listUpstreams,
+  refreshServices as postRefreshServices,
   saveClient as putClient,
   saveProfile as putProfile,
+  saveProfileServices as putProfileServices,
   saveRewrite as putRewrite,
   saveSchedule as putSchedule,
   saveSource as putSource,
@@ -38,6 +41,7 @@ import {
   type ClientInput,
   type Profile,
   type ProfileInput,
+  type BlockedService,
   type Rewrite,
   type Route,
   type RouteInput,
@@ -103,6 +107,8 @@ export default function App() {
   const [clients, setClients] = createSignal<Client[]>([]);
   const [sources, setSources] = createSignal<Source[]>([]);
   const [catalog, setCatalog] = createSignal<CatalogEntry[]>([]);
+  const [services, setServices] = createSignal<BlockedService[]>([]);
+  const [serviceGroups, setServiceGroups] = createSignal<string[]>([]);
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [schedules, setSchedules] = createSignal<Schedule[]>([]);
   const [rewrites, setRewrites] = createSignal<Rewrite[]>([]);
@@ -120,7 +126,7 @@ export default function App() {
   const log = createQueryLog({ live: live() });
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices] =
       await Promise.all([
         listProfiles(),
         listClients(),
@@ -134,6 +140,7 @@ export default function App() {
         getAccess(),
         getDefaultProfile(),
         getStatus(),
+        listServices(),
       ]);
     setProfiles(nextProfiles);
     setClients(nextClients);
@@ -148,6 +155,8 @@ export default function App() {
     setDefaultProfile(nextDefault.profile);
     setUpstreams(nextStatus.upstreams);
     setRuleCount(nextStatus.rules ?? 0);
+    setServices(nextServices.services);
+    setServiceGroups(nextServices.groups);
   }
 
   createEffect(
@@ -253,6 +262,16 @@ export default function App() {
     await refresh();
   }
 
+  async function saveProfileServices(name: string, serviceIDs: string[]) {
+    await putProfileServices(name, serviceIDs);
+    await refresh();
+  }
+
+  async function refreshServiceCatalog() {
+    await postRefreshServices();
+    await refresh();
+  }
+
   async function saveAccess(input: AccessSettings) {
     await putAccess(input);
     await refresh();
@@ -344,9 +363,13 @@ export default function App() {
                 <Profiles
                   profiles={profiles()}
                   defaultProfile={defaultProfile()}
+                  services={services()}
+                  serviceGroups={serviceGroups()}
                   onSave={saveProfile}
                   onDelete={deleteProfile}
                   onSetDefault={makeDefault}
+                  onSaveServices={saveProfileServices}
+                  onRefreshServices={refreshServiceCatalog}
                 />
               </div>
             </Show>

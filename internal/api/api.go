@@ -38,17 +38,27 @@ type SourcePreviewer interface {
 	RefreshOne(ctx context.Context, name string) error
 }
 
+// ServiceRefresher fetches the blocked-services catalog and republishes the
+// resolver with what it holds. Runtime's ServiceSync implements it, and the API
+// refreshes on demand so a new service reaches an operator without a restart.
+type ServiceRefresher interface {
+	RefreshCatalog(ctx context.Context) error
+}
+
 // Config is what Start needs.
 type Config struct {
 	Store    *store.Store
 	Reloader Reloader
 	Sources  SourceRefresher
 	Preview  SourcePreviewer
-	Hub      *Hub
-	Files    fs.FS
-	Address  string
-	Logger   *slog.Logger
-	Metrics  *metrics.Metrics
+	// Catalog is optional: a server without it still serves the stored
+	// catalog, and only the refresh endpoint is unavailable.
+	Catalog ServiceRefresher
+	Hub     *Hub
+	Files   fs.FS
+	Address string
+	Logger  *slog.Logger
+	Metrics *metrics.Metrics
 	// Upstreams is the running resolver switch; nil leaves the upstream rows
 	// without live health.
 	Upstreams *upstream.Switch
@@ -61,6 +71,7 @@ type Server struct {
 	reloader  Reloader
 	sources   SourceRefresher
 	preview   SourcePreviewer
+	catalog   ServiceRefresher
 	hub       *Hub
 	files     fs.FS
 	metrics   *metrics.Metrics
@@ -103,7 +114,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, preview: cfg.Preview, hub: cfg.Hub, files: cfg.Files, metrics: cfg.Metrics, upstreams: cfg.Upstreams, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, preview: cfg.Preview, catalog: cfg.Catalog, hub: cfg.Hub, files: cfg.Files, metrics: cfg.Metrics, upstreams: cfg.Upstreams, listener: listener}
 	s.http = &http.Server{
 		Handler:  s.routes(),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
@@ -161,6 +172,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/upstreams/{name}", s.deleteUpstream)
 	mux.HandleFunc("GET /api/v1/access", s.getAccess)
 	mux.HandleFunc("PUT /api/v1/access", s.putAccess)
+	mux.HandleFunc("GET /api/v1/services", s.listServices)
+	mux.HandleFunc("POST /api/v1/services/refresh", s.refreshServices)
+	mux.HandleFunc("GET /api/v1/profiles/{name}/services", s.getProfileServices)
+	mux.HandleFunc("PUT /api/v1/profiles/{name}/services", s.putProfileServices)
 	mux.HandleFunc("GET /api/v1/routes", s.listRoutes)
 	mux.HandleFunc("POST /api/v1/routes", s.postRoute)
 	mux.HandleFunc("PUT /api/v1/routes/{id}", s.putRoute)

@@ -67,6 +67,7 @@ type compiledSchedule struct {
 type scheduledRule struct {
 	candidate candidate
 	client    ClientKey
+	profile   ProfileID
 	match     func(name string) bool
 }
 

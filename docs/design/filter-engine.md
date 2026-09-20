@@ -76,6 +76,12 @@ owns what is done; this list says what each unit is and the check that proves it
 11. **Query log.** Persist each decision and serve it to the dashboard.
 12. **More matchers.** Wildcard, regular expression, and CIDR rules.
 13. **Schedules.** Compile windows into a minute-of-week table.
+14. **Blocked services.** A fetched catalog of per-service domain sets, enabled
+    per profile and compiled to profile-scoped block rules. The check is that a
+    query for an enabled service's domain is blocked from a client on that
+    profile, allowed from a client on another, and unblocked when the service is
+    disabled, all without a restart. `docs/design/services.md` records the
+    catalog and the divergence from AdGuard Home.
 
 ## Why the order changed twice
 
@@ -111,6 +117,38 @@ prefix wins, then the same tier rule as everywhere else. Within name rules a
 pattern ranks below an indexed rule of the same tier for provenance only; the
 action is the tier winner either way, since a pattern carries no specificity a
 comparison could use.
+
+## How a rule is scoped
+
+A rule is active for every client unless it names a scope, and it may name at
+most one: a `Client`, which keeps it to one identity, or a `Profile`, which
+keeps it to every client whose policy is that profile. Compile rejects a rule
+that names both, because two scopes that can disagree would need a merge rule
+nobody could predict from the config, and rejects a profile the config does not
+define rather than indexing a rule that silently never matches.
+
+Scope filters candidacy and nothing else. The client's profile is resolved once
+per query, from the same table that resolves its policy: the client record, or
+the default profile for an address nothing claims. A rule scoped to another
+profile is then not a candidate at all, and among the candidates that remain the
+action tiers, specificity, and declaration order decide exactly as they do for
+unscoped rules. An unscoped allow still beats a profile-scoped block, and a
+profile-scoped allow is how an operator exempts one profile from a global list
+rule.
+
+A profile scope needs no schedule; it is the whole of what a blocked service
+means. A client scope keeps the schedule requirement it always had, because an
+identity that is only different at some minute is a schedule rule.
+
+The name index holds the winner among the unscoped rules for one name plus the
+scoped rules for that name, and folds the scoped ones in at query time, because
+who wins depends on who asks and compile time does not know. A name with no
+scoped rules costs one nil-slice check.
+
+Profile scope is the foundation for blocked services (`docs/design/services.md`).
+That is where Aegis first diverges from AdGuard Home here: AGH keys blocked
+services on the client with a separate global set, while Aegis keys them on the
+profile and expresses the global set as the default profile's set.
 
 ## How a schedule compiles
 
@@ -160,7 +198,7 @@ path to replacing AdGuard Home for a first user.
 
 Blocklist diffing and source health monitoring. Both need the store first.
 
-A profile attached to a schedule. Profiles today carry only a blocking mode,
-which answers how a blocked name is answered and cannot block anything by
-itself, so a profile swap on a window changes nothing an operator can see.
-Revisit when profiles grow rule sets of their own.
+A profile attached to a schedule. A profile stays a policy identity rather than
+a rule set: the rules a profile activates are its blocked services, and time of
+day is expressed by scoping an ordinary rule to a schedule. A window that swaps
+profiles would be a second way to say the same thing.
