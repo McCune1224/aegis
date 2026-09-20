@@ -77,8 +77,6 @@ func TestDGAShapeSeeksRandomLabelsAndSkipsHumanOnes(t *testing.T) {
 	}
 }
 
-// The issue's done-when: a known DGA-shaped sequence through the analyser is
-// flagged, with the evidence recorded.
 func TestDetectorFlagsADGASequenceWithEvidence(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)}
 	detector := NewDetector(WithClock(clock.Now))

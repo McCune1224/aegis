@@ -112,11 +112,12 @@ the two cannot drift.
 
 ### Wait on state, never on a clock
 
-Never sleep longer than 30 seconds in one command. When waiting on CI, a
-container, or a background process, use the tool that watches the thing itself
-(`gh pr checks --watch`, `gh run watch`) or poll with a short sleep between
-checks. A long blocking sleep burns wall clock and hides the moment the state
-actually changed.
+Never hold a command open waiting for progress. No sleep over 30 seconds, and
+no watch mode (`gh pr checks --watch`, `gh run watch`, tail -f) either, because
+a blocked wait is a sleep with a costume. Poll instead: check the state in one
+short command, act or move on, and check again later. Long-running work that
+actually computes (make test, docker build) may run long; waiting never
+computes.
 
 ### Commits
 
