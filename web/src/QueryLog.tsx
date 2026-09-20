@@ -145,7 +145,14 @@ export default function QueryLog(props: Props) {
                     <td>
                       <span class={`badge ${entry.verdict === "block" ? "block" : entry.verdict === "rewrite" ? "rewrite" : "allow"}`}>{entry.verdict}</span>
                     </td>
-                    <td class="selectors">{entry.rule ?? ""}</td>
+                    <td class="selectors">
+                      {entry.rule ?? ""}
+                      <Show when={entry.threat}>
+                        <span class="badge block" data-testid="log-threat" title="named by a threat feed">
+                          {entry.threat}
+                        </span>
+                      </Show>
+                    </td>
                     <td>
                       <Show
                         when={entry.verdict === "block"}

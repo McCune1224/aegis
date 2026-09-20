@@ -24,6 +24,7 @@ import {
   listSafesearch,
   listDiscoveries,
   dismissDiscovery as removeDiscovery,
+  listThreatFindings,
   listServices,
   listSources,
   listUpstreams,
@@ -48,6 +49,7 @@ import {
   type BlockedService,
   type Discovery,
   type SafesearchEngine,
+  type ThreatFinding,
   type Rewrite,
   type Route,
   type RouteInput,
@@ -117,6 +119,7 @@ export default function App() {
   const [serviceGroups, setServiceGroups] = createSignal<string[]>([]);
   const [safesearch, setSafesearch] = createSignal<SafesearchEngine[]>([]);
   const [discoveries, setDiscoveries] = createSignal<Discovery[]>([]);
+  const [threats, setThreats] = createSignal<ThreatFinding[]>([]);
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [schedules, setSchedules] = createSignal<Schedule[]>([]);
   const [rewrites, setRewrites] = createSignal<Rewrite[]>([]);
@@ -134,7 +137,7 @@ export default function App() {
   const log = createQueryLog({ live: live() });
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices, nextSafesearch, nextDiscoveries] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices, nextSafesearch, nextDiscoveries, nextThreats] =
       await Promise.all([
         listProfiles(),
         listClients(),
@@ -151,6 +154,7 @@ export default function App() {
         listServices(),
         listSafesearch(),
         listDiscoveries(),
+        listThreatFindings(),
       ]);
     setProfiles(nextProfiles);
     setClients(nextClients);
@@ -169,6 +173,7 @@ export default function App() {
     setServiceGroups(nextServices.groups);
     setSafesearch(nextSafesearch.engines);
     setDiscoveries(nextDiscoveries.discoveries);
+    setThreats(nextThreats.findings);
   }
 
   createEffect(
@@ -351,6 +356,7 @@ export default function App() {
               <Dashboard
                 entries={log.entries()}
                 discoveries={discoveries()}
+                threats={threats()}
                 onClaimDiscovery={claimDiscovery}
                 onDismissDiscovery={async (mac) => {
                   await removeDiscovery(mac);

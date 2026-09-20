@@ -450,7 +450,22 @@ export type QueryEntry = {
   type: string;
   verdict: string;
   rule?: string;
+  threat?: string;
 };
+
+// ThreatFinding is one pattern the analyser recorded, with the evidence that
+// earned it.
+export type ThreatFinding = {
+  time: number;
+  client: string;
+  kind: string;
+  summary: string;
+  evidence: string[];
+};
+
+export function listThreatFindings(limit = 50): Promise<{ findings: ThreatFinding[] }> {
+  return request<{ findings: ThreatFinding[] }>(`/api/v1/threats/findings?limit=${limit}`);
+}
 
 export type QueryFilterInput = {
   client?: string;
