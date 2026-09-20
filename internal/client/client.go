@@ -7,6 +7,7 @@ package client
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"sort"
 
@@ -19,13 +20,26 @@ import (
 type Spec struct {
 	Key       filter.ClientKey
 	Addresses []netip.Addr
+	MACs      []net.HardwareAddr
 	Prefixes  []netip.Prefix
 }
 
-// Resolver maps a source address to a client key.
+// Selector is what one request carries for identity: the source address the
+// packet came from, and the hardware address when the caller has one. Only a
+// DHCP request knows both, which is why the address is not required.
+type Selector struct {
+	Address netip.Addr
+	MAC     net.HardwareAddr
+}
+
+// Resolver maps a selector to a client key.
 type Resolver struct {
 	byAddress map[netip.Addr]filter.ClientKey
+	byMAC     map[string]filter.ClientKey
 	prefixes  []prefixSelector
+	// leases is the addresses DHCP has handed out, which is where an address
+	// that no selector claims finds its device.
+	leases *Dynamic
 }
 
 type prefixSelector struct {
@@ -38,6 +52,7 @@ type prefixSelector struct {
 // device is exactly the thing an operator cannot debug from the outside.
 func New(specs []Spec) (*Resolver, error) {
 	byAddress := make(map[netip.Addr]filter.ClientKey)
+	byMAC := make(map[string]filter.ClientKey)
 	byPrefix := make(map[netip.Prefix]filter.ClientKey)
 
 	for _, spec := range specs {
@@ -50,6 +65,16 @@ func New(specs []Spec) (*Resolver, error) {
 				return nil, fmt.Errorf("client: address %s is claimed by both %q and %q", normalized, existing, spec.Key)
 			}
 			byAddress[normalized] = spec.Key
+		}
+		for _, hardware := range spec.MACs {
+			normalized := NormalizeMAC(hardware)
+			if normalized == "" {
+				return nil, fmt.Errorf("client: %q has a hardware address that is not one", spec.Key)
+			}
+			if existing, taken := byMAC[normalized]; taken {
+				return nil, fmt.Errorf("client: hardware address %s is claimed by both %q and %q", normalized, existing, spec.Key)
+			}
+			byMAC[normalized] = spec.Key
 		}
 		for _, prefix := range spec.Prefixes {
 			masked := prefix.Masked()
@@ -71,20 +96,49 @@ func New(specs []Spec) (*Resolver, error) {
 		return ordered[i].prefix.Bits() > ordered[j].prefix.Bits()
 	})
 
-	return &Resolver{byAddress: byAddress, prefixes: ordered}, nil
+	return &Resolver{byAddress: byAddress, byMAC: byMAC, prefixes: ordered}, nil
 }
 
-// Key returns the identity an address carries. An exact address beats a
-// prefix, and among prefixes the longest match wins. An address nothing claims
-// gives the empty key, which takes the default profile.
+// NormalizeMAC is the form hardware addresses are keyed on: lower case, one
+// spelling, so a device that reports its address two ways is one device.
+func NormalizeMAC(hardware net.HardwareAddr) string {
+	if len(hardware) != 6 {
+		return ""
+	}
+	return hardware.String()
+}
+
+// Key returns the identity an address carries.
 func (r *Resolver) Key(address netip.Addr) filter.ClientKey {
-	normalized := address.Unmap()
-	if key, exists := r.byAddress[normalized]; exists {
+	return r.Select(Selector{Address: address})
+}
+
+// Select returns the identity a request carries. An exact address beats a
+// hardware address, which beats a prefix, so pinning one device to one policy
+// does not depend on where it got its address from.
+func (r *Resolver) Select(selector Selector) filter.ClientKey {
+	if selector.Address.IsValid() {
+		if key, exists := r.byAddress[selector.Address.Unmap()]; exists {
+			return key
+		}
+	}
+	if r.leases != nil {
+		if hardware, held := r.leases.MAC(selector.Address); held {
+			if key, exists := r.byMAC[NormalizeMAC(hardware)]; exists {
+				return key
+			}
+		}
+	}
+	if key, exists := r.byMAC[NormalizeMAC(selector.MAC)]; exists {
 		return key
 	}
-	for _, selector := range r.prefixes {
-		if selector.prefix.Contains(normalized) {
-			return selector.key
+	if !selector.Address.IsValid() {
+		return ""
+	}
+	normalized := selector.Address.Unmap()
+	for _, candidate := range r.prefixes {
+		if candidate.prefix.Contains(normalized) {
+			return candidate.key
 		}
 	}
 	return ""
