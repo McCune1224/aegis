@@ -278,6 +278,16 @@ type conflict struct{ err error }
 func (e conflict) Error() string { return e.err.Error() }
 func (e conflict) Unwrap() error { return e.err }
 
+// decodeJSON reads one request body into the type its handler expects. A body
+// that is not JSON is the client's to fix, so callers answer it as a bad request.
+func decodeJSON[T any](r *http.Request) (T, error) {
+	var value T
+	if err := json.NewDecoder(r.Body).Decode(&value); err != nil {
+		return value, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return value, nil
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -80,14 +79,6 @@ func clientResponseFrom(record store.Client) clientResponse {
 	return response
 }
 
-func decodeClient(r *http.Request) (clientRequest, error) {
-	var request clientRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return clientRequest{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return request, nil
-}
-
 func (s *Server) listClients(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.store.Load(r.Context())
 	if err != nil {
@@ -119,7 +110,7 @@ func (s *Server) getClient(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) putClient(w http.ResponseWriter, r *http.Request) {
 	key := filter.ClientKey(r.PathValue("name"))
-	request, err := decodeClient(r)
+	request, err := decodeJSON[clientRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return

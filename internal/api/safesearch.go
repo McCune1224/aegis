@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -90,9 +89,9 @@ func (s *Server) getProfileSafesearch(w http.ResponseWriter, r *http.Request) {
 // even though the catalog still holds it.
 func (s *Server) putProfileSafesearch(w http.ResponseWriter, r *http.Request) {
 	id := filter.ProfileID(r.PathValue("name"))
-	var request profileSafesearchRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, badRequest{fmt.Errorf("invalid JSON: %w", err)})
+	request, err := decodeJSON[profileSafesearchRequest](r)
+	if err != nil {
+		writeError(w, badRequest{err})
 		return
 	}
 

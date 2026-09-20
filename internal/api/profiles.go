@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -62,14 +61,6 @@ func profileResponseFrom(spec filter.ProfileSpec) profileResponse {
 	return response
 }
 
-func decodeProfile(r *http.Request) (profileRequest, error) {
-	var request profileRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return profileRequest{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return request, nil
-}
-
 func (s *Server) listProfiles(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.store.Load(r.Context())
 	if err != nil {
@@ -101,7 +92,7 @@ func (s *Server) getProfile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
 	id := filter.ProfileID(r.PathValue("name"))
-	request, err := decodeProfile(r)
+	request, err := decodeJSON[profileRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return

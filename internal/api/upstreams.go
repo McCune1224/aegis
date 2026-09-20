@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -37,14 +36,6 @@ func upstreamResponseFrom(row store.Upstream) upstreamResponse {
 	return upstreamResponse{Name: row.Name, URL: row.URL, Enabled: row.Enabled, Backup: row.Backup}
 }
 
-func decodeUpstream(r *http.Request) (upstreamRequest, error) {
-	var request upstreamRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return upstreamRequest{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return request, nil
-}
-
 func (s *Server) listUpstreams(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.store.Upstreams(r.Context())
 	if err != nil {
@@ -73,7 +64,7 @@ func (s *Server) listUpstreams(w http.ResponseWriter, r *http.Request) {
 // putUpstream creates one upstream or replaces what its name held, so the
 // answers of a running server change on the next reload.
 func (s *Server) putUpstream(w http.ResponseWriter, r *http.Request) {
-	request, err := decodeUpstream(r)
+	request, err := decodeJSON[upstreamRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return

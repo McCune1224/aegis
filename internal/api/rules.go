@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -56,14 +55,6 @@ func ruleResponseFrom(rule store.Rule) ruleResponse {
 	return response
 }
 
-func decodeRule(r *http.Request) (ruleRequest, error) {
-	var request ruleRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return ruleRequest{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return request, nil
-}
-
 func (s *Server) listRules(w http.ResponseWriter, r *http.Request) {
 	rules, err := s.store.Rules(r.Context())
 	if err != nil {
@@ -81,7 +72,7 @@ func (s *Server) listRules(w http.ResponseWriter, r *http.Request) {
 // it. Every field a rule needs is required here, because a new rule with a
 // missing field has nothing to inherit.
 func (s *Server) postRule(w http.ResponseWriter, r *http.Request) {
-	request, err := decodeRule(r)
+	request, err := decodeJSON[ruleRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return
@@ -133,7 +124,7 @@ func (s *Server) postRule(w http.ResponseWriter, r *http.Request) {
 // putRule patches one stored rule. A body that names a field changes that
 // field; the rest of the stored rule survives.
 func (s *Server) putRule(w http.ResponseWriter, r *http.Request) {
-	request, err := decodeRule(r)
+	request, err := decodeJSON[ruleRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return

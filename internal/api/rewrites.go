@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,14 +24,6 @@ func rewriteResponseFrom(record rewrite.Record) rewriteResponse {
 	return rewriteResponse{Pattern: record.Pattern, Target: rewrite.TargetText(record)}
 }
 
-func decodeRewrite(r *http.Request) (rewriteRequest, error) {
-	var request rewriteRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return rewriteRequest{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return request, nil
-}
-
 func (s *Server) listRewrites(w http.ResponseWriter, r *http.Request) {
 	records, err := s.store.Rewrites(r.Context())
 	if err != nil {
@@ -49,7 +40,7 @@ func (s *Server) listRewrites(w http.ResponseWriter, r *http.Request) {
 // putRewrite creates one rewrite or replaces what its pattern held, so the
 // answers of a running server change on the next reload.
 func (s *Server) putRewrite(w http.ResponseWriter, r *http.Request) {
-	request, err := decodeRewrite(r)
+	request, err := decodeJSON[rewriteRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -43,14 +42,6 @@ func scheduleResponseFrom(schedule filter.ScheduleSpec) scheduleResponse {
 	return scheduleResponse{Name: schedule.Name, Priority: schedule.Priority, Windows: windows}
 }
 
-func decodeSchedule(r *http.Request) (scheduleRequest, error) {
-	var request scheduleRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		return scheduleRequest{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return request, nil
-}
-
 func (s *Server) listSchedules(w http.ResponseWriter, r *http.Request) {
 	schedules, err := s.store.Schedules(r.Context())
 	if err != nil {
@@ -67,7 +58,7 @@ func (s *Server) listSchedules(w http.ResponseWriter, r *http.Request) {
 // putSchedule creates one schedule or replaces what its name held, so the
 // windows of a running server change on the next reload.
 func (s *Server) putSchedule(w http.ResponseWriter, r *http.Request) {
-	request, err := decodeSchedule(r)
+	request, err := decodeJSON[scheduleRequest](r)
 	if err != nil {
 		writeError(w, badRequest{err})
 		return
