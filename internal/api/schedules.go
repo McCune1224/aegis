@@ -36,15 +36,11 @@ func scheduleResponseFrom(schedule filter.ScheduleSpec) scheduleResponse {
 	for _, window := range schedule.Windows {
 		windows = append(windows, scheduleWindow{
 			Days:  window.Days,
-			Start: minuteOfDay(window.Start),
-			End:   minuteOfDay(window.End),
+			Start: filter.MinuteOfDay(window.Start),
+			End:   filter.MinuteOfDay(window.End),
 		})
 	}
 	return scheduleResponse{Name: schedule.Name, Priority: schedule.Priority, Windows: windows}
-}
-
-func minuteOfDay(minute int) string {
-	return fmt.Sprintf("%02d:%02d", minute/60, minute%60)
 }
 
 func decodeSchedule(r *http.Request) (scheduleRequest, error) {

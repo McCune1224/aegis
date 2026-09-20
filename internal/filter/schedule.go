@@ -32,6 +32,12 @@ type ScheduleSpec struct {
 	Windows  []Window
 }
 
+// MinuteOfDay renders a minute of the day the way ParseMinuteOfDay reads it
+// back, so the API and the export document spell one clock the same way.
+func MinuteOfDay(minute int) string {
+	return fmt.Sprintf("%02d:%02d", minute/60, minute%60)
+}
+
 // ParseMinuteOfDay turns "21:00" into the minute-of-day form a Window stores.
 func ParseMinuteOfDay(raw string) (int, error) {
 	hour, minute, ok := strings.Cut(strings.TrimSpace(raw), ":")
