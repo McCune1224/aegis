@@ -109,7 +109,7 @@ export default function Settings(props: Props) {
           <h2>Client access</h2>
         </header>
         <p class="muted">Disallowed clients are refused before any processing. Once the allowed list has an entry, only the clients it lists are served.</p>
-        <form onSubmit={(event) => void submitAllow(event)}>
+        <form class="access-form" onSubmit={(event) => void submitAllow(event)}>
           <h2>Allowed</h2>
           <ul class="tag-list">
             <For each={props.access.allowed}>
@@ -147,7 +147,7 @@ export default function Settings(props: Props) {
             </button>
           </div>
         </form>
-        <form onSubmit={(event) => void submitDeny(event)}>
+        <form class="access-form" onSubmit={(event) => void submitDeny(event)}>
           <h2>Disallowed</h2>
           <ul class="tag-list">
             <For each={props.access.disallowed}>
