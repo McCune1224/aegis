@@ -267,7 +267,7 @@ func TestAConfigWithAnUnknownScheduleIsInvalid(t *testing.T) {
 	require.Error(t, cfg.Validate())
 }
 
-func mustDomain(t *testing.T, name string) filter.Domain {
+func mustDomain(t testing.TB, name string) filter.Domain {
 	t.Helper()
 	domain, err := filter.ParseDomain(name)
 	require.NoError(t, err)

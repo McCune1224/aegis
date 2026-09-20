@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"net/netip"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -87,6 +88,81 @@ func TestQueriesTrimToTheRetentionBound(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 3)
 	require.Equal(t, base.Add(4*time.Second), got[0].Time, "the newest rows survive")
+}
+
+func TestTrimLeavesATableAtItsBoundAlone(t *testing.T) {
+	s := open(t)
+	ctx := t.Context()
+
+	base := time.Now().Truncate(time.Millisecond)
+	batch := make([]store.QueryEntry, 0, 3)
+	for i := range 3 {
+		batch = append(batch, store.QueryEntry{
+			Time:    base.Add(time.Duration(i) * time.Second),
+			Client:  netip.MustParseAddr("10.9.9.2"),
+			Name:    mustDomain(t, "ads.example.com"),
+			Type:    "A",
+			Verdict: filter.ActionBlock,
+		})
+	}
+	require.NoError(t, s.RecordQueries(ctx, batch))
+
+	require.NoError(t, s.TrimQueries(ctx, 3))
+	exact, err := s.Queries(ctx, store.QueryFilter{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, exact, 3, "a table holding exactly the bound keeps every row")
+	require.Equal(t, base, exact[2].Time, "and keeps the oldest one")
+
+	require.NoError(t, s.TrimQueries(ctx, 10))
+	below, err := s.Queries(ctx, store.QueryFilter{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, below, 3, "a bound above the row count deletes nothing")
+}
+
+// BenchmarkTrimQueries measures the pair the log writer performs per flush at the
+// retention bound. It guards the delete's scope, which the earlier NOT IN form paid
+// for with a scan of the whole table.
+func BenchmarkTrimQueries(b *testing.B) {
+	s, err := store.Open(b.Context(), filepath.Join(b.TempDir(), "aegis.db"))
+	require.NoError(b, err)
+	b.Cleanup(func() { _ = s.Close() })
+
+	const bound = 100000
+	const batch = 256
+	name := mustDomain(b, "doubleclick.net")
+	base := time.Now().Truncate(time.Millisecond)
+	fill := make([]store.QueryEntry, 0, bound)
+	for i := range bound {
+		fill = append(fill, store.QueryEntry{
+			Time:    base.Add(time.Duration(i) * time.Millisecond),
+			Client:  netip.MustParseAddr("10.9.9.2"),
+			Name:    name,
+			Type:    "A",
+			Verdict: filter.ActionBlock,
+		})
+	}
+	require.NoError(b, s.RecordQueries(b.Context(), fill))
+
+	decisions := make([]store.QueryEntry, 0, batch)
+	for i := range batch {
+		decisions = append(decisions, store.QueryEntry{
+			Time:    base.Add(time.Duration(bound+i) * time.Millisecond),
+			Client:  netip.MustParseAddr("10.9.9.2"),
+			Name:    name,
+			Type:    "A",
+			Verdict: filter.ActionBlock,
+		})
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := s.RecordQueries(b.Context(), decisions); err != nil {
+			b.Fatal(err)
+		}
+		if err := s.TrimQueries(b.Context(), bound); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func TestReadsRunBesideTheLogWriter(t *testing.T) {
