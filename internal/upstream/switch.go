@@ -22,6 +22,15 @@ func NewSwitch() *Switch { return &Switch{} }
 // Swap publishes the pool every later Resolve reads.
 func (s *Switch) Swap(p *Pool) { s.pool.Store(p) }
 
+// Stats hands back the current pool's health. No pool yet, no stats.
+func (s *Switch) Stats() []Stat {
+	pool := s.pool.Load()
+	if pool == nil {
+		return nil
+	}
+	return pool.Stats()
+}
+
 // Resolve hands the query to the current pool. An empty route resolves
 // through the pool's health ranking; a named route goes to that peer only,
 // never to the rest of the pool.

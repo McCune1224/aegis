@@ -15,6 +15,7 @@ import (
 
 	"aegis/internal/metrics"
 	"aegis/internal/store"
+	"aegis/internal/upstream"
 )
 
 // Reloader rebuilds the running resolver from the store. Runtime implements it,
@@ -48,20 +49,24 @@ type Config struct {
 	Address  string
 	Logger   *slog.Logger
 	Metrics  *metrics.Metrics
+	// Upstreams is the running resolver switch; nil leaves the upstream rows
+	// without live health.
+	Upstreams *upstream.Switch
 }
 
 // Server is the HTTP control plane. It holds its own listener, separate from
 // the DNS socket.
 type Server struct {
-	store    *store.Store
-	reloader Reloader
-	sources  SourceRefresher
-	preview  SourcePreviewer
-	hub      *Hub
-	files    fs.FS
-	metrics  *metrics.Metrics
-	http     *http.Server
-	listener net.Listener
+	store     *store.Store
+	reloader  Reloader
+	sources   SourceRefresher
+	preview   SourcePreviewer
+	hub       *Hub
+	files     fs.FS
+	metrics   *metrics.Metrics
+	upstreams *upstream.Switch
+	http      *http.Server
+	listener  net.Listener
 
 	// mu serializes a mutation's validate, write, and reload, so two requests
 	// cannot both validate against a configuration that never saw the other and
@@ -98,7 +103,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("api: listen %s: %w", cfg.Address, err)
 	}
 
-	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, preview: cfg.Preview, hub: cfg.Hub, files: cfg.Files, metrics: cfg.Metrics, listener: listener}
+	s := &Server{store: cfg.Store, reloader: cfg.Reloader, sources: cfg.Sources, preview: cfg.Preview, hub: cfg.Hub, files: cfg.Files, metrics: cfg.Metrics, upstreams: cfg.Upstreams, listener: listener}
 	s.http = &http.Server{
 		Handler:  s.routes(),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn),

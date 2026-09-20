@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/netip"
@@ -117,6 +118,57 @@ func TestAnUpstreamRowDeletionKeepsTheRemainingResolvers(t *testing.T) {
 
 	got := askName(t, h.dnsAddress, "kept.example.com.")
 	require.Equal(t, "203.0.113.10", answerAddress(t, got), "the remaining resolver serves")
+}
+
+type upstreamRowJSON struct {
+	Name      string  `json:"name"`
+	URL       string  `json:"url"`
+	Enabled   bool    `json:"enabled"`
+	LatencyMS float64 `json:"latency_ms"`
+	Failures  int     `json:"failures"`
+	Down      bool    `json:"down"`
+}
+
+func TestUpstreamRowsCarryLiveHealth(t *testing.T) {
+	h := startHarness(t)
+	live := startStub(t, "203.0.113.10")
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/upstreams/primary", `{"url":"`+live.address+`","enabled":true}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	askName(t, h.dnsAddress, "health-one.example.com.")
+	askName(t, h.dnsAddress, "health-two.example.com.")
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/upstreams", "")
+	require.Equal(t, http.StatusOK, status, body)
+	var listed []upstreamRowJSON
+	require.NoError(t, json.Unmarshal([]byte(body), &listed))
+	require.Len(t, listed, 2)
+	rows := map[string]upstreamRowJSON{}
+	for _, row := range listed {
+		rows[row.Name] = row
+	}
+	require.Greater(t, rows["primary"].LatencyMS, 0.0, "the live resolver has a measured latency")
+	require.Equal(t, 0, rows["primary"].Failures)
+	require.False(t, rows["primary"].Down)
+	require.Equal(t, 0.0, rows[deadUpstream].LatencyMS)
+	require.Equal(t, 2, rows[deadUpstream].Failures, "both queries probed the dead resolver first")
+	require.True(t, rows[deadUpstream].Down, "the failures crossed the threshold")
+
+	status, body = h.do(t, http.MethodPut, "/api/v1/upstreams/spare", `{"url":"9.9.9.9","enabled":false}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/upstreams", "")
+	require.Equal(t, http.StatusOK, status, body)
+	listed = nil
+	require.NoError(t, json.Unmarshal([]byte(body), &listed))
+	rows = map[string]upstreamRowJSON{}
+	for _, row := range listed {
+		rows[row.Name] = row
+	}
+	require.Equal(t, 0.0, rows["spare"].LatencyMS, "a row outside the running pool reads zero")
+	require.Equal(t, 0, rows["spare"].Failures)
+	require.False(t, rows["spare"].Down)
 }
 
 func TestUpstreamInputIsRejectedWithFourHundred(t *testing.T) {

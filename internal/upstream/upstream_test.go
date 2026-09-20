@@ -243,6 +243,38 @@ func TestABackupResolverTakesOverOnlyWhileEveryPrimaryIsDown(t *testing.T) {
 	require.EqualValues(t, backupSeen, backup.attempts.Load())
 }
 
+func TestPoolStatsSnapshotsEveryResolverInConfiguredOrder(t *testing.T) {
+	tick := &clock{}
+	silent := startStub(t, drop())
+	live := startStub(t, answerWith("203.0.113.11"))
+	pool := newPool(t, func(cfg *upstream.Config) {
+		cfg.Attempt = 50 * time.Millisecond
+		cfg.Now = tick.Now
+	}, silent.address, live.address)
+
+	stats := pool.Stats()
+	require.Len(t, stats, 2)
+	require.Equal(t, silent.address, stats[0].Name)
+	require.Equal(t, "udp://"+silent.address, stats[0].URL)
+	require.Zero(t, stats[0].EWMA, "an unqueried resolver has no sample")
+	require.Equal(t, 0, stats[0].Failures)
+	require.False(t, stats[0].Down)
+	require.Equal(t, live.address, stats[1].Name)
+
+	resolve(t, pool)
+	resolve(t, pool)
+
+	stats = pool.Stats()
+	require.Positive(t, stats[1].EWMA, "a successful exchange measures latency")
+	require.Equal(t, 0, stats[1].Failures)
+	require.False(t, stats[1].Down)
+	require.Equal(t, 2, stats[0].Failures)
+	require.True(t, stats[0].Down, "the failure threshold marks the resolver down")
+
+	tick.Advance(11 * time.Second)
+	require.False(t, pool.Stats()[0].Down, "the backoff expiry puts the resolver back in play")
+}
+
 func TestParseReadsEveryScheme(t *testing.T) {
 	cases := []struct {
 		name   string

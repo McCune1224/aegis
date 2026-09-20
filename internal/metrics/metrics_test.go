@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -67,11 +68,31 @@ func TestScrapeReportsReloadsDropsAndCache(t *testing.T) {
 	require.Equal(t, "1", valueFor(t, body, "aegis_cache_prefetches_total"))
 }
 
+func TestScrapeReportsUpstreamHealth(t *testing.T) {
+	m := metrics.New()
+	m.WatchUpstreams(func() []metrics.UpstreamStat {
+		return []metrics.UpstreamStat{
+			{Name: "primary", EWMA: 1500 * time.Microsecond, Failures: 2, Down: true},
+			{Name: "secondary"},
+		}
+	})
+
+	body := scrape(t, m)
+	require.Equal(t, "0.0015", valueFor(t, body, `aegis_upstream_latency_seconds{upstream="primary"}`))
+	require.Equal(t, "2", valueFor(t, body, `aegis_upstream_failures{upstream="primary"}`))
+	require.Equal(t, "1", valueFor(t, body, `aegis_upstream_down{upstream="primary"}`))
+	require.Equal(t, "0", valueFor(t, body, `aegis_upstream_latency_seconds{upstream="secondary"}`),
+		"an unmeasured resolver reads zero latency")
+	require.Equal(t, "0", valueFor(t, body, `aegis_upstream_failures{upstream="secondary"}`))
+	require.Equal(t, "0", valueFor(t, body, `aegis_upstream_down{upstream="secondary"}`))
+}
+
 func TestScrapeWithoutWatchersReportsZero(t *testing.T) {
 	m := metrics.New()
 	body := scrape(t, m)
 	require.Equal(t, "0", valueFor(t, body, "aegis_stream_drops_total"), "no drops watcher, no drops")
 	require.Equal(t, "0", valueFor(t, body, "aegis_cache_hits_total"), "no cache watcher, no hits")
+	require.NotContains(t, body, "aegis_upstream_", "no upstream watcher, no resolver series")
 }
 
 func readAll(t *testing.T, body io.Reader) string {

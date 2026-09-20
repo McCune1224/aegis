@@ -18,6 +18,26 @@ func TestASwitchWithoutAPoolNamesTheProblem(t *testing.T) {
 	require.EqualError(t, err, "upstream: no resolvers are loaded")
 }
 
+func TestASwitchWithoutAPoolHasNoStats(t *testing.T) {
+	sw := upstream.NewSwitch()
+
+	require.Nil(t, sw.Stats())
+}
+
+func TestASwitchStatsComeFromTheCurrentPool(t *testing.T) {
+	only := startStub(t, answerWith("203.0.113.10"))
+	sw := upstream.NewSwitch()
+	pool, err := upstream.New(upstream.Config{Specs: specs(t, only.address)})
+	require.NoError(t, err)
+	sw.Swap(pool)
+	resolveThrough(t, sw)
+
+	stats := sw.Stats()
+	require.Len(t, stats, 1)
+	require.Equal(t, only.address, stats[0].Name)
+	require.Positive(t, stats[0].EWMA, "the switch reads the pool it was given last")
+}
+
 func TestASwitchServesThePoolItWasGivenLast(t *testing.T) {
 	first := startStub(t, answerWith("203.0.113.10"))
 	second := startStub(t, answerWith("203.0.113.11"))

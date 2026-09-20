@@ -173,6 +173,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			Prefetches: stats.Prefetches,
 		}
 	})
+	counts.WatchUpstreams(func() []metrics.UpstreamStat {
+		stats := engine.Upstreams().Stats()
+		health := make([]metrics.UpstreamStat, 0, len(stats))
+		for _, stat := range stats {
+			health = append(health, metrics.UpstreamStat{Name: stat.Name, EWMA: stat.EWMA, Failures: stat.Failures, Down: stat.Down})
+		}
+		return health
+	})
 	limiter, err := buildLimiter(cfg, engine)
 	if err != nil {
 		return err
@@ -211,15 +219,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	apiServer, err := api.Start(api.Config{
-		Store:    database,
-		Reloader: engine,
-		Sources:  sync,
-		Preview:  sync,
-		Hub:      hub,
-		Files:    web.Files(),
-		Address:  cfg.APIAddress,
-		Logger:   logger,
-		Metrics:  counts,
+		Store:     database,
+		Reloader:  engine,
+		Sources:   sync,
+		Preview:   sync,
+		Hub:       hub,
+		Files:     web.Files(),
+		Address:   cfg.APIAddress,
+		Logger:    logger,
+		Metrics:   counts,
+		Upstreams: engine.Upstreams(),
 	})
 	if err != nil {
 		_ = server.Shutdown(context.Background())

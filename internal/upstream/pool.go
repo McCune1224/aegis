@@ -23,6 +23,15 @@ const (
 	ewmaDivisor      = 4
 )
 
+// Stat is one resolver's health as an observer outside the pool sees it.
+type Stat struct {
+	Name     string
+	URL      string
+	EWMA     time.Duration
+	Failures int
+	Down     bool
+}
+
 // Config is what a Pool needs. Attempt is the budget one exchange gets before
 // the pool gives up on that resolver for this query; zero takes the default.
 type Config struct {
@@ -122,6 +131,25 @@ func (p *Pool) ResolveUpstream(ctx context.Context, req *mdns.Msg, name string) 
 		return nil, fmt.Errorf("upstream: %q: %w", name, err)
 	}
 	return resp, nil
+}
+
+// Stats snapshots every peer's health in configured order, under one mutex
+// hold so the reading cannot interleave with a recording exchange.
+func (p *Pool) Stats() []Stat {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	stats := make([]Stat, 0, len(p.peers))
+	for _, peer := range p.peers {
+		stats = append(stats, Stat{
+			Name:     peer.spec.Name,
+			URL:      peer.spec.URL.String(),
+			EWMA:     peer.ewma,
+			Failures: peer.failures,
+			Down:     now.Before(peer.downUntil),
+		})
+	}
+	return stats
 }
 
 // peerNamed finds the one peer a routed query may speak to.

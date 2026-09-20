@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"aegis/internal/store"
 	"aegis/internal/upstream"
@@ -19,12 +20,17 @@ type upstreamRequest struct {
 }
 
 // upstreamResponse is one upstream as it leaves over HTTP. Name is the row as
-// written and URL is the canonical form the transports read from.
+// written and URL is the canonical form the transports read from. The health
+// fields are live observations and zero when the running pool holds no such
+// resolver.
 type upstreamResponse struct {
-	Name    string `json:"name"`
-	URL     string `json:"url"`
-	Enabled bool   `json:"enabled"`
-	Backup  bool   `json:"backup"`
+	Name      string  `json:"name"`
+	URL       string  `json:"url"`
+	Enabled   bool    `json:"enabled"`
+	Backup    bool    `json:"backup"`
+	LatencyMS float64 `json:"latency_ms"`
+	Failures  int     `json:"failures"`
+	Down      bool    `json:"down"`
 }
 
 func upstreamResponseFrom(row store.Upstream) upstreamResponse {
@@ -45,9 +51,21 @@ func (s *Server) listUpstreams(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	health := map[string]upstream.Stat{}
+	if s.upstreams != nil {
+		for _, stat := range s.upstreams.Stats() {
+			health[stat.Name] = stat
+		}
+	}
 	response := make([]upstreamResponse, 0, len(rows))
 	for _, row := range rows {
-		response = append(response, upstreamResponseFrom(row))
+		entry := upstreamResponseFrom(row)
+		if stat, ok := health[row.Name]; ok {
+			entry.LatencyMS = float64(stat.EWMA) / float64(time.Millisecond)
+			entry.Failures = stat.Failures
+			entry.Down = stat.Down
+		}
+		response = append(response, entry)
 	}
 	writeJSON(w, http.StatusOK, response)
 }
