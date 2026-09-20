@@ -25,12 +25,26 @@ type Props = {
   onDelete: (id: number) => Promise<void>;
 };
 
+// createdTime is the calendar day the rule was written, in the reader's zone.
 function createdTime(rule: Rule): string {
   if (!rule.created) {
     return "";
   }
   const parsed = new Date(rule.created);
   return Number.isNaN(parsed.getTime()) ? rule.created : parsed.toLocaleDateString();
+}
+
+// summary is the row's one line of context. Joining a list rather than
+// concatenating the parts is what stopped it printing "subdomains9/20/2026".
+function summary(rule: Rule): string {
+  return [
+    rule.kind,
+    rule.schedule ? `schedule ${rule.schedule}` : "",
+    rule.client ? `client ${rule.client}` : "",
+    createdTime(rule),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export default function Rules(props: Props) {
@@ -103,14 +117,9 @@ export default function Rules(props: Props) {
             <li data-testid="rule-row">
               <div>
                 <strong>{rule.domain}</strong>
-                <span class="muted">
-                  {rule.kind}
-                  <Show when={rule.schedule}> · schedule {rule.schedule}</Show>
-                  <Show when={rule.client}> · client {rule.client}</Show>
-                  {createdTime(rule)}
-                </span>
+                <span class="muted">{summary(rule)}</span>
                 <Show when={rule.notes}>
-                  <span class="selectors">{rule.notes}</span>
+                  <span class="note">{rule.notes}</span>
                 </Show>
               </div>
               <div class="row-actions">
