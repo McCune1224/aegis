@@ -378,10 +378,12 @@ export default function App() {
               <Graph
                 profiles={profiles()}
                 clients={clients()}
+                rules={rules()}
                 defaultProfile={defaultProfile()}
                 upstreams={upstreams()}
                 log={log}
                 onSaveClient={saveClient}
+                onSaveProfile={saveProfile}
                 onSetDefault={makeDefault}
               />
             </Show>

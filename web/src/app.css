@@ -948,3 +948,30 @@ form .row-actions {
   left: 0.8rem;
   z-index: 2;
 }
+
+.graph .graph-create {
+  position: absolute;
+  top: 0.8rem;
+  left: 4.2rem;
+  z-index: 2;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.graph .graph-create input {
+  width: 8rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.graph .graph-error {
+  position: absolute;
+  bottom: 2.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  pointer-events: none;
+  white-space: nowrap;
+}

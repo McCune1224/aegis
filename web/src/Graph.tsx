@@ -1,29 +1,31 @@
 import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
-import { createEffect, createSignal, onCleanup, Show } from "solid-js";
-import type { Client, Profile } from "./api";
-import { frame, pan, toWorld, zoomAt, type Box, type Camera } from "./camera";
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import type { Client, Profile, ProfileInput, Rule } from "./api";
+import { BLOCKING_MODES } from "./api";
+import { frame, ensureVisible, pan, toWorld, zoomAt, type Box, type Camera } from "./camera";
 import type { Decision } from "./api";
 import { effectiveMode } from "./resolve";
 import type { QueryLog } from "./querylog";
-import { buildTopology, clientFor, upstreamNodeID, type Topology } from "./topology";
+import { buildTopology, clientFor, upstreamNodeID, type NodeKind, type Topology } from "./topology";
 import { admit, advance, emptyFlow, PULSE_LIFE_SECONDS, segment, streak, trail, type Flow } from "./flow";
+import { linkIntent, type LinkIntent } from "./edit";
 
 type Props = {
   profiles: Profile[];
   clients: Client[];
+  rules: Rule[];
   defaultProfile: string;
   upstreams: string[];
   log: QueryLog;
   onSaveClient: (name: string, input: { profile: string; notes: string; addresses: string[]; macs: string[]; prefixes: string[] }) => Promise<void>;
+  onSaveProfile: (name: string, input: ProfileInput) => Promise<void>;
   onSetDefault: (name: string) => Promise<void>;
 };
 
-type Kind = "client" | "profile" | "upstream";
-
 type Placed = {
   id: string;
-  kind: Kind;
+  kind: NodeKind;
   label: string;
   detail: string;
   x: number;
@@ -31,10 +33,23 @@ type Placed = {
   phase: number;
 };
 
-const kindColor: Record<Kind, number> = {
+// Gesture is what one pointer sequence is doing. A press on a star becomes a
+// link once it travels; a press on empty space becomes a pan; anything under
+// the travel threshold is a click.
+type Gesture =
+  | { kind: "idle" }
+  | { kind: "press"; node?: string }
+  | { kind: "pan" }
+  | { kind: "link"; from: string }
+  | { kind: "pinch"; startDistance: number; startScale: number; midX: number; midY: number };
+
+const CLICK_TRAVEL = 6;
+
+const kindColor: Record<NodeKind, number> = {
   client: 0x7dd3fc,
   profile: 0x6ee7b7,
   upstream: 0xc4b5fd,
+  rule: 0xfbbf24,
 };
 
 const allowColor = 0x6ee7b7;
@@ -45,6 +60,9 @@ const detailColor = 0x8b96b5;
 
 // margin is the room a fit leaves around the stars for their labels.
 const FIT_MARGIN = 220;
+
+// margin is how close to the edge a revealed node may land.
+const REVEAL_MARGIN = 60;
 
 const elk = new ELK();
 
@@ -111,10 +129,11 @@ function makeStarTexture(tint: string, spikes: number): Texture {
   return Texture.from(canvas);
 }
 
-const kindTint: Record<Kind, string> = {
+const kindTint: Record<NodeKind, string> = {
   client: "#7dd3fc",
   profile: "#6ee7b7",
   upstream: "#c4b5fd",
+  rule: "#fbbf24",
 };
 
 export default function Graph(props: Props) {
@@ -122,6 +141,9 @@ export default function Graph(props: Props) {
   let app: Application | undefined;
 
   const [selected, setSelected] = createSignal<string>();
+  const [graphError, setGraphError] = createSignal<string>();
+  const [newProfile, setNewProfile] = createSignal("");
+  const [creating, setCreating] = createSignal(false);
   const placed = new Map<string, Placed>();
   const flow: Flow = emptyFlow();
 
@@ -131,15 +153,19 @@ export default function Graph(props: Props) {
   let nodeLayer: Container | undefined;
   let fxLayer: Graphics | undefined;
   let selection: Graphics | undefined;
+  let linkRing: Graphics | undefined;
   let camera: Camera = { x: 0, y: 0, scale: 1 };
   // framed is whether the view has been placed once. A later redraw keeps the
   // camera, so adding a client does not throw away where the operator was
   // looking; the fit control is how they ask for it back.
   let framed = false;
-  let starTextures: Map<Kind, Texture>;
+  let starTextures: Map<NodeKind, Texture>;
+  // reveal is the node a create should land on once the layout has placed it.
+  let reveal: string | undefined;
+  let draft: { from: string; x: number; y: number; target?: string; legal: boolean } | undefined;
 
   createEffect(
-    () => [buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams)] as const,
+    () => [buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams, props.rules)] as const,
     ([topology]) => {
       void draw(topology);
     },
@@ -184,10 +210,11 @@ export default function Graph(props: Props) {
     });
     host?.appendChild(instance.canvas);
 
-    starTextures = new Map<Kind, Texture>([
+    starTextures = new Map<NodeKind, Texture>([
       ["client", makeStarTexture(kindTint.client, 44)],
       ["profile", makeStarTexture(kindTint.profile, 56)],
       ["upstream", makeStarTexture(kindTint.upstream, 68)],
+      ["rule", makeStarTexture(kindTint.rule, 34)],
     ]);
     world = new Container();
     haloLayer = new Container();
@@ -199,7 +226,13 @@ export default function Graph(props: Props) {
       selection.arc(0, 0, 17, (index * Math.PI) / 2 + 0.28, ((index + 1) * Math.PI) / 2 - 0.28);
       selection.stroke({ width: 1.4, color: 0xffffff, alpha: 0.85 });
     }
-    world.addChild(edgeLayer, haloLayer, nodeLayer, fxLayer, selection);
+    linkRing = new Graphics();
+    for (let index = 0; index < 4; index++) {
+      linkRing.arc(0, 0, 20, (index * Math.PI) / 2 + 0.4, ((index + 1) * Math.PI) / 2 - 0.4);
+      linkRing.stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
+    }
+    linkRing.visible = false;
+    world.addChild(edgeLayer, haloLayer, nodeLayer, fxLayer, selection, linkRing);
     instance.stage.addChild(world);
     instance.stage.eventMode = "static";
     instance.stage.hitArea = instance.screen;
@@ -265,13 +298,23 @@ export default function Graph(props: Props) {
     if (!framed) {
       fitToView();
     }
+    if (reveal) {
+      const node = placed.get(reveal);
+      reveal = undefined;
+      if (node && host) {
+        setSelected(node.id);
+        drawSelection();
+        camera = ensureVisible(camera, node, host.clientWidth, host.clientHeight, REVEAL_MARGIN);
+        applyCamera();
+      }
+    }
   }
 
   function drawStar(node: Placed) {
     if (!haloLayer || !nodeLayer) {
       return;
     }
-    const size = node.kind === "upstream" ? 150 : node.kind === "profile" ? 124 : 108;
+    const size = node.kind === "upstream" ? 150 : node.kind === "profile" ? 124 : node.kind === "rule" ? 84 : 108;
     const star = new Sprite(starTextures.get(node.kind) ?? Texture.WHITE);
     star.anchor.set(0.5);
     star.x = node.x;
@@ -384,6 +427,17 @@ export default function Graph(props: Props) {
         .stroke({ width: 1.6 * (1 - ratio), color: pulse.color, alpha: 1 - ratio });
     }
 
+    if (draft) {
+      const origin = placed.get(draft.from);
+      if (origin) {
+        fxLayer
+          .moveTo(origin.x, origin.y)
+          .lineTo(draft.x, draft.y)
+          .stroke({ width: 1.6, color: draft.legal ? allowColor : blockColor, alpha: 0.8, cap: "round" });
+        fxLayer.circle(draft.x, draft.y, 3).fill({ color: draft.legal ? allowColor : blockColor, alpha: 0.9 });
+      }
+    }
+
     const time = performance.now() / 1000;
     const nodes = [...placed.values()];
     haloLayer?.children.forEach((child, index) => {
@@ -398,15 +452,15 @@ export default function Graph(props: Props) {
     }
   }
 
-  // ── Pan, zoom, selection ──────────────────────────────────────────────
+  // ── Pan, zoom, link, selection ────────────────────────────────────────
 
   function attachControls(instance: Application) {
+    let gesture: Gesture = { kind: "idle" };
     let moved = 0;
     let last = { x: 0, y: 0 };
     const pointers = new Map<number, { x: number; y: number }>();
-    let pinch: { startDistance: number; startScale: number; midX: number; midY: number } | undefined;
 
-    const pinchState = () => {
+    const pinchState = (startScale: number) => {
       const points = [...pointers.values()];
       if (points.length < 2) {
         return undefined;
@@ -414,7 +468,7 @@ export default function Graph(props: Props) {
       const [a, b] = points;
       return {
         startDistance: Math.hypot(a.x - b.x, a.y - b.y),
-        startScale: camera.scale,
+        startScale,
         midX: (a.x + b.x) / 2,
         midY: (a.y + b.y) / 2,
       };
@@ -425,8 +479,15 @@ export default function Graph(props: Props) {
       moved = 0;
       last = { x: event.global.x, y: event.global.y };
       if (pointers.size === 2) {
-        pinch = pinchState();
+        const start = pinchState(camera.scale);
+        if (start) {
+          gesture = { kind: "pinch", ...start };
+        }
+        draft = undefined;
+        drawDraft();
+        return;
       }
+      gesture = { kind: "press", node: pick(event.global.x, event.global.y) };
     });
 
     instance.stage.on("pointermove", (event) => {
@@ -434,16 +495,16 @@ export default function Graph(props: Props) {
         return;
       }
       pointers.set(event.pointerId, { x: event.global.x, y: event.global.y });
-      if (pointers.size >= 2 && pinch) {
-        const current = pinchState();
+      if (gesture.kind === "pinch") {
+        const current = pinchState(gesture.startScale);
         if (!current || current.startDistance === 0) {
           return;
         }
         camera = zoomAt(
-          { x: camera.x, y: camera.y, scale: pinch.startScale },
-          current.startDistance / pinch.startDistance,
-          pinch.midX,
-          pinch.midY,
+          { x: camera.x, y: camera.y, scale: gesture.startScale },
+          current.startDistance / gesture.startDistance,
+          current.midX,
+          current.midY,
         );
         applyCamera();
         return;
@@ -451,19 +512,45 @@ export default function Graph(props: Props) {
       const dx = event.global.x - last.x;
       const dy = event.global.y - last.y;
       moved += Math.abs(dx) + Math.abs(dy);
-      camera = pan(camera, dx, dy);
       last = { x: event.global.x, y: event.global.y };
-      applyCamera();
+      if (gesture.kind === "press") {
+        if (moved < CLICK_TRAVEL) {
+          return;
+        }
+        gesture = gesture.node ? { kind: "link", from: gesture.node } : { kind: "pan" };
+      }
+      if (gesture.kind === "pan") {
+        camera = pan(camera, dx, dy);
+        applyCamera();
+        return;
+      }
+      if (gesture.kind === "link") {
+        updateDraft(gesture.from, event.global.x, event.global.y);
+      }
     });
 
     const release = (event: { pointerId: number; global: { x: number; y: number } }) => {
       pointers.delete(event.pointerId);
-      if (pointers.size < 2) {
-        pinch = undefined;
+      if (gesture.kind === "pinch" && pointers.size < 2) {
+        gesture = { kind: "pan" };
       }
-      if (moved < 6) {
-        setSelected(pick(event.global.x, event.global.y));
-        drawSelection();
+      if (gesture.kind === "press") {
+        if (moved < CLICK_TRAVEL) {
+          setSelected(pick(event.global.x, event.global.y));
+          drawSelection();
+        }
+        gesture = { kind: "idle" };
+      } else if (gesture.kind === "link") {
+        const target = pick(event.global.x, event.global.y);
+        if (target && target !== gesture.from) {
+          void applyLink(gesture.from, target);
+        }
+        draft = undefined;
+        drawDraft();
+        gesture = { kind: "idle" };
+      }
+      if (pointers.size === 0 && gesture.kind === "pan") {
+        gesture = { kind: "idle" };
       }
     };
 
@@ -499,6 +586,96 @@ export default function Graph(props: Props) {
     world.scale.set(camera.scale);
   }
 
+  function updateDraft(from: string, screenX: number, screenY: number) {
+    const origin = placed.get(from);
+    if (!origin) {
+      return;
+    }
+    const cursor = toWorld(camera, screenX, screenY);
+    const target = pick(screenX, screenY);
+    const legal =
+      target !== undefined && target !== from && linkIntent([...placed.values()], from, target) !== undefined;
+    draft = { from, x: cursor.x, y: cursor.y, target: target === from ? undefined : target, legal };
+    drawDraft();
+  }
+
+  function drawDraft() {
+    if (!linkRing) {
+      return;
+    }
+    const node = draft?.target ? placed.get(draft.target) : undefined;
+    linkRing.visible = node !== undefined;
+    if (node) {
+      linkRing.position.set(node.x, node.y);
+      linkRing.tint = draft?.legal ? allowColor : blockColor;
+    }
+  }
+
+  // applyLink writes one drag through the endpoint that owns the record, so
+  // validation stays on the server and a rejected link changes nothing.
+  async function applyLink(from: string, to: string) {
+    const intent = linkIntent([...placed.values()], from, to);
+    if (!intent) {
+      return;
+    }
+    setGraphError(undefined);
+    try {
+      if (intent.op === "reassign") {
+        const client = props.clients.find((candidate) => candidate.name === intent.client);
+        if (!client) {
+          return;
+        }
+        await props.onSaveClient(intent.client, {
+          profile: intent.profile,
+          notes: client.notes,
+          addresses: client.addresses,
+          macs: client.macs,
+          prefixes: client.prefixes,
+        });
+      } else if (intent.op === "default") {
+        await props.onSetDefault(intent.profile);
+      } else {
+        const child = props.profiles.find((candidate) => candidate.name === intent.child);
+        if (!child) {
+          return;
+        }
+        await props.onSaveProfile(intent.child, {
+          extends: intent.parent,
+          mode: child.mode ?? "",
+          custom: child.custom ?? "",
+        });
+      }
+      setSelected(to);
+      drawSelection();
+    } catch (cause) {
+      setGraphError(String(cause));
+    }
+  }
+
+  async function createProfile() {
+    const name = newProfile().trim();
+    if (!name) {
+      return;
+    }
+    if (props.profiles.some((profile) => profile.name === name)) {
+      setGraphError(`a profile named ${name} already exists`);
+      return;
+    }
+    setCreating(true);
+    setGraphError(undefined);
+    // reveal is claimed before the write so the redraw the refresh triggers
+    // cannot land between the save and the claim.
+    reveal = `profile:${name}`;
+    try {
+      await props.onSaveProfile(name, {});
+      setNewProfile("");
+    } catch (cause) {
+      setGraphError(String(cause));
+    } finally {
+      setCreating(false);
+    }
+  }
+
   // ── Selection panel ───────────────────────────────────────────────────
 
   const selectedNode = () => {
@@ -522,6 +699,14 @@ export default function Graph(props: Props) {
     return props.profiles.find((profile) => profile.name === node.label);
   };
 
+  const selectedRule = () => {
+    const node = selectedNode();
+    if (!node || node.kind !== "rule") {
+      return undefined;
+    }
+    return props.rules.find((rule) => `rule:${rule.id}` === node.id);
+  };
+
   return (
     <div
       class="graph"
@@ -530,7 +715,29 @@ export default function Graph(props: Props) {
         host = element as HTMLDivElement;
       }}
     >
-      <span class="hint">drag to pan · scroll to zoom · click a star</span>
+      <span class="hint">click a star · drag star to star to connect · scroll to zoom</span>
+      <form
+        class="graph-create"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void createProfile();
+        }}
+      >
+        <input
+          data-testid="graph-create-name"
+          placeholder="new profile"
+          value={newProfile()}
+          onInput={(event) => setNewProfile(event.currentTarget.value)}
+        />
+        <button type="submit" class="btn-ghost" data-testid="graph-create" disabled={!newProfile().trim() || creating()}>
+          Add
+        </button>
+      </form>
+      <Show when={graphError()}>
+        <p class="error graph-error" data-testid="graph-error">
+          {graphError()}
+        </p>
+      </Show>
       <button type="button" class="btn-ghost fit" data-testid="graph-fit" onClick={() => fitToView()}>
         Fit
       </button>
@@ -574,6 +781,12 @@ export default function Graph(props: Props) {
               <p class="muted">
                 {props.clients.filter((client) => client.profile === profile().name).length} clients bound
               </p>
+              <ProfilePanel
+                profile={profile()}
+                onSave={async (input) => {
+                  await props.onSaveProfile(profile().name, input);
+                }}
+              />
               <Show when={props.defaultProfile !== profile().name}>
                 <button type="button" class="btn" onClick={() => void props.onSetDefault(profile().name)}>
                   Make default
@@ -583,6 +796,86 @@ export default function Graph(props: Props) {
           </div>
         )}
       </Show>
+      <Show when={selectedRule()}>
+        {(rule) => (
+          <div class="graph-panel" data-testid="graph-panel">
+            <header>
+              <h2>{rule().domain}</h2>
+              <button type="button" class="btn-ghost" onClick={() => setSelected(undefined)}>
+                ×
+              </button>
+            </header>
+            <div class="graph-panel-body">
+              <p class="muted">
+                {rule().action} · {rule().kind}
+              </p>
+              <Show when={rule().client}>
+                <p class="muted">client {rule().client}</p>
+              </Show>
+              <Show when={rule().schedule}>
+                <p class="muted">schedule {rule().schedule}</p>
+              </Show>
+              <Show when={rule().notes}>
+                <p class="muted">{rule().notes}</p>
+              </Show>
+            </div>
+          </div>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function ProfilePanel(props: { profile: Profile; onSave: (input: ProfileInput) => Promise<void> }) {
+  const [mode, setMode] = createSignal(props.profile.mode ?? "");
+  const [custom, setCustom] = createSignal(props.profile.custom ?? "");
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<string>();
+
+  const untouched = () => mode() === (props.profile.mode ?? "") && custom() === (props.profile.custom ?? "");
+
+  async function save() {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await props.onSave({ extends: props.profile.extends ?? "", mode: mode(), custom: custom() });
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <label>
+        Blocking mode
+        <select data-testid="graph-panel-mode" value={mode()} onInput={(event) => setMode(event.currentTarget.value)}>
+          <option value="">inherit</option>
+          <For each={BLOCKING_MODES}>{(value) => <option value={value}>{value}</option>}</For>
+        </select>
+      </label>
+      <Show when={mode() === "custom-address"}>
+        <label>
+          Custom address
+          <input
+            data-testid="graph-panel-custom"
+            value={custom()}
+            placeholder="10.0.0.1"
+            onInput={(event) => setCustom(event.currentTarget.value)}
+          />
+        </label>
+      </Show>
+      <button
+        type="button"
+        class="btn-solid"
+        data-testid="graph-panel-mode-save"
+        disabled={busy() || untouched()}
+        onClick={() => void save()}
+      >
+        Save mode
+      </button>
+      {error() ? <p class="error">{error()}</p> : null}
     </div>
   );
 }

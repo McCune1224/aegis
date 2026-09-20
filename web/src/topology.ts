@@ -1,6 +1,6 @@
-import type { Client, Profile } from "./api";
+import type { Client, Profile, Rule } from "./api";
 
-export type NodeKind = "client" | "profile" | "upstream";
+export type NodeKind = "client" | "profile" | "upstream" | "rule";
 
 export type GraphNode = {
   id: string;
@@ -34,6 +34,7 @@ export function buildTopology(
   clients: Client[],
   defaultProfile: string,
   upstreams: string[],
+  rules: Rule[] = [],
 ): Topology {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
@@ -77,6 +78,18 @@ export function buildTopology(
       kind: "client",
     });
     edges.push({ id: `policy:${client.name}`, from: `client:${client.name}`, to: `profile:${client.profile}` });
+  }
+
+  for (const rule of rules) {
+    nodes.push({
+      id: `rule:${rule.id}`,
+      label: rule.domain,
+      detail: [rule.action, rule.kind, rule.client].filter(Boolean).join(" · "),
+      kind: "rule",
+    });
+    if (rule.client && clients.some((candidate) => candidate.name === rule.client)) {
+      edges.push({ id: `scope:${rule.id}`, from: `rule:${rule.id}`, to: `client:${rule.client}` });
+    }
   }
 
   return { nodes, edges };

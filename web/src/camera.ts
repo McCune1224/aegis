@@ -42,6 +42,36 @@ export function pan(camera: Camera, dx: number, dy: number): Camera {
   return { x: camera.x + dx, y: camera.y + dy, scale: camera.scale };
 }
 
+// ensureVisible pans the least distance that brings a world point inside the
+// viewport margins, leaving the scale alone. A node the operator just created
+// should be findable without reframing the whole sky.
+export function ensureVisible(
+  camera: Camera,
+  world: { x: number; y: number },
+  width: number,
+  height: number,
+  margin: number,
+): Camera {
+  const screenX = world.x * camera.scale + camera.x;
+  const screenY = world.y * camera.scale + camera.y;
+  let dx = 0;
+  let dy = 0;
+  if (screenX < margin) {
+    dx = margin - screenX;
+  } else if (screenX > width - margin) {
+    dx = width - margin - screenX;
+  }
+  if (screenY < margin) {
+    dy = margin - screenY;
+  } else if (screenY > height - margin) {
+    dy = height - margin - screenY;
+  }
+  if (dx === 0 && dy === 0) {
+    return camera;
+  }
+  return pan(camera, dx, dy);
+}
+
 // frame fits a world box into a viewport, centring it and leaving the given
 // margin for the labels that hang off a star.
 export function frame(box: Box, width: number, height: number, margin: number): Camera {
