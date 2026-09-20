@@ -454,15 +454,7 @@ func (r ruleDoc) rule() (Rule, error) {
 		Client:   filter.ClientKey(r.Client),
 		Notes:    r.Notes,
 	}
-	switch kind {
-	case filter.MatchExact, filter.MatchSubdomains:
-		rule.Domain, err = filter.ParseDomain(r.Domain)
-	case filter.MatchWildcard, filter.MatchRegex:
-		rule.Pattern, err = filter.ParsePattern(kind, r.Domain)
-	case filter.MatchCIDR:
-		rule.Network, err = filter.ParseNetwork(r.Domain)
-	}
-	if err != nil {
+	if err := rule.SetValue(kind, r.Domain); err != nil {
 		return Rule{}, fmt.Errorf("store: rule %d: %w", r.ID, err)
 	}
 	if rule.Action, err = filter.ParseAction(r.Action); err != nil {

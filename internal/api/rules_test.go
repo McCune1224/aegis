@@ -156,6 +156,24 @@ func TestPatchingTheKindReparsesTheStoredValue(t *testing.T) {
 	require.Contains(t, body, `"domain":"games.example.com"`)
 }
 
+func TestPatchingTheKindReplacesTheStoredPayload(t *testing.T) {
+	h := startHarness(t)
+
+	status, _ := h.do(t, http.MethodPost, "/api/v1/rules",
+		`{"domain":"games.example.com","kind":"exact","action":"block"}`)
+	require.Equal(t, http.StatusCreated, status)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/rules/1", `{"kind":"cidr","domain":"127.0.0.5/32"}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"kind":"cidr"`)
+	require.Contains(t, body, `"domain":"127.0.0.5/32"`)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/rules", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"kind":"cidr"`)
+	require.NotContains(t, body, "games.example.com")
+}
+
 func TestARuleIDMustBeANumber(t *testing.T) {
 	h := startHarness(t)
 
