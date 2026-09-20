@@ -314,7 +314,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer refreshCancel()
 	go runSourceRefreshLoop(refreshCtx, sync, refreshInterval, logger)
 	go runCatalogRefreshLoop(refreshCtx, catalog, logger)
-	go runThreatRefreshLoop(refreshCtx, threatSync, refreshInterval, logger)
+	go runThreatRefreshLoop(refreshCtx, threatSync, logger)
 
 	dhcpDone := make(chan error, 1)
 	if dhcpServer != nil {
@@ -698,7 +698,7 @@ func newLogger(level string, out io.Writer) (*slog.Logger, error) {
 	return slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: parsed})), nil
 }
 
-func runThreatRefreshLoop(ctx context.Context, sync *runtime.ThreatSync, defaultInterval time.Duration, logger *slog.Logger) {
+func runThreatRefreshLoop(ctx context.Context, sync *runtime.ThreatSync, logger *slog.Logger) {
 	ticker := time.NewTicker(sourceRefreshTick)
 	defer ticker.Stop()
 	for {
