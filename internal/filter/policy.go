@@ -172,8 +172,11 @@ func compileProfiles(specs []ProfileSpec, fallback ProfileID) (map[ProfileID]Pol
 	return resolved, nil
 }
 
-func compileClients(specs []ClientSpec, profiles map[ProfileID]Policy) (map[ClientKey]Policy, error) {
-	clients := make(map[ClientKey]Policy, len(specs))
+// compileClients resolves the profile each client names into the policy and
+// the profile identity Decide answers with, so a query resolves both in one
+// map lookup.
+func compileClients(specs []ClientSpec, profiles map[ProfileID]Policy) (map[ClientKey]clientScope, error) {
+	clients := make(map[ClientKey]clientScope, len(specs))
 	for _, spec := range specs {
 		if spec.Key == "" {
 			return nil, errors.New("filter: a client has no key")
@@ -185,7 +188,15 @@ func compileClients(specs []ClientSpec, profiles map[ProfileID]Policy) (map[Clie
 		if !exists {
 			return nil, fmt.Errorf("filter: client %q names profile %q, which is not defined", spec.Key, spec.Profile)
 		}
-		clients[spec.Key] = policy
+		clients[spec.Key] = clientScope{policy: policy, profile: spec.Profile}
 	}
 	return clients, nil
+}
+
+// clientScope is a client's resolved policy together with the profile it came
+// from. The policy answers a blocked name; the profile decides which
+// profile-scoped rules are candidates.
+type clientScope struct {
+	policy  Policy
+	profile ProfileID
 }

@@ -163,8 +163,10 @@ type Source struct {
 // subdomains, a Pattern for wildcard and regex, a Network for cidr. Compile
 // rejects a rule whose payload does not fit its kind. A rule may name a
 // Schedule, which keeps it active only while that schedule covers the query
-// minute, and a Client, which keeps it scoped to one identity; a scope
-// without a schedule has no meaning, so Compile rejects it.
+// minute, and at most one scope: a Client, which keeps it to one identity, or
+// a Profile, which keeps it to every client on that profile. A client scope
+// without a schedule has no meaning, so Compile rejects it; a profile scope is
+// the way a service set applies to a whole policy group and needs no schedule.
 type RuleSpec struct {
 	ID       string
 	Source   Source
@@ -174,6 +176,7 @@ type RuleSpec struct {
 	Network  netip.Prefix
 	Schedule string
 	Client   ClientKey
+	Profile  ProfileID
 	Action   Action
 }
 
@@ -208,13 +211,20 @@ type RuleSet struct {
 	networks   []networkRule
 	schedules  []compiledSchedule
 	minutes    [minutesPerWeek]uint16
-	clients    map[ClientKey]Policy
+	clients    map[ClientKey]clientScope
 	fallback   Policy
-	rules      int
+	// fallbackProfile is the profile an unidentified client takes, and the one
+	// a rule scoped to the default profile matches.
+	fallbackProfile ProfileID
+	rules           int
 }
 
+// entry holds the winner among the rules for one name plus the ones scoped to
+// a profile, which cannot be folded at compile time because the winner depends
+// on who asks.
 type entry struct {
-	best *candidate
+	best   *candidate
+	scoped []candidate
 }
 
 type candidate struct {
@@ -223,6 +233,16 @@ type candidate struct {
 	labels     int
 	exact      bool
 	order      int
+	// profile names the profile this candidate is scoped to. Empty means every
+	// profile, so an unscoped rule is a candidate for everyone.
+	profile ProfileID
+}
+
+// applies reports whether this candidate is a candidate for a client on
+// profile. Scope only filters candidacy; the tier, specificity, and order
+// comparison is unchanged.
+func (c *candidate) applies(profile ProfileID) bool {
+	return c.profile == "" || c.profile == profile
 }
 
 // patternRule is one compiled wildcard or regex rule. A wildcard compiles to
@@ -258,18 +278,23 @@ func Compile(cfg Config) (*RuleSet, error) {
 	}
 
 	rs := &RuleSet{
-		exact:      make(map[string]*entry, len(cfg.Rules)),
-		subdomains: make(map[string]*entry, len(cfg.Rules)),
-		schedules:  schedules,
-		minutes:    minutes,
-		clients:    clients,
-		fallback:   profiles[cfg.Default],
+		exact:           make(map[string]*entry, len(cfg.Rules)),
+		subdomains:      make(map[string]*entry, len(cfg.Rules)),
+		schedules:       schedules,
+		minutes:         minutes,
+		clients:         clients,
+		fallback:        profiles[cfg.Default],
+		fallbackProfile: cfg.Default,
 	}
 	byName := make(map[string]int, len(schedules))
 	for i, schedule := range schedules {
 		byName[schedule.name] = i
 	}
-	if err := rs.indexRules(cfg.Rules, byName); err != nil {
+	known := make(map[ProfileID]bool, len(profiles))
+	for id := range profiles {
+		known[id] = true
+	}
+	if err := rs.indexRules(cfg.Rules, byName, known); err != nil {
 		return nil, err
 	}
 	return rs, nil
@@ -279,12 +304,18 @@ func Compile(cfg Config) (*RuleSet, error) {
 // of index keys when several rules claim one name.
 func (rs *RuleSet) Len() int { return rs.rules }
 
-func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int) error {
+func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int, knownProfiles map[ProfileID]bool) error {
 	rs.rules = len(specs)
 	byNetwork := make(map[netip.Prefix]*entry)
 	for order, spec := range specs {
 		if spec.Action != ActionAllow && spec.Action != ActionBlock {
 			return fmt.Errorf("filter: rule %q has unknown action %d", spec.ID, spec.Action)
+		}
+		if spec.Client != "" && spec.Profile != "" {
+			return fmt.Errorf("filter: rule %q names both a client and a profile", spec.ID)
+		}
+		if spec.Profile != "" && !knownProfiles[spec.Profile] {
+			return fmt.Errorf("filter: rule %q names profile %q, which is not defined", spec.ID, spec.Profile)
 		}
 		if spec.Client != "" && spec.Schedule == "" {
 			return fmt.Errorf("filter: rule %q names a client but no schedule", spec.ID)
@@ -304,11 +335,13 @@ func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int) er
 				labels:     countLabels(spec.Domain.name),
 				exact:      spec.Kind == MatchExact,
 				order:      order,
+				profile:    spec.Profile,
 			}
 			if spec.Schedule != "" {
 				if err := rs.schedule(spec, scheduleIndex, scheduledRule{
 					candidate: candidate,
 					client:    spec.Client,
+					profile:   spec.Profile,
 					match:     nameMatcher(spec.Kind, spec.Domain, nil),
 				}); err != nil {
 					return err
@@ -324,7 +357,11 @@ func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int) er
 				e = &entry{}
 				table[spec.Domain.name] = e
 			}
-			e.best = better(e.best, &candidate)
+			if candidate.profile == "" {
+				e.best = better(e.best, &candidate)
+			} else {
+				e.scoped = append(e.scoped, candidate)
+			}
 		case MatchWildcard, MatchRegex:
 			if spec.Domain.name != "" || spec.Network.IsValid() {
 				return fmt.Errorf("filter: rule %q carries a payload kind %s does not use", spec.ID, spec.Kind)
@@ -337,11 +374,13 @@ func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int) er
 				provenance: Provenance{RuleID: spec.ID, Source: spec.Source, Pattern: spec.Pattern},
 				action:     spec.Action,
 				order:      order,
+				profile:    spec.Profile,
 			}
 			if spec.Schedule != "" {
 				if err := rs.schedule(spec, scheduleIndex, scheduledRule{
 					candidate: candidate,
 					client:    spec.Client,
+					profile:   spec.Profile,
 					match:     nameMatcher(spec.Kind, Domain{}, re),
 				}); err != nil {
 					return err
@@ -350,8 +389,8 @@ func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int) er
 			}
 			rs.patterns = append(rs.patterns, patternRule{candidate: candidate, re: re})
 		case MatchCIDR:
-			if spec.Schedule != "" || spec.Client != "" {
-				return fmt.Errorf("filter: rule %q cannot schedule a cidr rule", spec.ID)
+			if spec.Schedule != "" || spec.Client != "" || spec.Profile != "" {
+				return fmt.Errorf("filter: rule %q cannot scope a cidr rule", spec.ID)
 			}
 			if spec.Domain.name != "" || spec.Pattern != "" || !spec.Network.IsValid() {
 				return fmt.Errorf("filter: rule %q needs a network and no other payload", spec.ID)
@@ -420,10 +459,11 @@ func nameMatcher(kind MatchKind, domain Domain, re *regexp.Regexp) func(string) 
 // result never depends on map iteration. Time-scoped rules join the same
 // comparison when their schedule covers the minute.
 func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now time.Time) Verdict {
-	policy := rs.fallback
+	scope := clientScope{policy: rs.fallback, profile: rs.fallbackProfile}
 	if specific, exists := rs.clients[client]; exists {
-		policy = specific
+		scope = specific
 	}
+	policy := scope.policy
 
 	if best := rs.networkMatch(address); best != nil {
 		return Verdict{Action: best.action, Match: &best.provenance, Policy: policy}
@@ -433,12 +473,14 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 
 	if e := rs.exact[name.name]; e != nil {
 		best = better(best, e.best)
+		best = addScoped(best, e.scoped, scope.profile)
 	}
 
 	for start := 0; ; {
 		label := name.name[start:]
 		if e := rs.subdomains[label]; e != nil {
 			best = better(best, e.best)
+			best = addScoped(best, e.scoped, scope.profile)
 		}
 		dot := strings.IndexByte(label, '.')
 		if dot < 0 {
@@ -451,6 +493,9 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 	// carries no specificity to compare. The action is the tier winner either
 	// way, so this orders only the provenance.
 	for i := range rs.patterns {
+		if !rs.patterns[i].candidate.applies(scope.profile) {
+			continue
+		}
 		if rs.patterns[i].re.MatchString(name.name) {
 			best = better(best, &rs.patterns[i].candidate)
 		}
@@ -465,6 +510,9 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 			if rule.client != "" && rule.client != client {
 				continue
 			}
+			if rule.profile != "" && rule.profile != scope.profile {
+				continue
+			}
 			if rule.match(name.name) {
 				best = better(best, &rule.candidate)
 			}
@@ -475,6 +523,18 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 		return Verdict{Action: ActionAllow, Policy: policy}
 	}
 	return Verdict{Action: best.action, Match: &best.provenance, Policy: policy}
+}
+
+// addScoped folds the candidates one name holds for the asking profile into
+// the running winner. A rule scoped to another profile is not a candidate at
+// all, so it cannot lose a comparison it was never in.
+func addScoped(current *candidate, scoped []candidate, profile ProfileID) *candidate {
+	for i := range scoped {
+		if scoped[i].applies(profile) {
+			current = better(current, &scoped[i])
+		}
+	}
+	return current
 }
 
 // networkMatch returns the most specific CIDR rule that claims the address.
