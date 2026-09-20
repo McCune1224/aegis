@@ -330,9 +330,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := threats.Close(); err != nil {
 		logger.Warn("threat: final flush failed", "error", err)
 	}
-	if err := threats.Close(); err != nil {
-		logger.Warn("threat: final flush failed", "error", err)
-	}
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	var dhcpErr error
