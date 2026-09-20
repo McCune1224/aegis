@@ -20,9 +20,12 @@ type Props = {
 // Canvas text cannot read CSS custom properties, so the chart mirrors the
 // constellation tokens from app.css by value.
 const ink = "#8b96b5";
-const grid = "rgba(125, 211, 252, 0.08)";
+const grid = "rgba(255, 255, 255, 0.07)";
 const accent = "#7dd3fc";
 const block = "#fb7185";
+const axisFont = '12px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+const CHART_HEIGHT = 200;
 
 export default function Dashboard(props: Props) {
   const stats = () => aggregate(props.entries, Date.now(), props.windowMinutes);
@@ -87,21 +90,31 @@ export default function Dashboard(props: Props) {
       <section class="panel">
         <header>
           <h2>Queries, last {props.windowMinutes >= 1440 ? "24 hours" : "hour"}</h2>
-          <div class="seg">
-            <button
-              type="button"
-              class={props.windowMinutes < 1440 ? "seg-btn active" : "seg-btn"}
-              onClick={() => props.onSetWindow(60)}
-            >
-              1h
-            </button>
-            <button
-              type="button"
-              class={props.windowMinutes >= 1440 ? "seg-btn active" : "seg-btn"}
-              onClick={() => props.onSetWindow(1440)}
-            >
-              24h
-            </button>
+          <div class="chart-meta">
+            <div class="chart-legend">
+              <span class="total">
+                <i />total
+              </span>
+              <span class="blocked">
+                <i />blocked
+              </span>
+            </div>
+            <div class="seg">
+              <button
+                type="button"
+                class={props.windowMinutes < 1440 ? "seg-btn active" : "seg-btn"}
+                onClick={() => props.onSetWindow(60)}
+              >
+                1h
+              </button>
+              <button
+                type="button"
+                class={props.windowMinutes >= 1440 ? "seg-btn active" : "seg-btn"}
+                onClick={() => props.onSetWindow(1440)}
+              >
+                24h
+              </button>
+            </div>
           </div>
         </header>
         <div class="chart" data-testid="chart">
@@ -227,33 +240,39 @@ function SeriesChart(props: { series: { t: number; total: number; blocked: numbe
   function options(): Options {
     return {
       width: width(),
-      height: 190,
+      height: CHART_HEIGHT,
+      // The legend is drawn in the panel header instead, because uPlot's own
+      // one reserves a row that reads as an empty "VALUE: --" line.
+      legend: { show: false },
       cursor: { show: false },
-      legend: { show: true },
+      padding: [10, 12, 0, 0],
       scales: { x: { time: false } },
       axes: [
         {
           stroke: ink,
+          font: axisFont,
+          size: 32,
           grid: { stroke: grid },
           ticks: { stroke: grid },
           values: (_plot, values) =>
             values.map((value) => new Date(Number(value) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
         },
-        { stroke: ink, grid: { stroke: grid }, ticks: { stroke: grid } },
+        { stroke: ink, font: axisFont, size: 44, grid: { stroke: grid }, ticks: { stroke: grid } },
       ],
       series: [
         {},
         {
           label: "total",
           stroke: accent,
-          fill: "rgba(125, 211, 252, 0.14)",
-          width: 1.6,
+          fill: "rgba(125, 211, 252, 0.12)",
+          width: 1.8,
           points: { show: false },
         },
         {
           label: "blocked",
           stroke: block,
-          width: 1.6,
+          fill: "rgba(251, 113, 133, 0.1)",
+          width: 1.8,
           points: { show: false },
         },
       ],
@@ -286,7 +305,7 @@ function SeriesChart(props: { series: { t: number; total: number; blocked: numbe
           if (host && plot) {
             const next = host.clientWidth;
             setWidth(next);
-            plot.setSize({ width: next, height: 190 });
+            plot.setSize({ width: next, height: CHART_HEIGHT });
           }
         });
         observer.observe(element);
