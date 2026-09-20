@@ -126,3 +126,20 @@ func TestARouteEditRedirectsADomainWithoutARestart(t *testing.T) {
 	require.Equal(t, "203.0.113.10", answerAddress(t, got), "the edit is live on the same server")
 	require.EqualValues(t, 1, b.attempts.Load())
 }
+
+func TestAClientWithARouteCannotBeDeleted(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/clients/tablet", `{"profile":"default"}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodPost, "/api/v1/routes", `{"domain":"tablet.example","client":"tablet","upstream":"`+deadUpstream+`"}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = h.do(t, http.MethodDelete, "/api/v1/clients/tablet", "")
+	require.Equal(t, http.StatusConflict, status, body)
+
+	status, _ = h.do(t, http.MethodDelete, "/api/v1/routes/1", "")
+	require.Equal(t, http.StatusNoContent, status)
+	status, body = h.do(t, http.MethodDelete, "/api/v1/clients/tablet", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+}
