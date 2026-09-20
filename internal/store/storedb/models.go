@@ -78,3 +78,10 @@ type Source struct {
 	Failures       int64
 	RefreshSeconds int64
 }
+
+type Upstream struct {
+	Name    string
+	Url     string
+	Enabled int64
+	Backup  int64
+}

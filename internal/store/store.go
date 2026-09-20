@@ -38,6 +38,7 @@ type Config struct {
 	Rules     []filter.RuleSpec
 	Schedules []filter.ScheduleSpec
 	Rewrites  []rewrite.Record
+	Upstreams []Upstream
 	Default   filter.ProfileID
 }
 
@@ -174,12 +175,18 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 
+	upstreams, err := s.Upstreams(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Profiles:  profiles,
 		Clients:   clients,
 		Rules:     specs,
 		Schedules: schedules,
 		Rewrites:  rewrites,
+		Upstreams: upstreams,
 		Default:   filter.ProfileID(defaultProfile),
 	}, nil
 }
