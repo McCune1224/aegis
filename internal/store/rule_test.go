@@ -87,7 +87,9 @@ func TestDeleteRuleRemovesIt(t *testing.T) {
 		Action: filter.ActionAllow,
 	})
 	require.NoError(t, err)
-	require.NoError(t, s.DeleteRule(ctx, id))
+	deleted, err := s.DeleteRule(ctx, id)
+	require.NoError(t, err)
+	require.True(t, deleted, "the rule the test just wrote is there to delete")
 
 	rules, err := s.Rules(ctx)
 	require.NoError(t, err)

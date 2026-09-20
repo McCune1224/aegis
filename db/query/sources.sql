@@ -2,6 +2,10 @@
 SELECT name, url, format, enabled, etag, last_fetch, last_error, rule_count, skipped, failures, refresh_seconds, body
 FROM sources ORDER BY name;
 
+-- name: SourceByName :one
+SELECT name, url, format, enabled, etag, last_fetch, last_error, rule_count, skipped, failures, refresh_seconds, body
+FROM sources WHERE name = ?;
+
 -- name: ListEnabledSources :many
 SELECT name, url, format, enabled, etag, last_fetch, last_error, rule_count, skipped, failures, refresh_seconds, body
 FROM sources WHERE enabled = 1 ORDER BY name;

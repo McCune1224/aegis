@@ -161,6 +161,46 @@ func (q *Queries) RecordSourceFetch(ctx context.Context, arg RecordSourceFetchPa
 	return err
 }
 
+const sourceByName = `-- name: SourceByName :one
+SELECT name, url, format, enabled, etag, last_fetch, last_error, rule_count, skipped, failures, refresh_seconds, body
+FROM sources WHERE name = ?
+`
+
+type SourceByNameRow struct {
+	Name           string
+	Url            string
+	Format         string
+	Enabled        int64
+	Etag           string
+	LastFetch      int64
+	LastError      string
+	RuleCount      int64
+	Skipped        int64
+	Failures       int64
+	RefreshSeconds int64
+	Body           []byte
+}
+
+func (q *Queries) SourceByName(ctx context.Context, name string) (SourceByNameRow, error) {
+	row := q.db.QueryRowContext(ctx, sourceByName, name)
+	var i SourceByNameRow
+	err := row.Scan(
+		&i.Name,
+		&i.Url,
+		&i.Format,
+		&i.Enabled,
+		&i.Etag,
+		&i.LastFetch,
+		&i.LastError,
+		&i.RuleCount,
+		&i.Skipped,
+		&i.Failures,
+		&i.RefreshSeconds,
+		&i.Body,
+	)
+	return i, err
+}
+
 const upsertSource = `-- name: UpsertSource :exec
 INSERT INTO sources (name, url, format, enabled, refresh_seconds) VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (name) DO UPDATE SET
