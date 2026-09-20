@@ -32,6 +32,7 @@ type Service struct {
 	buffer   chan dns.Decision
 	findings chan Finding
 	dropped  atomic.Uint64
+	index    atomic.Pointer[Index]
 	logger   *slog.Logger
 	done     chan struct{}
 	flushed  chan struct{}
@@ -51,8 +52,21 @@ func NewService(database *store.Store, logger *slog.Logger, options ...Option) *
 		done:     make(chan struct{}),
 		flushed:  make(chan struct{}),
 	}
+	service.index.Store(EmptyIndex)
 	go service.analyse()
 	return service
+}
+
+// ThreatFor names the threat a queried name carries per the published feed
+// index, or "" when no feed claims it. Safe from any goroutine.
+func (s *Service) ThreatFor(name string) string {
+	return s.index.Load().ThreatFor(name)
+}
+
+// PublishIndex swaps the lookup the log enrichment reads. It is the same
+// publish-once pattern the filter engine uses.
+func (s *Service) PublishIndex(domains map[string]string) {
+	s.index.Store(BuildIndex(domains))
 }
 
 // Observe is the dns.Observer seam. It never waits: a full buffer drops the

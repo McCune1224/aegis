@@ -1,5 +1,7 @@
 -- +goose Up
 
+ALTER TABLE queries ADD COLUMN threat TEXT NOT NULL DEFAULT '';
+
 CREATE TABLE threat_findings (
     id       INTEGER PRIMARY KEY,
     time     INTEGER NOT NULL,
@@ -26,6 +28,7 @@ CREATE TABLE threat_domains (
 
 -- +goose Down
 
+ALTER TABLE queries DROP COLUMN threat;
 DROP TABLE threat_domains;
 DROP TABLE threat_feeds;
 DROP TABLE threat_findings;

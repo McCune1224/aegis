@@ -129,3 +129,27 @@ func BenchmarkObserve(b *testing.B) {
 	require.NoError(b, err)
 	b.Logf("%d decisions observed, %d recorded, %d dropped", b.N, len(entries), log.Dropped())
 }
+
+func TestTheLogStampsTheThreatAFeedNames(t *testing.T) {
+	database := open(t)
+
+	log := querylog.New(database, quiet(), querylog.WithThreats(func(name string) string {
+		if name == "c2.example.biz" {
+			return "c2"
+		}
+		return ""
+	}))
+	log.Observe(decisionFor("c2.example.biz", filter.ActionAllow))
+	log.Observe(decisionFor("clean.example.org", filter.ActionAllow))
+	require.NoError(t, log.Close())
+
+	entries, err := database.Queries(t.Context(), store.QueryFilter{Limit: 10})
+	require.NoError(t, err)
+
+	byName := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		byName[entry.Name.String()] = entry.Threat
+	}
+	require.Equal(t, "c2", byName["c2.example.biz"])
+	require.Equal(t, "", byName["clean.example.org"])
+}

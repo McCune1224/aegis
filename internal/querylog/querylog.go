@@ -38,13 +38,26 @@ type QueryLog struct {
 	store   *store.Store
 	buffer  chan dns.Decision
 	dropped atomic.Uint64
+	// threats names the feed a queried name belongs to, or "" when no feed
+	// claims it. It runs in the writer, so the lookup never touches the
+	// resolver worker.
+	threats func(name string) string
 	logger  *slog.Logger
 	done    chan struct{}
 	flushed chan struct{}
 }
 
+// Option configures a QueryLog.
+type Option func(*QueryLog)
+
+// WithThreats stamps every logged row with the threat kind a feed assigns to
+// the queried name.
+func WithThreats(lookup func(name string) string) Option {
+	return func(l *QueryLog) { l.threats = lookup }
+}
+
 // New returns a QueryLog writing into the store and starts its writer.
-func New(database *store.Store, logger *slog.Logger) *QueryLog {
+func New(database *store.Store, logger *slog.Logger, options ...Option) *QueryLog {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -54,6 +67,9 @@ func New(database *store.Store, logger *slog.Logger) *QueryLog {
 		logger:  logger,
 		done:    make(chan struct{}),
 		flushed: make(chan struct{}),
+	}
+	for _, option := range options {
+		option(log)
 	}
 	go log.write()
 	return log
@@ -94,7 +110,7 @@ func (l *QueryLog) write() {
 		if len(batch) == 0 {
 			return
 		}
-		if err := l.store.RecordQueries(ctx, entriesFrom(batch)); err != nil {
+		if err := l.store.RecordQueries(ctx, l.entriesFrom(batch)); err != nil {
 			l.logger.Warn("querylog: a batch was lost", "error", err, "size", len(batch))
 		}
 		if err := l.store.TrimQueries(ctx, MaxRows); err != nil {
@@ -126,7 +142,7 @@ func (l *QueryLog) write() {
 	}
 }
 
-func entriesFrom(decisions []dns.Decision) []store.QueryEntry {
+func (l *QueryLog) entriesFrom(decisions []dns.Decision) []store.QueryEntry {
 	entries := make([]store.QueryEntry, 0, len(decisions))
 	for _, decision := range decisions {
 		entry := store.QueryEntry{
@@ -135,6 +151,9 @@ func entriesFrom(decisions []dns.Decision) []store.QueryEntry {
 			Name:    decision.Name,
 			Type:    decision.Type,
 			Verdict: decision.Action,
+		}
+		if l.threats != nil {
+			entry.Threat = l.threats(decision.Name.String())
 		}
 		switch {
 		case decision.Rewritten != "":

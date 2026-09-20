@@ -71,6 +71,7 @@ type Query struct {
 	Type    string
 	Verdict string
 	Rule    string
+	Threat  string
 }
 
 type Rewrite struct {
