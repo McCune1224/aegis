@@ -165,6 +165,14 @@ func TestCompileRejectsARuleNamingAnUndefinedProfile(t *testing.T) {
 	require.ErrorContains(t, err, "ghosts")
 }
 
+func TestProfileOfResolvesTheProfileAQueryIsScopedAgainst(t *testing.T) {
+	rs := compileProfiles(t, twoProfiles(nil))
+
+	require.Equal(t, filter.ProfileID("kids"), rs.ProfileOf("tablet"))
+	require.Equal(t, filter.ProfileID("default"), rs.ProfileOf(""))
+	require.Equal(t, filter.ProfileID("default"), rs.ProfileOf("nobody"))
+}
+
 func TestProfileScopeKeepsTheWallClockOutOfTheDecision(t *testing.T) {
 	rs := compileProfiles(t, twoProfiles([]filter.RuleSpec{
 		profileScoped("block-video", "video.example", "kids", filter.ActionBlock),
