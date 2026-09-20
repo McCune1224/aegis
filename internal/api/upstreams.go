@@ -104,7 +104,8 @@ func (s *Server) putUpstream(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, upstreamResponseFrom(row))
 }
 
-// deleteUpstream removes one upstream by its name.
+// deleteUpstream removes one upstream by its name. A route still sending
+// queries there is a conflict the operator resolves first.
 func (s *Server) deleteUpstream(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	s.mu.Lock()
@@ -119,6 +120,17 @@ func (s *Server) deleteUpstream(w http.ResponseWriter, r *http.Request) {
 	if !keepsAnEnabledUpstream(rows, name, store.Upstream{}) {
 		writeError(w, badRequest{errors.New("at least one enabled upstream must remain")})
 		return
+	}
+	routes, err := s.store.Routes(ctx)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	for _, route := range routes {
+		if route.Upstream == name {
+			writeError(w, conflict{fmt.Errorf("route %d still sends its queries to upstream %q", route.ID, name)})
+			return
+		}
 	}
 	if err := s.store.DeleteUpstream(ctx, name); err != nil {
 		writeError(w, err)

@@ -154,6 +154,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/upstreams", s.listUpstreams)
 	mux.HandleFunc("PUT /api/v1/upstreams/{name}", s.putUpstream)
 	mux.HandleFunc("DELETE /api/v1/upstreams/{name}", s.deleteUpstream)
+	mux.HandleFunc("GET /api/v1/routes", s.listRoutes)
+	mux.HandleFunc("POST /api/v1/routes", s.postRoute)
+	mux.HandleFunc("PUT /api/v1/routes/{id}", s.putRoute)
+	mux.HandleFunc("DELETE /api/v1/routes/{id}", s.deleteRoute)
 	mux.HandleFunc("GET /api/v1/stream/queries", s.streamQueries)
 	mux.HandleFunc("GET /api/v1/queries", s.listQueries)
 	mux.HandleFunc("POST /api/v1/reload", s.reload)
@@ -239,6 +243,13 @@ type badRequest struct{ err error }
 func (e badRequest) Error() string { return e.err.Error() }
 func (e badRequest) Unwrap() error { return e.err }
 
+// conflict marks a write the stored records contradict, so it becomes a 409
+// rather than a 500.
+type conflict struct{ err error }
+
+func (e conflict) Error() string { return e.err.Error() }
+func (e conflict) Unwrap() error { return e.err }
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -248,11 +259,14 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 func writeError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	var bad badRequest
+	var clash conflict
 	switch {
 	case errors.Is(err, errNotFound):
 		status = http.StatusNotFound
 	case errors.As(err, &bad):
 		status = http.StatusBadRequest
+	case errors.As(err, &clash):
+		status = http.StatusConflict
 	}
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
