@@ -141,6 +141,11 @@ func (s *Server) deleteClient(w http.ResponseWriter, r *http.Request) {
 		func(cfg *store.Config) error {
 			for i := range cfg.Clients {
 				if cfg.Clients[i].Key == key {
+					for _, route := range cfg.Routes {
+						if route.Client == string(key) {
+							return conflict{fmt.Errorf("route %d still sends its queries to client %q", route.ID, key)}
+						}
+					}
 					cfg.Clients = append(cfg.Clients[:i], cfg.Clients[i+1:]...)
 					return nil
 				}

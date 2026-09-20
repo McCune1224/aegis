@@ -20,11 +20,13 @@ type stubResolver struct {
 	err    error
 	calls  int
 	asked  string
+	route  string
 }
 
-func (s *stubResolver) Resolve(_ context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+func (s *stubResolver) Resolve(_ context.Context, req *mdns.Msg, route string) (*mdns.Msg, error) {
 	s.calls++
 	s.asked = req.Question[0].Name
+	s.route = route
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -124,6 +126,49 @@ func upstreamA(req *mdns.Msg, address string) *mdns.Msg {
 		A: netip.MustParseAddr(address).AsSlice(),
 	})
 	return resp
+}
+
+// routedDecider is a decider whose every verdict names a route, the way the
+// runtime fills the route in after Decide.
+type routedDecider struct {
+	stubDecider
+	route string
+}
+
+func (d routedDecider) Decide(name filter.Domain, address netip.Addr) filter.Verdict {
+	verdict := d.stubDecider.Decide(name, address)
+	verdict.Route = d.route
+	return verdict
+}
+
+func TestHandleForwardsTheVerdictsRouteToTheUpstream(t *testing.T) {
+	upstream := &stubResolver{}
+	decider := routedDecider{stubDecider: deciderFor(t, defaultPolicy), route: "internal"}
+	handler := handlerFor(t, decider, upstream)
+
+	req := query("secret.example.net.", mdns.TypeA)
+	upstream.answer = upstreamA(req, "203.0.113.9")
+	_, err := handler.Handle(context.Background(), req, netip.Addr{})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, "internal", upstream.route)
+}
+
+func TestHandleForwardsAnUnparseableNameWithoutARoute(t *testing.T) {
+	upstream := &stubResolver{}
+	handler := handlerFor(t, routedDecider{stubDecider: deciderFor(t, defaultPolicy), route: "internal"}, upstream)
+	req := query(".", mdns.TypeNS)
+	resp := new(mdns.Msg)
+	resp.SetReply(req)
+	upstream.answer = resp
+
+	_, err := handler.Handle(context.Background(), req, netip.Addr{})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, "", upstream.route,
+		"a name no route can match goes out with the pool free to choose")
 }
 
 func TestHandleAnswersNxDomainForABlockedNameAndStillForwardsTheOther(t *testing.T) {

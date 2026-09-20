@@ -32,11 +32,12 @@ const prefetchFraction = 5
 // the asking client's context because that client has already been answered.
 const refreshTimeout = 10 * time.Second
 
-// Upstream answers a query on behalf of the cache. It is the same shape the
-// DNS handler calls a Resolver, declared here so this package does not import
-// the server.
+// Upstream answers a query on behalf of the cache. Route is the upstream
+// route the query carries, which the keying below treats as part of the
+// question. It is the same shape the DNS handler calls a Resolver, declared
+// here so this package does not import the server.
 type Upstream interface {
-	Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error)
+	Resolve(ctx context.Context, req *mdns.Msg, route string) (*mdns.Msg, error)
 }
 
 // Config is what a Cache needs. Zero bounds fall to the defaults, so wiring
@@ -62,6 +63,7 @@ type key struct {
 	name   string
 	qclass uint16
 	qtype  uint16
+	route  string
 }
 
 // entry is one stored upstream answer. resp is a private template whose ID and
@@ -151,12 +153,12 @@ func New(cfg Config) (*Cache, error) {
 // so the next query retries the upstream. A hit inside the last fraction of
 // the entry's life also starts one background refresh when prefetching is on,
 // so a popular name never costs a client the cold round trip.
-func (c *Cache) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+func (c *Cache) Resolve(ctx context.Context, req *mdns.Msg, route string) (*mdns.Msg, error) {
 	if len(req.Question) != 1 {
-		return c.upstream.Resolve(ctx, req)
+		return c.upstream.Resolve(ctx, req, route)
 	}
 	question := req.Question[0]
-	k := key{name: strings.ToLower(question.Name), qclass: question.Qclass, qtype: question.Qtype}
+	k := key{name: strings.ToLower(question.Name), qclass: question.Qclass, qtype: question.Qtype, route: route}
 
 	c.mu.Lock()
 	if el, ok := c.items[k]; ok {
@@ -183,7 +185,7 @@ func (c *Cache) Resolve(ctx context.Context, req *mdns.Msg) (*mdns.Msg, error) {
 	c.misses++
 	c.mu.Unlock()
 
-	resp, err := c.upstream.Resolve(ctx, req)
+	resp, err := c.upstream.Resolve(ctx, req, route)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +207,7 @@ func (c *Cache) refresh(k key) {
 	req.SetQuestion(k.name, k.qtype)
 	req.Question[0].Qclass = k.qclass
 
-	resp, err := c.upstream.Resolve(ctx, req)
+	resp, err := c.upstream.Resolve(ctx, req, k.route)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -104,8 +104,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	specs, err := buildUpstreams(cfg.Upstreams)
-	if err != nil {
+	if err := validateUpstreams(cfg.Upstreams); err != nil {
 		return err
 	}
 	rewrites, err := buildRewrites(cfg.Rewrites)
@@ -144,6 +143,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := seedRewrites(ctx, database, rewrites, firstBoot, logger); err != nil {
 		return err
 	}
+	if err := seedUpstreams(ctx, database, cfg.Upstreams, logger); err != nil {
+		return err
+	}
 	if err := database.MarkSeeded(ctx); err != nil {
 		return err
 	}
@@ -157,11 +159,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	hub := api.NewHub(logger)
 	log := querylog.New(database, logger)
 
-	pool, err := upstream.New(upstream.Config{Specs: specs})
-	if err != nil {
-		return err
-	}
-	resolver, err := cache.New(cache.Config{Upstream: pool, Prefetch: true})
+	resolver, err := cache.New(cache.Config{Upstream: engine.Upstreams(), Prefetch: true})
 	if err != nil {
 		return err
 	}
@@ -174,6 +172,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			Evictions:  stats.Evictions,
 			Prefetches: stats.Prefetches,
 		}
+	})
+	counts.WatchUpstreams(func() []metrics.UpstreamStat {
+		stats := engine.Upstreams().Stats()
+		health := make([]metrics.UpstreamStat, 0, len(stats))
+		for _, stat := range stats {
+			health = append(health, metrics.UpstreamStat{Name: stat.Name, EWMA: stat.EWMA, Failures: stat.Failures, Down: stat.Down})
+		}
+		return health
 	})
 	limiter, err := buildLimiter(cfg, engine)
 	if err != nil {
@@ -207,6 +213,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	rows, err := database.Upstreams(ctx)
+	if err != nil {
+		return err
+	}
+
 	apiServer, err := api.Start(api.Config{
 		Store:     database,
 		Reloader:  engine,
@@ -214,10 +225,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Preview:   sync,
 		Hub:       hub,
 		Files:     web.Files(),
-		Upstreams: upstreamNames(specs),
 		Address:   cfg.APIAddress,
 		Logger:    logger,
 		Metrics:   counts,
+		Upstreams: engine.Upstreams(),
 	})
 	if err != nil {
 		_ = server.Shutdown(context.Background())
@@ -228,7 +239,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		"udp", server.UDPAddr().String(),
 		"tcp", server.TCPAddr().String(),
 		"api", apiServer.Addr().String(),
-		"upstreams", strings.Join(upstreamNames(specs), ", "),
+		"upstreams", strings.Join(upstreamNames(rows), ", "),
 		"database", cfg.DB,
 		"rules", engine.Size(),
 		slog.Group("encrypted",
@@ -259,30 +270,47 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	return errors.Join(apiServer.Shutdown(shutdown), server.Shutdown(shutdown))
 }
 
-// buildUpstreams parses every configured resolver before the database is
+// validateUpstreams parses every --upstream flag before the database is
 // touched, so a bad URL fails the start with the entry named.
-func buildUpstreams(raw []string) ([]upstream.Spec, error) {
+func validateUpstreams(raw []string) error {
 	if len(raw) == 0 {
-		return nil, errors.New("at least one --upstream is required")
+		return errors.New("at least one --upstream is required")
 	}
-	specs := make([]upstream.Spec, 0, len(raw))
 	for _, entry := range raw {
-		spec, err := upstream.Parse(entry)
-		if err != nil {
-			return nil, err
+		if _, err := upstream.Parse(entry); err != nil {
+			return err
 		}
-		specs = append(specs, spec)
 	}
-	return specs, nil
+	return nil
 }
 
-// upstreamNames lists the resolvers as written, for status and logs.
-func upstreamNames(specs []upstream.Spec) []string {
-	names := make([]string, 0, len(specs))
-	for _, spec := range specs {
-		names = append(names, spec.Name)
+// upstreamNames lists the stored rows as written, for status and logs.
+func upstreamNames(rows []store.Upstream) []string {
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		names = append(names, row.Name)
 	}
 	return names
+}
+
+// seedUpstreams stores the flag resolvers while the table has no rows. The
+// check is the empty table rather than first boot, so a database upgraded from
+// a flag-only release gets its resolvers too.
+func seedUpstreams(ctx context.Context, database *store.Store, flags []string, logger *slog.Logger) error {
+	rows, err := database.Upstreams(ctx)
+	if err != nil {
+		return err
+	}
+	if len(rows) > 0 {
+		return nil
+	}
+	for _, raw := range flags {
+		if err := database.SaveUpstream(ctx, store.Upstream{Name: raw, URL: raw, Enabled: true}); err != nil {
+			return err
+		}
+	}
+	logger.Info("seeded upstream resolvers from the flags", "count", len(flags))
+	return nil
 }
 
 // buildLimiter reads the rate flags into a limiter whose buckets key on the

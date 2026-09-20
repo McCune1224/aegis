@@ -38,6 +38,8 @@ type Config struct {
 	Rules     []filter.RuleSpec
 	Schedules []filter.ScheduleSpec
 	Rewrites  []rewrite.Record
+	Upstreams []Upstream
+	Routes    []Route
 	Default   filter.ProfileID
 }
 
@@ -66,14 +68,47 @@ func (c Config) Validate() error {
 	if _, err := client.New(c.Selectors()); err != nil {
 		return err
 	}
-	_, err := filter.Compile(filter.Config{
+	if _, err := filter.Compile(filter.Config{
 		Rules:     c.Rules,
 		Profiles:  c.Profiles,
 		Clients:   c.ClientSpecs(),
 		Schedules: c.Schedules,
 		Default:   c.Default,
-	})
-	return err
+	}); err != nil {
+		return err
+	}
+	return validateRoutes(c.Routes, c.Upstreams, c.Clients)
+}
+
+// validateRoutes refuses a route whose upstream is missing or disabled,
+// whose client does not exist, or whose domain no query can carry. A route
+// that fails here would fail every reload, because the router has nowhere to
+// send the queries it matches.
+func validateRoutes(routes []Route, upstreams []Upstream, clients []Client) error {
+	enabled := make(map[string]bool, len(upstreams))
+	for _, row := range upstreams {
+		if row.Enabled {
+			enabled[row.Name] = true
+		}
+	}
+	known := make(map[filter.ClientKey]bool, len(clients))
+	for _, record := range clients {
+		known[record.Key] = true
+	}
+	for _, route := range routes {
+		if !enabled[route.Upstream] {
+			return fmt.Errorf("store: route %d names upstream %q, which is not an enabled resolver", route.ID, route.Upstream)
+		}
+		if route.Client != "" && !known[filter.ClientKey(route.Client)] {
+			return fmt.Errorf("store: route %d names client %q, which does not exist", route.ID, route.Client)
+		}
+		if route.Domain != "" {
+			if _, err := filter.ParseDomain(route.Domain); err != nil {
+				return fmt.Errorf("store: route %d: %w", route.ID, err)
+			}
+		}
+	}
+	return nil
 }
 
 // Store is the configuration Aegis serves from. It owns two handles to the
@@ -174,12 +209,24 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 
+	upstreams, err := s.Upstreams(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+
+	routes, err := s.Routes(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Profiles:  profiles,
 		Clients:   clients,
 		Rules:     specs,
 		Schedules: schedules,
 		Rewrites:  rewrites,
+		Upstreams: upstreams,
+		Routes:    routes,
 		Default:   filter.ProfileID(defaultProfile),
 	}, nil
 }

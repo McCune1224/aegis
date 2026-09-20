@@ -42,6 +42,13 @@ type Rewrite struct {
 	Target string
 }
 
+type Route struct {
+	ID       int64
+	Domain   string
+	Client   string
+	Upstream string
+}
+
 type Rule struct {
 	ID       int64
 	Domain   string
@@ -77,4 +84,11 @@ type Source struct {
 	Skipped        int64
 	Failures       int64
 	RefreshSeconds int64
+}
+
+type Upstream struct {
+	Name    string
+	Url     string
+	Enabled int64
+	Backup  int64
 }

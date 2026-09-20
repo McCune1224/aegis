@@ -22,10 +22,10 @@ func putRewrite(t *testing.T, h *harness, pattern, target string) {
 
 // askName resolves any name through the harness's DNS server, unlike queryFor
 // and queryFrom, which each ask one fixed name.
-func askName(t *testing.T, address, name string, qtype uint16) *mdns.Msg {
+func askName(t *testing.T, address, name string) *mdns.Msg {
 	t.Helper()
 	client := &mdns.Client{Net: "udp", Timeout: 2 * time.Second}
-	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion(name, qtype), address)
+	resp, _, err := client.Exchange(new(mdns.Msg).SetQuestion(name, mdns.TypeA), address)
 	require.NoError(t, err)
 	return resp
 }
@@ -40,7 +40,7 @@ func TestARewriteAnswersARealQuery(t *testing.T) {
 	require.Contains(t, body, `"pattern":"nas.local"`)
 	require.Contains(t, body, `"target":"192.0.2.44"`)
 
-	got := askName(t, h.dnsAddress, "nas.local.", mdns.TypeA)
+	got := askName(t, h.dnsAddress, "nas.local.")
 	require.Equal(t, mdns.RcodeSuccess, got.Rcode)
 	require.Len(t, got.Answer, 1)
 	require.Equal(t, netip.MustParseAddr("192.0.2.44").AsSlice(), []byte(got.Answer[0].(*mdns.A).A))
@@ -54,7 +54,7 @@ func TestARewriteAnswersARealQuery(t *testing.T) {
 	// harness does not run, so the query stops succeeding.
 	status, body = h.do(t, http.MethodDelete, "/api/v1/rewrites/"+url.PathEscape("nas.local"), "")
 	require.Equal(t, http.StatusNoContent, status, body)
-	got = askName(t, h.dnsAddress, "nas.local.", mdns.TypeA)
+	got = askName(t, h.dnsAddress, "nas.local.")
 	require.Equal(t, mdns.RcodeServerFailure, got.Rcode)
 }
 
@@ -63,7 +63,7 @@ func TestAWildcardRewriteAnswersSubdomainsThroughTheAPI(t *testing.T) {
 
 	putRewrite(t, h, "*.nas.local", "192.0.2.45")
 
-	got := askName(t, h.dnsAddress, "cam.nas.local.", mdns.TypeA)
+	got := askName(t, h.dnsAddress, "cam.nas.local.")
 	require.Equal(t, mdns.RcodeSuccess, got.Rcode)
 	require.Len(t, got.Answer, 1)
 	require.Equal(t, netip.MustParseAddr("192.0.2.45").AsSlice(), []byte(got.Answer[0].(*mdns.A).A))

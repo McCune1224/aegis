@@ -264,6 +264,68 @@ export function deleteRewrite(pattern: string): Promise<void> {
   return request<void>(`/api/v1/rewrites/${encodeURIComponent(pattern)}`, { method: "DELETE" });
 }
 
+export type Upstream = {
+  name: string;
+  url: string;
+  enabled: boolean;
+  backup: boolean;
+  latency_ms: number;
+  failures: number;
+  down: boolean;
+};
+
+export type UpstreamInput = {
+  url: string;
+  enabled: boolean;
+  backup: boolean;
+};
+
+export function listUpstreams(): Promise<Upstream[]> {
+  return request<Upstream[]>("/api/v1/upstreams");
+}
+
+export function saveUpstream(name: string, input: UpstreamInput): Promise<Upstream> {
+  return request<Upstream>(`/api/v1/upstreams/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteUpstream(name: string): Promise<void> {
+  return request<void>(`/api/v1/upstreams/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+export type Route = {
+  id: number;
+  domain: string;
+  client: string;
+  upstream: string;
+};
+
+// A blank domain matches every name and a blank client matches every client,
+// so the router fills the gaps a rule leaves open.
+export type RouteInput = {
+  domain: string;
+  client: string;
+  upstream: string;
+};
+
+export function listRoutes(): Promise<Route[]> {
+  return request<Route[]>("/api/v1/routes");
+}
+
+export function createRoute(input: RouteInput): Promise<Route> {
+  return request<Route>("/api/v1/routes", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateRoute(id: number, input: RouteInput): Promise<Route> {
+  return request<Route>(`/api/v1/routes/${id}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export function deleteRoute(id: number): Promise<void> {
+  return request<void>(`/api/v1/routes/${id}`, { method: "DELETE" });
+}
+
 export type QueryEntry = {
   time: string;
   client: string;

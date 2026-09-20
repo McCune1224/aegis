@@ -2,7 +2,9 @@
 
 This records the shape of `internal/upstream` and what it deliberately does
 not do. It is the design record for #21's first landing: several resolvers,
-DoT and DoH on top of plain UDP, health scoring, and failover.
+DoT and DoH on top of plain UDP, health scoring, and failover; and for #77's:
+stored upstreams, per-domain and per-client routing, and the surfaces they
+show on.
 
 ## The decision
 
@@ -31,15 +33,17 @@ A SERVFAIL answer passes through untouched. It came from a resolver that is
 up, and failing over on it would multiply load for every permanently broken
 name on the internet. Failover answers transport errors only.
 
-## The cache keys on the question
+## The cache keys on the question, and on the route
 
-One shared cache sits over the pool, keyed on name, class, and type as
-before. Resolvers that disagree about a name therefore share one answer, and
-whichever resolver served it wins. For a sinkhole pointed at public
-resolvers this is the right trade: keying by upstream multiplies the table
-and doubles misses to defend against a split-horizon setup this product does
-not yet express. If routing below introduces per-query upstream choice, the
-cache key gains the route at the same time.
+One shared cache sits over the pool, keyed on name, class, and type — and on
+the route once routing exists. A query a route sends to a private resolver is
+a different question from the same name sent to a public one, so the key
+gains the route and every entry remembers the route it was fetched with,
+prefetch included. A setup without routes keys everything on the empty route
+and behaves exactly as before. Resolvers that disagree about a name still
+share one answer whenever no route separates them; keying every entry by
+upstream would multiply the table to defend against a split this product
+only expresses through explicit routes, and routes already carry the key.
 
 ## Transports and URLs
 
@@ -59,14 +63,61 @@ stream transports, so they never truncate. `http://` is rejected outright:
 plaintext HTTP DNS is a footgun, and plain DNS already covers the insecure
 case. DoQ waits on `quic-go`, the heavy dependency the issue deferred.
 
-## Configuration
+## The store owns the resolvers
 
-`--upstream` is repeatable and every value is a URL. The default stays one
-plain UDP resolver, so upgrading changes no behaviour, and `AEGIS_UPSTREAM`
-keeps working as the single-value environment form. The store and API do not
-hold upstreams yet, so a change still needs a restart; #21's remaining slice
-(stored upstreams, per-domain and per-client routing, health on the API and
-graph) builds on this pool and tracks in its own issue.
+Upstream rows live in the `upstreams` table: a name, the canonical URL, an
+enabled flag, and a backup flag. The `--upstream` flag seeds an empty table
+only, whatever the boot, so a database upgraded from a flag-only release gets
+its resolvers once and the store owns them from then on. The API serves CRUD
+on `/api/v1/upstreams`, and every write reloads the same way a rewrite write
+does, so an edit reaches a running server without a restart.
+
+The runtime publishes a fresh pool on every reload through `upstream.Switch`,
+a stable handle the cache wires to once at boot. A reload that cannot build a
+pool leaves the previous one serving; a store with no enabled upstream fails
+the same way an empty flag list always did, and the API refuses the write
+that would cause it.
+
+## Routing
+
+A route row sends matching queries to one named upstream: an optional client
+(the identity key), an optional domain (the name itself or anything under
+it), and the upstream's name. The runtime builds the router into the same
+snapshot as the rule set and the identity table, so one atomic load decides
+filter, identity, and route together and a query cannot be routed by an old
+table while filtered by a new one. The route name rides the filter's verdict
+to the handler, through the cache, and onto the pool.
+
+A routed query resolves through that one peer only. It never fails over to
+another resolver, because the point of sending a name to a private resolver
+is that a public one would answer it wrongly, and a leaked split-horizon
+answer poisons the shared cache. An operator who wants a routed name to have
+spare capacity lists that upstream several times under different names.
+
+Match order, first match wins: a client-scoped route outranks a
+domain-scoped one, a deeper domain outranks a shallower one, and the row id
+breaks the rest. An empty domain matches every name; an empty client matches
+every client. The API refuses a route naming an unknown or disabled
+upstream, an unknown client, or a domain no query can carry, and refuses
+deleting an upstream or client a route still references: a route that
+vanishes or dangles under the operator is a silent policy change.
+
+Backup upstreams never enter the candidate order while a regular peer is
+eligible, so a backup is probed only when everything ahead of it is down.
+
+## Divergences from AdGuard Home, cited
+
+- Per-client upstreams in AdGuard Home replace a client's whole resolver
+  list. Aegis routes name one upstream per rule and stack by specificity,
+  which is the dnsmasq `server=/domain/ip` shape AdGuard lacks. An operator
+  who wants AdGuard's per-client list adds one client-scoped route per
+  resolver.
+- AdGuard Home has no per-domain routing. The superset is deliberate.
+- Backup upstreams generalize AdGuard's global fallback list into a per-row
+  flag; a fallback list is the degenerate case where every row is backup.
+- Per-category routing waits until Aegis has a category concept to route on
+  (blocked services, threat intel). Routing half of one now would invent a
+  domain-set type the rest of the product does not share.
 
 ## Alternatives considered
 
@@ -76,14 +127,13 @@ graph) builds on this pool and tracks in its own issue.
 | race every resolver | first answer wins | rejected, multiplies upstream load on every query and hides which resolver served |
 | fail over on SERVFAIL too | retry next resolver on any non-answer | rejected, an upstream that answered is healthy and broken names would hit every peer |
 | background health prober | periodic cheap queries | rejected, passive recovery probes with real traffic and costs nothing when idle |
-| cache keyed by upstream | one table per resolver | rejected until routing exists, see above |
+| cache keyed by upstream | one table per resolver | rejected; the route joins the key when routing exists, which it now does |
+| routed queries fail over to the pool | next resolver after the routed one errors | rejected, a public resolver answers a split-horizon name wrongly and the cache keeps the poison |
+| route targets a resolver group | a route names an ordered list | rejected until asked; one named upstream per route keeps the table and the UI honest, and listing a resolver twice under two names is the escape hatch |
 | persistent connections | cached `*dns.Conn` per peer | deferred, the forwarder never had them and the cache absorbs repeats |
 
 ## Deferred
 
-- **Stored upstreams and routing.** Per-domain, per-client, per-category
-  routing needs the store schema and the identity table in on the decision,
-  so it lands on top of this pool rather than inside it.
 - **Health on a surface.** Latency averages and failure counts live on the
   pool; #56's metrics and the graph's multi-upstream stars are where they
   show.

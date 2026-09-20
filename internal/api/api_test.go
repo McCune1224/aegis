@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -25,14 +24,6 @@ import (
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 )
-
-// deadResolver never answers: the harness exercises the API surface, so no
-// query should reach an upstream.
-type deadResolver struct{}
-
-func (deadResolver) Resolve(_ context.Context, _ *mdns.Msg) (*mdns.Msg, error) {
-	return nil, errors.New("the api harness has no resolver")
-}
 
 type harness struct {
 	apiURL     string
@@ -56,6 +47,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "aegis.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = database.Close() })
+	require.NoError(t, database.SaveUpstream(ctx, store.Upstream{Name: deadUpstream, URL: deadUpstream, Enabled: true}))
 
 	lists := []runtime.ListFile{listFileWith(t, "ads.example.com\n")}
 	var options []runtime.Option
@@ -70,7 +62,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 	log := querylog.New(database, quietLogger())
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:   rt,
-		Upstream:  deadResolver{},
+		Upstream:  rt.Upstreams(),
 		Rewriter:  rt,
 		Observers: []dns.Observer{hub, log},
 	})
@@ -79,7 +71,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = dnsServer.Shutdown(context.Background()) })
 
-	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Sources: sync, Preview: sync, Hub: hub, Upstreams: []string{"9.9.9.9:53"}, Address: "127.0.0.1:0"})
+	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Sources: sync, Preview: sync, Hub: hub, Upstreams: rt.Upstreams(), Address: "127.0.0.1:0"})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = apiServer.Shutdown(context.Background()) })
 
@@ -118,6 +110,11 @@ func listFileWith(t *testing.T, content string) runtime.ListFile {
 // listedName is the name the harness's list server blocks, and the name every
 // DNS-path test in this package asks for.
 const listedName = "tracker.example.net"
+
+// deadUpstream is the row the harness seeds, so the runtime's reload always
+// has an enabled resolver. Nothing listens there, so a query the filter lets
+// through fails the way it did when the harness wired a dead resolver in.
+const deadUpstream = "127.0.0.1:1"
 
 // queryFor asks the harness DNS server for the listed name from the loopback
 // address the policy defaults to.
@@ -356,7 +353,7 @@ func TestStatusReportsTheUpstreamAndRuleCount(t *testing.T) {
 	status, body := h.do(t, http.MethodGet, "/api/v1/status", "")
 
 	require.Equal(t, http.StatusOK, status, body)
-	require.Contains(t, body, "9.9.9.9:53")
+	require.Contains(t, body, deadUpstream)
 	require.Contains(t, body, `"rules":1`)
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,21 +18,37 @@ import (
 // prefetchStub is an upstream for the prefetch tests. The call count is
 // atomic because the background refresh rings it from its own goroutine.
 // arrived carries one ring per call, dropped when full, so a test waits for
-// a call to start instead of sleeping for it.
+// a call to start instead of sleeping for it. routes records the route each
+// call came in with.
 type prefetchStub struct {
-	calls   atomic.Int64
+	calls  atomic.Int64
+	routes struct {
+		sync.Mutex
+		byCall map[int64]string
+	}
 	arrived chan struct{}
 	behave  func(n int64, req *mdns.Msg) (*mdns.Msg, error)
 }
 
 func newPrefetchStub() *prefetchStub {
-	return &prefetchStub{arrived: make(chan struct{}, 16)}
+	s := &prefetchStub{arrived: make(chan struct{}, 16)}
+	s.routes.byCall = map[int64]string{}
+	return s
 }
 
 func (s *prefetchStub) saw() int { return int(s.calls.Load()) }
 
-func (s *prefetchStub) Resolve(_ context.Context, req *mdns.Msg) (*mdns.Msg, error) {
+func (s *prefetchStub) routeOf(n int64) string {
+	s.routes.Lock()
+	defer s.routes.Unlock()
+	return s.routes.byCall[n]
+}
+
+func (s *prefetchStub) Resolve(_ context.Context, req *mdns.Msg, route string) (*mdns.Msg, error) {
 	n := s.calls.Add(1)
+	s.routes.Lock()
+	s.routes.byCall[n] = route
+	s.routes.Unlock()
 	select {
 	case s.arrived <- struct{}{}:
 	default:
@@ -96,15 +113,15 @@ func TestStatsCountsHitsMissesAndEvictions(t *testing.T) {
 	resolver := newResolver(t, upstream, func(cfg *cache.Config) { cfg.MaxEntries = 2 })
 	ctx := context.Background()
 
-	_, err := resolver.Resolve(ctx, query("a.example.net.", mdns.TypeA))
+	_, err := resolver.Resolve(ctx, query("a.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(ctx, query("b.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(ctx, query("b.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(ctx, query("a.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(ctx, query("a.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(ctx, query("c.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(ctx, query("c.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
-	_, err = resolver.Resolve(ctx, query("a.example.net.", mdns.TypeA))
+	_, err = resolver.Resolve(ctx, query("a.example.net.", mdns.TypeA), "")
 	require.NoError(t, err)
 
 	twoQuestions := new(mdns.Msg)
@@ -112,7 +129,7 @@ func TestStatsCountsHitsMissesAndEvictions(t *testing.T) {
 		mdns.Question{Name: "x.example.net.", Qtype: mdns.TypeA, Qclass: mdns.ClassINET},
 		mdns.Question{Name: "y.example.net.", Qtype: mdns.TypeA, Qclass: mdns.ClassINET},
 	)
-	_, err = resolver.Resolve(ctx, twoQuestions)
+	_, err = resolver.Resolve(ctx, twoQuestions, "")
 	require.NoError(t, err)
 
 	stats := resolver.Stats()
@@ -130,7 +147,7 @@ func TestPrefetchRefreshesAPopularNameBeforeItExpires(t *testing.T) {
 	name := query("popular.example.net.", mdns.TypeA)
 
 	// The entry lives 300 seconds from now.
-	first, err := resolver.Resolve(ctx, name)
+	first, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.1", answeredAddress(t, first))
 	require.Equal(t, 1, stub.saw())
@@ -139,7 +156,7 @@ func TestPrefetchRefreshesAPopularNameBeforeItExpires(t *testing.T) {
 	// Asked with a fifth of its life left, the entry is served from memory
 	// while the refresh runs behind it.
 	fake.Advance(241 * time.Second)
-	near, err := resolver.Resolve(ctx, name)
+	near, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.1", answeredAddress(t, near), "the client never waits for the refresh")
 	require.Equal(t, 1, stub.saw())
@@ -148,7 +165,7 @@ func TestPrefetchRefreshesAPopularNameBeforeItExpires(t *testing.T) {
 	// Once the refresh lands, the entry answers with the new address.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		resp, err := resolver.Resolve(ctx, name)
+		resp, err := resolver.Resolve(ctx, name, "")
 		require.NoError(t, err)
 		if answeredAddress(t, resp) == "203.0.113.2" {
 			break
@@ -165,7 +182,7 @@ func TestPrefetchRefreshesAPopularNameBeforeItExpires(t *testing.T) {
 	// lands between the original expiry (300) and the refreshed entry's own
 	// prefetch window (which opens 240 before its expiry).
 	fake.Advance(200 * time.Second)
-	late, err := resolver.Resolve(ctx, name)
+	late, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.2", answeredAddress(t, late))
 	require.Equal(t, 2, stub.saw())
@@ -191,14 +208,14 @@ func TestPrefetchDoesNotStartTwiceWhileOneRefreshIsInFlight(t *testing.T) {
 	ctx := context.Background()
 	name := query("held.example.net.", mdns.TypeA)
 
-	_, err := resolver.Resolve(ctx, name)
+	_, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, 1, stub.saw())
 	stub.drainArrived()
 
 	fake.Advance(241 * time.Second)
 	for i := 0; i < 3; i++ {
-		resp, err := resolver.Resolve(ctx, name)
+		resp, err := resolver.Resolve(ctx, name, "")
 		require.NoError(t, err)
 		require.Equal(t, "203.0.113.1", answeredAddress(t, resp))
 	}
@@ -215,7 +232,7 @@ func TestPrefetchDoesNotStartTwiceWhileOneRefreshIsInFlight(t *testing.T) {
 	close(release)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		resp, err := resolver.Resolve(ctx, name)
+		resp, err := resolver.Resolve(ctx, name, "")
 		require.NoError(t, err)
 		if answeredAddress(t, resp) == "203.0.113.2" {
 			break
@@ -226,7 +243,7 @@ func TestPrefetchDoesNotStartTwiceWhileOneRefreshIsInFlight(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	fake.Advance(210 * time.Second)
-	late, err := resolver.Resolve(ctx, name)
+	late, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.2", answeredAddress(t, late))
 	require.Equal(t, 2, stub.saw())
@@ -247,12 +264,12 @@ func TestPrefetchKeepsTheOldEntryWhenTheRefreshFails(t *testing.T) {
 	ctx := context.Background()
 	name := query("flaky.example.net.", mdns.TypeA)
 
-	_, err := resolver.Resolve(ctx, name)
+	_, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	stub.drainArrived()
 
 	fake.Advance(241 * time.Second)
-	near, err := resolver.Resolve(ctx, name)
+	near, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.1", answeredAddress(t, near))
 	stub.waitArrived(t)
@@ -260,7 +277,7 @@ func TestPrefetchKeepsTheOldEntryWhenTheRefreshFails(t *testing.T) {
 	// The failed refresh leaves the stored entry alone until its own expiry.
 	// The next ask inside the window rearms the refresh: one try per ask.
 	fake.Advance(58 * time.Second)
-	still, err := resolver.Resolve(ctx, name)
+	still, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.1", answeredAddress(t, still))
 	stub.waitArrived(t)
@@ -269,7 +286,7 @@ func TestPrefetchKeepsTheOldEntryWhenTheRefreshFails(t *testing.T) {
 	// Past that expiry the query goes upstream again and meets the failure:
 	// the client's own ask, plus the two background refreshes.
 	fake.Advance(2 * time.Second)
-	_, err = resolver.Resolve(ctx, name)
+	_, err = resolver.Resolve(ctx, name, "")
 	require.Error(t, err)
 	require.Equal(t, 4, stub.saw())
 
@@ -277,6 +294,35 @@ func TestPrefetchKeepsTheOldEntryWhenTheRefreshFails(t *testing.T) {
 	require.Equal(t, uint64(2), stats.Misses)
 	require.Equal(t, uint64(2), stats.Hits)
 	require.Equal(t, uint64(2), stats.Prefetches)
+}
+
+func TestPrefetchRefreshesWithTheRouteTheEntryWasFetchedWith(t *testing.T) {
+	stub := newPrefetchStub()
+	fake := newClock()
+	resolver := newPrefetchResolver(t, stub, func(cfg *cache.Config) { cfg.Now = fake.Now })
+	ctx := context.Background()
+	name := query("routed.example.net.", mdns.TypeA)
+
+	_, err := resolver.Resolve(ctx, name, "internal")
+	require.NoError(t, err)
+	require.Equal(t, 1, stub.saw())
+	require.Equal(t, "internal", stub.routeOf(1))
+	stub.drainArrived()
+
+	fake.Advance(241 * time.Second)
+	_, err = resolver.Resolve(ctx, name, "internal")
+	require.NoError(t, err)
+	stub.waitArrived(t)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for stub.saw() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("the prefetch never landed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.Equal(t, "internal", stub.routeOf(2),
+		"the refresh re-resolves with the route the entry was fetched with")
 }
 
 func TestPrefetchDisabledKeepsTheUpstreamQuiet(t *testing.T) {
@@ -289,12 +335,12 @@ func TestPrefetchDisabledKeepsTheUpstreamQuiet(t *testing.T) {
 	ctx := context.Background()
 	const name = "quiet.example.net."
 
-	_, err := resolver.Resolve(ctx, query(name, mdns.TypeA))
+	_, err := resolver.Resolve(ctx, query(name, mdns.TypeA), "")
 	require.NoError(t, err)
 	stub.drainArrived()
 
 	fake.Advance(241 * time.Second)
-	_, err = resolver.Resolve(ctx, query(name, mdns.TypeA))
+	_, err = resolver.Resolve(ctx, query(name, mdns.TypeA), "")
 	require.NoError(t, err)
 	stub.waitArrivedNothing(t)
 	require.Equal(t, 1, stub.saw())

@@ -6,6 +6,7 @@ package metrics
 import (
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -22,6 +23,16 @@ type CacheCounters struct {
 	Prefetches uint64
 }
 
+// UpstreamStat is the snapshot the upstream pool feeds in, one per configured
+// resolver. Metrics declares the shape instead of importing the pool, so the
+// dependency points one way.
+type UpstreamStat struct {
+	Name     string
+	EWMA     time.Duration
+	Failures int
+	Down     bool
+}
+
 // Metrics is the counter set. Watchers must be wired before the HTTP server
 // starts serving, which the serve command does while it builds the wiring.
 type Metrics struct {
@@ -34,6 +45,8 @@ type Metrics struct {
 
 	drops func() uint64
 	cache func() CacheCounters
+
+	upstreams func() []UpstreamStat
 }
 
 // New builds the counter set and its registry. The registry is private, so
@@ -75,6 +88,24 @@ func New() *Metrics {
 	cache("evictions", "Cache entries evicted at the size bound.", func(c CacheCounters) uint64 { return c.Evictions })
 	cache("prefetches", "Background cache refreshes started.", func(c CacheCounters) uint64 { return c.Prefetches })
 
+	latencyDesc := prometheus.NewDesc("aegis_upstream_latency_seconds",
+		"Smoothed query latency per upstream resolver.", []string{"upstream"}, nil)
+	failuresDesc := prometheus.NewDesc("aegis_upstream_failures",
+		"Consecutive failed exchanges per upstream resolver.", []string{"upstream"}, nil)
+	downDesc := prometheus.NewDesc("aegis_upstream_down",
+		"Whether the resolver is in its failure backoff, 1 or 0.", []string{"upstream"}, nil)
+	m.registry.MustRegister(prometheus.CollectorFunc(func(ch chan<- prometheus.Metric) {
+		for _, stat := range m.readUpstreams() {
+			ch <- prometheus.MustNewConstMetric(latencyDesc, prometheus.GaugeValue, stat.EWMA.Seconds(), stat.Name)
+			ch <- prometheus.MustNewConstMetric(failuresDesc, prometheus.GaugeValue, float64(stat.Failures), stat.Name)
+			down := 0.0
+			if stat.Down {
+				down = 1
+			}
+			ch <- prometheus.MustNewConstMetric(downDesc, prometheus.GaugeValue, down, stat.Name)
+		}
+	}))
+
 	return m
 }
 
@@ -101,6 +132,9 @@ func (m *Metrics) WatchDrops(f func() uint64) { m.drops = f }
 // WatchCache names where the cache counters live.
 func (m *Metrics) WatchCache(f func() CacheCounters) { m.cache = f }
 
+// WatchUpstreams names where the upstream health snapshot lives.
+func (m *Metrics) WatchUpstreams(f func() []UpstreamStat) { m.upstreams = f }
+
 // Handler serves the exposition format.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
@@ -118,4 +152,11 @@ func (m *Metrics) readCache() CacheCounters {
 		return CacheCounters{}
 	}
 	return m.cache()
+}
+
+func (m *Metrics) readUpstreams() []UpstreamStat {
+	if m.upstreams == nil {
+		return nil
+	}
+	return m.upstreams()
 }

@@ -165,6 +165,116 @@ func whoAnswered(t *testing.T, resp *mdns.Msg) string {
 	return netip.AddrFrom4([4]byte(a.A)).String()
 }
 
+func TestResolveUpstreamAsksOnlyTheNamedResolver(t *testing.T) {
+	a := startStub(t, answerWith("203.0.113.10"))
+	b := startStub(t, answerWith("203.0.113.11"))
+	pool := newPool(t, nil, a.address, b.address)
+
+	req := new(mdns.Msg).SetQuestion("internal.example.", mdns.TypeA)
+	resp, err := pool.ResolveUpstream(context.Background(), req, b.address)
+
+	require.NoError(t, err)
+	require.Equal(t, "203.0.113.11", whoAnswered(t, resp))
+	require.EqualValues(t, 0, a.attempts.Load(), "a routed query never touches another resolver")
+	require.EqualValues(t, 1, b.attempts.Load())
+}
+
+func TestARoutedQueryFailsWithItsOwnUpstreamInsteadOfFailingOver(t *testing.T) {
+	a := startStub(t, answerWith("203.0.113.10"))
+	dead := startStub(t, answerWith("203.0.113.11"))
+	pool := newPool(t, nil, a.address, dead.address)
+	dead.stop()
+
+	req := new(mdns.Msg).SetQuestion("internal.example.", mdns.TypeA)
+	_, err := pool.ResolveUpstream(context.Background(), req, dead.address)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), dead.address)
+	require.EqualValues(t, 0, a.attempts.Load(),
+		"a split-horizon name must not leak to the next resolver")
+}
+
+func TestResolveUpstreamNamesAnUnknownResolver(t *testing.T) {
+	a := startStub(t, answerWith("203.0.113.10"))
+	pool := newPool(t, nil, a.address)
+
+	_, err := pool.ResolveUpstream(context.Background(), new(mdns.Msg).SetQuestion("internal.example.", mdns.TypeA), "ghost")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ghost")
+}
+
+func TestABackupResolverStaysIdleWhileAPrimaryAnswers(t *testing.T) {
+	primary := startStub(t, answerWith("203.0.113.10"))
+	backup := startStub(t, answerWith("203.0.113.11"))
+	pool := newPool(t, func(cfg *upstream.Config) { cfg.Specs[1].Backup = true }, primary.address, backup.address)
+
+	for range 2 {
+		require.Equal(t, "203.0.113.10", whoAnswered(t, resolve(t, pool)))
+	}
+
+	require.EqualValues(t, 2, primary.attempts.Load())
+	require.EqualValues(t, 0, backup.attempts.Load(),
+		"the backup never shares the rotation while a primary is eligible")
+}
+
+func TestABackupResolverTakesOverOnlyWhileEveryPrimaryIsDown(t *testing.T) {
+	tick := &clock{}
+	primary := startStub(t, answerWith("203.0.113.10"))
+	backup := startStub(t, answerWith("203.0.113.11"))
+	pool := newPool(t, func(cfg *upstream.Config) {
+		cfg.Attempt = 50 * time.Millisecond
+		cfg.Now = tick.Now
+		cfg.Specs[1].Backup = true
+	}, primary.address, backup.address)
+	require.Equal(t, "203.0.113.10", whoAnswered(t, resolve(t, pool)))
+
+	primary.stop()
+	require.Error(t, tryResolve(t, pool))
+	require.Error(t, tryResolve(t, pool), "a second failure marks the primary down")
+	require.Equal(t, "203.0.113.11", whoAnswered(t, resolve(t, pool)),
+		"the backup answers once no primary is eligible")
+	backupSeen := backup.attempts.Load()
+
+	primary.revive()
+	tick.Advance(11 * time.Second)
+	require.Equal(t, "203.0.113.10", whoAnswered(t, resolve(t, pool)),
+		"an eligible primary comes back and the backup sits out again")
+	require.EqualValues(t, backupSeen, backup.attempts.Load())
+}
+
+func TestPoolStatsSnapshotsEveryResolverInConfiguredOrder(t *testing.T) {
+	tick := &clock{}
+	silent := startStub(t, drop())
+	live := startStub(t, answerWith("203.0.113.11"))
+	pool := newPool(t, func(cfg *upstream.Config) {
+		cfg.Attempt = 50 * time.Millisecond
+		cfg.Now = tick.Now
+	}, silent.address, live.address)
+
+	stats := pool.Stats()
+	require.Len(t, stats, 2)
+	require.Equal(t, silent.address, stats[0].Name)
+	require.Equal(t, "udp://"+silent.address, stats[0].URL)
+	require.Zero(t, stats[0].EWMA, "an unqueried resolver has no sample")
+	require.Equal(t, 0, stats[0].Failures)
+	require.False(t, stats[0].Down)
+	require.Equal(t, live.address, stats[1].Name)
+
+	resolve(t, pool)
+	resolve(t, pool)
+
+	stats = pool.Stats()
+	require.Positive(t, stats[1].EWMA, "a successful exchange measures latency")
+	require.Equal(t, 0, stats[1].Failures)
+	require.False(t, stats[1].Down)
+	require.Equal(t, 2, stats[0].Failures)
+	require.True(t, stats[0].Down, "the failure threshold marks the resolver down")
+
+	tick.Advance(11 * time.Second)
+	require.False(t, pool.Stats()[0].Down, "the backoff expiry puts the resolver back in play")
+}
+
 func TestParseReadsEveryScheme(t *testing.T) {
 	cases := []struct {
 		name   string
