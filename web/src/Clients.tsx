@@ -21,6 +21,7 @@ export default function Clients(props: Props) {
   const [profile, setProfile] = createSignal("");
   const [notes, setNotes] = createSignal("");
   const [addresses, setAddresses] = createSignal("");
+  const [macs, setMACs] = createSignal("");
   const [prefixes, setPrefixes] = createSignal("");
   const [editing, setEditing] = createSignal<string>();
   const [error, setError] = createSignal<string>();
@@ -31,6 +32,7 @@ export default function Clients(props: Props) {
     setProfile("");
     setNotes("");
     setAddresses("");
+    setMACs("");
     setPrefixes("");
     setEditing(undefined);
   }
@@ -41,6 +43,7 @@ export default function Clients(props: Props) {
     setProfile(client.profile);
     setNotes(client.notes);
     setAddresses(client.addresses.join("\n"));
+    setMACs(client.macs.join("\n"));
     setPrefixes(client.prefixes.join("\n"));
     setError(undefined);
   }
@@ -58,6 +61,7 @@ export default function Clients(props: Props) {
         profile: profile(),
         notes: notes(),
         addresses: splitSelectors(addresses()),
+        macs: splitSelectors(macs()),
         prefixes: splitSelectors(prefixes()),
       });
       reset();
@@ -145,6 +149,15 @@ export default function Clients(props: Props) {
             value={addresses()}
             placeholder="one per line, for example 10.9.9.2"
             onInput={(event) => setAddresses(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Hardware addresses
+          <textarea
+            data-testid="client-macs"
+            value={macs()}
+            placeholder="one per line, for example aa:bb:cc:dd:ee:01"
+            onInput={(event) => setMACs(event.currentTarget.value)}
           />
         </label>
         <label>

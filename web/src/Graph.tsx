@@ -13,7 +13,7 @@ type Props = {
   defaultProfile: string;
   upstreams: string[];
   log: QueryLog;
-  onSaveClient: (name: string, input: { profile: string; notes: string; addresses: string[]; prefixes: string[] }) => Promise<void>;
+  onSaveClient: (name: string, input: { profile: string; notes: string; addresses: string[]; macs: string[]; prefixes: string[] }) => Promise<void>;
   onSetDefault: (name: string) => Promise<void>;
 };
 
@@ -617,6 +617,7 @@ export default function Graph(props: Props) {
                   profile,
                   notes: client().notes,
                   addresses: client().addresses,
+                  macs: client().macs,
                   prefixes: client().prefixes,
                 });
                 setSelected(undefined);

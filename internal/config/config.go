@@ -29,6 +29,13 @@ type Config struct {
 	RateLimit     float64  `mapstructure:"rate-limit"`
 	RateBurst     int      `mapstructure:"rate-burst"`
 	LogLevel      string   `mapstructure:"log-level"`
+	DHCPAddress   string   `mapstructure:"dhcp-address"`
+	DHCPRange     string   `mapstructure:"dhcp-range"`
+	DHCPNetmask   string   `mapstructure:"dhcp-netmask"`
+	DHCPServerIP  string   `mapstructure:"dhcp-server-ip"`
+	DHCPRouter    string   `mapstructure:"dhcp-router"`
+	DHCPDNS       []string `mapstructure:"dhcp-dns"`
+	DHCPLeaseTime string   `mapstructure:"dhcp-lease-time"`
 	DoTAddress    string   `mapstructure:"dot-address"`
 	DoHAddress    string   `mapstructure:"doh-address"`
 	TLSCert       string   `mapstructure:"tls-cert"`

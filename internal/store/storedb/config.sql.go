@@ -36,6 +36,24 @@ func (q *Queries) DeleteClientAddressesForClient(ctx context.Context, client str
 	return err
 }
 
+const deleteClientMAC = `-- name: DeleteClientMAC :exec
+DELETE FROM client_macs WHERE mac = ?
+`
+
+func (q *Queries) DeleteClientMAC(ctx context.Context, mac string) error {
+	_, err := q.db.ExecContext(ctx, deleteClientMAC, mac)
+	return err
+}
+
+const deleteClientMACsForClient = `-- name: DeleteClientMACsForClient :exec
+DELETE FROM client_macs WHERE client = ?
+`
+
+func (q *Queries) DeleteClientMACsForClient(ctx context.Context, client string) error {
+	_, err := q.db.ExecContext(ctx, deleteClientMACsForClient, client)
+	return err
+}
+
 const deleteClientPrefix = `-- name: DeleteClientPrefix :exec
 DELETE FROM client_prefixes WHERE prefix = ?
 `
@@ -88,6 +106,33 @@ func (q *Queries) ListClientAddresses(ctx context.Context) ([]ClientAddress, err
 	for rows.Next() {
 		var i ClientAddress
 		if err := rows.Scan(&i.Address, &i.Client); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listClientMACs = `-- name: ListClientMACs :many
+SELECT mac, client FROM client_macs ORDER BY mac
+`
+
+func (q *Queries) ListClientMACs(ctx context.Context) ([]ClientMac, error) {
+	rows, err := q.db.QueryContext(ctx, listClientMACs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClientMac
+	for rows.Next() {
+		var i ClientMac
+		if err := rows.Scan(&i.Mac, &i.Client); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -230,6 +275,21 @@ type UpsertClientAddressParams struct {
 
 func (q *Queries) UpsertClientAddress(ctx context.Context, arg UpsertClientAddressParams) error {
 	_, err := q.db.ExecContext(ctx, upsertClientAddress, arg.Address, arg.Client)
+	return err
+}
+
+const upsertClientMAC = `-- name: UpsertClientMAC :exec
+INSERT INTO client_macs (mac, client) VALUES (?, ?)
+ON CONFLICT (mac) DO UPDATE SET client = excluded.client
+`
+
+type UpsertClientMACParams struct {
+	Mac    string
+	Client string
+}
+
+func (q *Queries) UpsertClientMAC(ctx context.Context, arg UpsertClientMACParams) error {
+	_, err := q.db.ExecContext(ctx, upsertClientMAC, arg.Mac, arg.Client)
 	return err
 }
 

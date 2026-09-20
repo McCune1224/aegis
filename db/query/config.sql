@@ -53,3 +53,16 @@ DELETE FROM client_prefixes WHERE prefix = ?;
 
 -- name: DeleteClientPrefixesForClient :exec
 DELETE FROM client_prefixes WHERE client = ?;
+
+-- name: ListClientMACs :many
+SELECT mac, client FROM client_macs ORDER BY mac;
+
+-- name: UpsertClientMAC :exec
+INSERT INTO client_macs (mac, client) VALUES (?, ?)
+ON CONFLICT (mac) DO UPDATE SET client = excluded.client;
+
+-- name: DeleteClientMAC :exec
+DELETE FROM client_macs WHERE mac = ?;
+
+-- name: DeleteClientMACsForClient :exec
+DELETE FROM client_macs WHERE client = ?;

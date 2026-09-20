@@ -20,7 +20,9 @@ import (
 	"aegis/internal/api"
 	"aegis/internal/blocklist"
 	"aegis/internal/cache"
+	"aegis/internal/client"
 	"aegis/internal/config"
+	"aegis/internal/dhcp"
 	"aegis/internal/dns"
 	"aegis/internal/filter"
 	"aegis/internal/metrics"
@@ -60,6 +62,13 @@ func newServeCmd() *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.String("dns-address", "127.0.0.1:53", "address to listen on, as host:port")
+	flags.String("dhcp-address", "", "address to serve DHCPv4 on, as host:port, usually 0.0.0.0:67 because clients broadcast, enables the DHCP server")
+	flags.String("dhcp-range", "", "addresses the DHCP server hands out, as first-last, required with dhcp-address")
+	flags.String("dhcp-netmask", "255.255.255.0", "netmask of the network the DHCP pool belongs to")
+	flags.String("dhcp-server-ip", "", "address clients renew with, defaults to the first address of the pool network")
+	flags.String("dhcp-router", "", "address clients are told to route through, defaults to dhcp-server-ip")
+	flags.StringArray("dhcp-dns", nil, "resolver clients are told to use, repeatable, defaults to the DNS listener address")
+	flags.String("dhcp-lease-time", "12h", "how long a DHCP lease lasts")
 	flags.String("dot-address", "", "address to serve DNS over TLS on, as host:port, requires tls-cert and tls-key")
 	flags.String("doh-address", "", "address to serve DNS over HTTPS on, as host:port, requires tls-cert and tls-key")
 	flags.String("tls-cert", "", "path to the PEM certificate chain the encrypted listeners serve")
@@ -155,8 +164,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := database.MarkSeeded(ctx); err != nil {
 		return err
 	}
+	dhcpConfig, err := buildDHCPConfig(cfg)
+	if err != nil {
+		_ = database.Close()
+		return err
+	}
+
 	counts := metrics.New()
-	engine := runtime.New(database, lists, logger, runtime.WithMetrics(counts))
+	leases := client.NewDynamic()
+	engine := runtime.New(database, lists, logger, runtime.WithMetrics(counts), runtime.WithLeases(leases))
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(sourceTimeout), engine, logger)
 	if err := sync.RefreshSources(ctx); err != nil {
 		return err
@@ -244,6 +260,24 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	var dhcpServer *dhcp.Server
+	dhcpGroup := slog.Group("dhcp", "off", true)
+	if dhcpConfig.Pool.First.IsValid() {
+		dhcpConfig.Identity = engine.Select
+		dhcpServer = dhcp.New(dhcpConfig, database, leases, logger)
+		if err := dhcpServer.Load(ctx); err != nil {
+			_ = apiServer.Shutdown(context.Background())
+			_ = server.Shutdown(context.Background())
+			return err
+		}
+		dhcpGroup = slog.Group("dhcp",
+			"listen", dhcpConfig.Address,
+			"pool", dhcpConfig.Pool,
+			"gateway", dhcpConfig.Router,
+			"server", dhcpConfig.ServerIP,
+		)
+	}
+
 	logger.Info("aegis is serving",
 		"udp", server.UDPAddr().String(),
 		"tcp", server.TCPAddr().String(),
@@ -255,6 +289,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			"dot", listenerAddrOrOff(server.DoTAddr()),
 			"doh", listenerAddrOrOff(server.DoHAddr()),
 		),
+		dhcpGroup,
 	)
 
 	stop, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -269,6 +304,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	go runSourceRefreshLoop(refreshCtx, sync, refreshInterval, logger)
 	go runCatalogRefreshLoop(refreshCtx, catalog, logger)
 
+	dhcpDone := make(chan error, 1)
+	if dhcpServer != nil {
+		go func() { dhcpDone <- dhcpServer.Serve(stop) }()
+	}
+
 	<-stop.Done()
 
 	logger.Info("aegis is shutting down")
@@ -277,7 +317,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
-	return errors.Join(apiServer.Shutdown(shutdown), server.Shutdown(shutdown))
+	var dhcpErr error
+	if dhcpServer != nil {
+		dhcpErr = <-dhcpDone
+	}
+	return errors.Join(apiServer.Shutdown(shutdown), server.Shutdown(shutdown), dhcpErr)
 }
 
 // validateUpstreams parses every --upstream flag before the database is
@@ -504,7 +548,7 @@ func buildProfiles(cfg config.Config) ([]filter.ProfileSpec, error) {
 	if err != nil {
 		return nil, err
 	}
-	custom, err := parseOptionalAddress(cfg.CustomAddress)
+	custom, err := parseOptionalAddress(cfg.CustomAddress, "custom-address")
 	if err != nil {
 		return nil, err
 	}
@@ -571,13 +615,13 @@ func buildClients(entries []string) ([]store.Client, error) {
 	return records, nil
 }
 
-func parseOptionalAddress(raw string) (netip.Addr, error) {
-	if raw == "" {
+func parseOptionalAddress(raw, field string) (netip.Addr, error) {
+	if strings.TrimSpace(raw) == "" {
 		return netip.Addr{}, nil
 	}
-	address, err := netip.ParseAddr(raw)
+	address, err := netip.ParseAddr(strings.TrimSpace(raw))
 	if err != nil {
-		return netip.Addr{}, fmt.Errorf("custom-address: %w", err)
+		return netip.Addr{}, fmt.Errorf("%s: %w", field, err)
 	}
 	return address, nil
 }

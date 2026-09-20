@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/netip"
 
 	"github.com/pressly/goose/v3"
@@ -24,6 +25,7 @@ type Client struct {
 	Profile   filter.ProfileID
 	Notes     string
 	Addresses []netip.Addr
+	MACs      []net.HardwareAddr
 	Prefixes  []netip.Prefix
 }
 
@@ -67,7 +69,7 @@ func (c Config) ClientSpecs() []filter.ClientSpec {
 func (c Config) Selectors() []client.Spec {
 	specs := make([]client.Spec, 0, len(c.Clients))
 	for _, record := range c.Clients {
-		specs = append(specs, client.Spec{Key: record.Key, Addresses: record.Addresses, Prefixes: record.Prefixes})
+		specs = append(specs, client.Spec{Key: record.Key, Addresses: record.Addresses, MACs: record.MACs, Prefixes: record.Prefixes})
 	}
 	return specs
 }
@@ -289,6 +291,10 @@ func (s *Store) loadClients(ctx context.Context) ([]Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	hardware, err := s.loadMACs(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	clients := make([]Client, 0, len(rows))
 	for _, row := range rows {
@@ -298,10 +304,29 @@ func (s *Store) loadClients(ctx context.Context) ([]Client, error) {
 			Profile:   filter.ProfileID(row.Profile),
 			Notes:     row.Notes,
 			Addresses: addresses[key],
+			MACs:      hardware[key],
 			Prefixes:  prefixes[key],
 		})
 	}
 	return clients, nil
+}
+
+func (s *Store) loadMACs(ctx context.Context) (map[filter.ClientKey][]net.HardwareAddr, error) {
+	rows, err := s.queries.ListClientMACs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: client hardware addresses: %w", err)
+	}
+
+	byClient := make(map[filter.ClientKey][]net.HardwareAddr, len(rows))
+	for _, row := range rows {
+		hardware, err := net.ParseMAC(row.Mac)
+		if err != nil {
+			return nil, fmt.Errorf("store: client %q: %w", row.Client, err)
+		}
+		key := filter.ClientKey(row.Client)
+		byClient[key] = append(byClient[key], hardware)
+	}
+	return byClient, nil
 }
 
 func (s *Store) loadProfiles(ctx context.Context) ([]filter.ProfileSpec, error) {
@@ -447,6 +472,22 @@ func (s *Store) SaveClient(ctx context.Context, record Client) error {
 		for _, prefix := range record.Prefixes {
 			if err := q.UpsertClientPrefix(ctx, storedb.UpsertClientPrefixParams{
 				Prefix: prefix.Masked().String(),
+				Client: name,
+			}); err != nil {
+				return fmt.Errorf("store: save client %q: %w", record.Key, err)
+			}
+		}
+
+		if err := q.DeleteClientMACsForClient(ctx, name); err != nil {
+			return fmt.Errorf("store: save client %q: %w", record.Key, err)
+		}
+		for _, hardware := range record.MACs {
+			normalized := client.NormalizeMAC(hardware)
+			if normalized == "" {
+				return fmt.Errorf("store: save client %q: %s is not a hardware address", record.Key, hardware)
+			}
+			if err := q.UpsertClientMAC(ctx, storedb.UpsertClientMACParams{
+				Mac:    normalized,
 				Client: name,
 			}); err != nil {
 				return fmt.Errorf("store: save client %q: %w", record.Key, err)

@@ -53,6 +53,10 @@ type Runtime struct {
 	counts   *metrics.Metrics
 	switcher *upstream.Switch
 
+	// leases is the address-to-device table DHCP fills in. It is set once and
+	// shared by every generation, because a lease outlives a reload.
+	leases *client.Dynamic
+
 	mu sync.Mutex
 	// lists are the blocklist files given at boot. publish reads them on every
 	// reload, so the file contents are inputs rather than frozen rules.
@@ -75,6 +79,12 @@ func WithClock(now func() time.Time) Option {
 // WithMetrics names where reload counts land. A nil Metrics counts nothing.
 func WithMetrics(m *metrics.Metrics) Option {
 	return func(r *Runtime) { r.counts = m }
+}
+
+// WithLeases names the table DHCP fills in, so an address a lease handed out
+// resolves to the device that holds it.
+func WithLeases(leases *client.Dynamic) Option {
+	return func(r *Runtime) { r.leases = leases }
 }
 
 // New returns a Runtime that allows every query until Reload runs.
@@ -130,6 +140,7 @@ func (r *Runtime) publish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	identity.UseLeases(r.leases)
 	// Custom rules come first so they win the declaration-order tie-break
 	// against a list rule of the same tier and specificity.
 	listRules, err := r.readLists()
@@ -226,6 +237,16 @@ func (r *Runtime) ClientKey(address netip.Addr) filter.ClientKey {
 		return ""
 	}
 	return current.identity.Key(address)
+}
+
+// Select resolves the identity a request carries, address and hardware address
+// together, so a DHCP request asks the same table a DNS query does.
+func (r *Runtime) Select(selector client.Selector) filter.ClientKey {
+	current := r.current.Load()
+	if current == nil {
+		return ""
+	}
+	return current.identity.Select(selector)
 }
 
 // Lookup maps one name through the rewrite tables, from the same generation

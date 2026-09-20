@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 
+	"aegis/internal/client"
 	"aegis/internal/filter"
 	"aegis/internal/store"
 )
@@ -17,6 +19,7 @@ type clientRequest struct {
 	Profile   string   `json:"profile"`
 	Notes     string   `json:"notes"`
 	Addresses []string `json:"addresses"`
+	MACs      []string `json:"macs"`
 	Prefixes  []string `json:"prefixes"`
 }
 
@@ -26,6 +29,7 @@ type clientResponse struct {
 	Profile   string   `json:"profile"`
 	Notes     string   `json:"notes"`
 	Addresses []string `json:"addresses"`
+	MACs      []string `json:"macs"`
 	Prefixes  []string `json:"prefixes"`
 }
 
@@ -37,6 +41,13 @@ func (r clientRequest) record(key filter.ClientKey) (store.Client, error) {
 			return store.Client{}, fmt.Errorf("addresses[%d]: %w", i, err)
 		}
 		record.Addresses = append(record.Addresses, address)
+	}
+	for i, raw := range r.MACs {
+		hardware, err := net.ParseMAC(raw)
+		if err != nil {
+			return store.Client{}, fmt.Errorf("macs[%d]: %w", i, err)
+		}
+		record.MACs = append(record.MACs, hardware)
 	}
 	for i, raw := range r.Prefixes {
 		prefix, err := netip.ParsePrefix(raw)
@@ -54,10 +65,14 @@ func clientResponseFrom(record store.Client) clientResponse {
 		Profile:   string(record.Profile),
 		Notes:     record.Notes,
 		Addresses: make([]string, 0, len(record.Addresses)),
+		MACs:      make([]string, 0, len(record.MACs)),
 		Prefixes:  make([]string, 0, len(record.Prefixes)),
 	}
 	for _, address := range record.Addresses {
 		response.Addresses = append(response.Addresses, address.String())
+	}
+	for _, hardware := range record.MACs {
+		response.MACs = append(response.MACs, client.NormalizeMAC(hardware))
 	}
 	for _, prefix := range record.Prefixes {
 		response.Prefixes = append(response.Prefixes, prefix.String())

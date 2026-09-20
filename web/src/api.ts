@@ -10,6 +10,7 @@ export type Client = {
   profile: string;
   notes: string;
   addresses: string[];
+  macs: string[];
   prefixes: string[];
 };
 
@@ -25,6 +26,7 @@ export type ClientInput = {
   profile: string;
   notes: string;
   addresses: string[];
+  macs: string[];
   prefixes: string[];
 };
 
@@ -223,6 +225,34 @@ export function setDefaultProfile(profile: string): Promise<{ profile: string }>
     method: "PUT",
     body: JSON.stringify({ profile }),
   });
+}
+
+export type Lease = {
+  address: string;
+  mac: string;
+  client?: string;
+  hostname?: string;
+  expires: number;
+};
+
+export type Discovery = {
+  mac: string;
+  address: string;
+  hostname?: string;
+  first: number;
+  last: number;
+};
+
+export function listLeases(): Promise<{ leases: Lease[] }> {
+  return request<{ leases: Lease[] }>("/api/v1/leases");
+}
+
+export function listDiscoveries(): Promise<{ discoveries: Discovery[] }> {
+  return request<{ discoveries: Discovery[] }>("/api/v1/discoveries");
+}
+
+export function dismissDiscovery(mac: string): Promise<void> {
+  return request<void>(`/api/v1/discoveries/${encodeURIComponent(mac)}`, { method: "DELETE" });
 }
 
 export function listClients(): Promise<Client[]> {

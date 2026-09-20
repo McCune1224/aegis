@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"time"
 
 	"aegis/internal/blocklist"
+	"aegis/internal/client"
 	"aegis/internal/filter"
 	"aegis/internal/rewrite"
 )
@@ -46,6 +48,7 @@ type clientDoc struct {
 	Profile   string   `json:"profile"`
 	Notes     string   `json:"notes"`
 	Addresses []string `json:"addresses"`
+	MACs      []string `json:"macs"`
 	Prefixes  []string `json:"prefixes"`
 }
 
@@ -167,6 +170,7 @@ func (s *Store) ReadDocument(ctx context.Context) (Document, error) {
 			Profile:   string(record.Profile),
 			Notes:     record.Notes,
 			Addresses: addressesText(record.Addresses),
+			MACs:      macsText(record.MACs),
 			Prefixes:  prefixesText(record.Prefixes),
 		})
 	}
@@ -405,6 +409,13 @@ func (c clientDoc) record() (Client, error) {
 		}
 		record.Addresses = append(record.Addresses, address)
 	}
+	for i, raw := range c.MACs {
+		hardware, err := net.ParseMAC(raw)
+		if err != nil {
+			return Client{}, fmt.Errorf("store: client %q: macs[%d]: %w", c.Key, i, err)
+		}
+		record.MACs = append(record.MACs, hardware)
+	}
 	for i, raw := range c.Prefixes {
 		prefix, err := netip.ParsePrefix(raw)
 		if err != nil {
@@ -494,6 +505,14 @@ func addressesText(addresses []netip.Addr) []string {
 	text := make([]string, 0, len(addresses))
 	for _, address := range addresses {
 		text = append(text, address.String())
+	}
+	return text
+}
+
+func macsText(macs []net.HardwareAddr) []string {
+	text := make([]string, 0, len(macs))
+	for _, hardware := range macs {
+		text = append(text, client.NormalizeMAC(hardware))
 	}
 	return text
 }

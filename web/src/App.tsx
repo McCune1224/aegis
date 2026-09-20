@@ -22,6 +22,8 @@ import {
   listRules,
   listSchedules,
   listSafesearch,
+  listDiscoveries,
+  dismissDiscovery as removeDiscovery,
   listServices,
   listSources,
   listUpstreams,
@@ -44,6 +46,7 @@ import {
   type Profile,
   type ProfileInput,
   type BlockedService,
+  type Discovery,
   type SafesearchEngine,
   type Rewrite,
   type Route,
@@ -113,6 +116,7 @@ export default function App() {
   const [services, setServices] = createSignal<BlockedService[]>([]);
   const [serviceGroups, setServiceGroups] = createSignal<string[]>([]);
   const [safesearch, setSafesearch] = createSignal<SafesearchEngine[]>([]);
+  const [discoveries, setDiscoveries] = createSignal<Discovery[]>([]);
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [schedules, setSchedules] = createSignal<Schedule[]>([]);
   const [rewrites, setRewrites] = createSignal<Rewrite[]>([]);
@@ -130,7 +134,7 @@ export default function App() {
   const log = createQueryLog({ live: live() });
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices, nextSafesearch] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices, nextSafesearch, nextDiscoveries] =
       await Promise.all([
         listProfiles(),
         listClients(),
@@ -146,6 +150,7 @@ export default function App() {
         getStatus(),
         listServices(),
         listSafesearch(),
+        listDiscoveries(),
       ]);
     setProfiles(nextProfiles);
     setClients(nextClients);
@@ -163,6 +168,7 @@ export default function App() {
     setServices(nextServices.services);
     setServiceGroups(nextServices.groups);
     setSafesearch(nextSafesearch.engines);
+    setDiscoveries(nextDiscoveries.discoveries);
   }
 
   createEffect(
@@ -283,6 +289,20 @@ export default function App() {
     await refresh();
   }
 
+  // claimDiscovery makes the device a client on the default profile, which is
+  // where an unnamed device lands anyway; the operator can move it afterwards.
+  async function claimDiscovery(discovery: Discovery, name: string) {
+    await saveClient(name, {
+      profile: defaultProfile(),
+      notes: `discovered at ${discovery.address}`,
+      addresses: [discovery.address],
+      macs: [discovery.mac],
+      prefixes: [],
+    });
+    await removeDiscovery(discovery.mac);
+    await refresh();
+  }
+
   async function saveAccess(input: AccessSettings) {
     await putAccess(input);
     await refresh();
@@ -330,6 +350,12 @@ export default function App() {
             <Show when={tab() === "dashboard"}>
               <Dashboard
                 entries={log.entries()}
+                discoveries={discoveries()}
+                onClaimDiscovery={claimDiscovery}
+                onDismissDiscovery={async (mac) => {
+                  await removeDiscovery(mac);
+                  await refresh();
+                }}
                 windowMinutes={windowMinutes()}
                 onSetWindow={setWindowMinutes}
                 onOpenLog={() => setTab("log")}
