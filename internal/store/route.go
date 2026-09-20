@@ -52,29 +52,32 @@ func (s *Store) SaveRoute(ctx context.Context, route Route) (Route, error) {
 	return stored, nil
 }
 
-// UpdateRoute replaces one route's domain, client, and upstream.
-func (s *Store) UpdateRoute(ctx context.Context, route Route) error {
+// UpdateRoute replaces one route's domain, client, and upstream, and reports
+// whether the store held it.
+func (s *Store) UpdateRoute(ctx context.Context, route Route) (bool, error) {
 	stored, err := normalizeRoute(route)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := s.queries.UpdateRoute(ctx, storedb.UpdateRouteParams{
+	updated, err := s.queries.UpdateRoute(ctx, storedb.UpdateRouteParams{
 		Domain:   stored.Domain,
 		Client:   stored.Client,
 		Upstream: stored.Upstream,
 		ID:       stored.ID,
-	}); err != nil {
-		return fmt.Errorf("store: update route %d: %w", stored.ID, err)
+	})
+	if err != nil {
+		return false, fmt.Errorf("store: update route %d: %w", stored.ID, err)
 	}
-	return nil
+	return updated > 0, nil
 }
 
-// DeleteRoute removes one route.
-func (s *Store) DeleteRoute(ctx context.Context, id int64) error {
-	if err := s.queries.DeleteRoute(ctx, id); err != nil {
-		return fmt.Errorf("store: delete route %d: %w", id, err)
+// DeleteRoute removes one route, and reports whether the store held it.
+func (s *Store) DeleteRoute(ctx context.Context, id int64) (bool, error) {
+	deleted, err := s.queries.DeleteRoute(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("store: delete route %d: %w", id, err)
 	}
-	return nil
+	return deleted > 0, nil
 }
 
 // normalizeRoute lowercases the domain through the same parser the DNS path

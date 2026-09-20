@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,29 +62,56 @@ func (s *Store) EnabledSources(ctx context.Context) ([]Source, error) {
 	return parseSources(uniform)
 }
 
+// SourceByName returns one configured source, and reports whether the store
+// holds it.
+func (s *Store) SourceByName(ctx context.Context, name string) (Source, bool, error) {
+	row, err := s.queries.SourceByName(ctx, name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Source{}, false, nil
+	}
+	if err != nil {
+		return Source{}, false, fmt.Errorf("store: source %q: %w", name, err)
+	}
+	// The single-row query returns the same columns as the list, so the row
+	// converts one to one.
+	source, err := parseSource(storedb.ListSourcesRow(row))
+	if err != nil {
+		return Source{}, false, err
+	}
+	return source, true, nil
+}
+
 func parseSources(rows []storedb.ListSourcesRow) ([]Source, error) {
 	sources := make([]Source, 0, len(rows))
 	for _, row := range rows {
-		format, err := blocklist.ParseFormat(row.Format)
+		source, err := parseSource(row)
 		if err != nil {
-			return nil, fmt.Errorf("store: source %q: %w", row.Name, err)
+			return nil, err
 		}
-		sources = append(sources, Source{
-			Name:           row.Name,
-			URL:            row.Url,
-			Format:         format,
-			Enabled:        row.Enabled != 0,
-			ETag:           row.Etag,
-			LastFetch:      unixSeconds(row.LastFetch),
-			LastError:      row.LastError,
-			RuleCount:      int(row.RuleCount),
-			Skipped:        int(row.Skipped),
-			Failures:       int(row.Failures),
-			RefreshSeconds: int(row.RefreshSeconds),
-			Body:           row.Body,
-		})
+		sources = append(sources, source)
 	}
 	return sources, nil
+}
+
+func parseSource(row storedb.ListSourcesRow) (Source, error) {
+	format, err := blocklist.ParseFormat(row.Format)
+	if err != nil {
+		return Source{}, fmt.Errorf("store: source %q: %w", row.Name, err)
+	}
+	return Source{
+		Name:           row.Name,
+		URL:            row.Url,
+		Format:         format,
+		Enabled:        row.Enabled != 0,
+		ETag:           row.Etag,
+		LastFetch:      unixSeconds(row.LastFetch),
+		LastError:      row.LastError,
+		RuleCount:      int(row.RuleCount),
+		Skipped:        int(row.Skipped),
+		Failures:       int(row.Failures),
+		RefreshSeconds: int(row.RefreshSeconds),
+		Body:           row.Body,
+	}, nil
 }
 
 func unixSeconds(seconds int64) time.Time {

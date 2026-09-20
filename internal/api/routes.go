@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -133,21 +132,17 @@ func (s *Server) putRoute(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	ctx := r.Context()
 
-	rows, err := s.store.Routes(ctx)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if !slices.ContainsFunc(rows, func(existing store.Route) bool { return existing.ID == id }) {
-		writeError(w, errNotFound)
-		return
-	}
 	if err := s.checkRoute(ctx, row); err != nil {
 		writeError(w, err)
 		return
 	}
-	if err := s.store.UpdateRoute(ctx, row); err != nil {
+	updated, err := s.store.UpdateRoute(ctx, row)
+	if err != nil {
 		writeError(w, err)
+		return
+	}
+	if !updated {
+		writeError(w, errNotFound)
 		return
 	}
 	if err := s.reloader.Reload(ctx); err != nil {
@@ -169,17 +164,13 @@ func (s *Server) deleteRoute(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	ctx := r.Context()
 
-	rows, err := s.store.Routes(ctx)
+	deleted, err := s.store.DeleteRoute(ctx, id)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	if !slices.ContainsFunc(rows, func(existing store.Route) bool { return existing.ID == id }) {
+	if !deleted {
 		writeError(w, errNotFound)
-		return
-	}
-	if err := s.store.DeleteRoute(ctx, id); err != nil {
-		writeError(w, err)
 		return
 	}
 	if err := s.reloader.Reload(ctx); err != nil {
@@ -189,30 +180,18 @@ func (s *Server) deleteRoute(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// checkRoute refuses a route whose upstream is not an enabled resolver or
-// whose client does not exist, the same rules a reload applies. The domain was
-// parsed at decode, so the row already holds the form the router matches.
+// checkRoute refuses a route the next reload would reject: an upstream that is
+// not an enabled resolver, a client that does not exist, or a domain no query can
+// carry. The rule itself lives in the store, so this cannot drift from what a
+// reload applies. The domain was parsed at decode, so the row already holds the
+// form the router matches.
 func (s *Server) checkRoute(ctx context.Context, row store.Route) error {
 	cfg, err := s.store.Load(ctx)
 	if err != nil {
 		return err
 	}
-	enabled := false
-	for _, upstream := range cfg.Upstreams {
-		if upstream.Name == row.Upstream && upstream.Enabled {
-			enabled = true
-		}
+	if err := cfg.ValidateRoute(row); err != nil {
+		return badRequest{err}
 	}
-	if !enabled {
-		return badRequest{fmt.Errorf("upstream %q is not an enabled resolver", row.Upstream)}
-	}
-	if row.Client == "" {
-		return nil
-	}
-	for _, client := range cfg.Clients {
-		if string(client.Key) == row.Client {
-			return nil
-		}
-	}
-	return badRequest{fmt.Errorf("client %q does not exist", row.Client)}
+	return nil
 }

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,9 +78,13 @@ func (s *Server) listSources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getSource(w http.ResponseWriter, r *http.Request) {
-	source, err := s.lookupSource(r.Context(), r.PathValue("name"))
+	source, found, err := s.store.SourceByName(r.Context(), r.PathValue("name"))
 	if err != nil {
 		writeError(w, err)
+		return
+	}
+	if !found {
+		writeError(w, errNotFound)
 		return
 	}
 	writeJSON(w, http.StatusOK, sourceResponseFrom(source))
@@ -106,12 +109,13 @@ func (s *Server) putSource(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	ctx := r.Context()
 
-	source, err := s.lookupSource(ctx, name)
-	if errors.Is(err, errNotFound) {
-		source = store.Source{Name: name, Enabled: true}
-	} else if err != nil {
+	source, found, err := s.store.SourceByName(ctx, name)
+	if err != nil {
 		writeError(w, err)
 		return
+	}
+	if !found {
+		source = store.Source{Name: name, Enabled: true}
 	}
 
 	if request.URL != nil {
@@ -164,9 +168,13 @@ func (s *Server) putSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stored, err := s.lookupSource(ctx, name)
+	stored, found, err := s.store.SourceByName(ctx, name)
 	if err != nil {
 		writeError(w, err)
+		return
+	}
+	if !found {
+		writeError(w, errNotFound)
 		return
 	}
 	writeJSON(w, http.StatusOK, sourceResponseFrom(stored))
@@ -179,8 +187,11 @@ func (s *Server) deleteSource(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	ctx := r.Context()
 
-	if _, err := s.lookupSource(ctx, name); err != nil {
+	if _, found, err := s.store.SourceByName(ctx, name); err != nil {
 		writeError(w, err)
+		return
+	} else if !found {
+		writeError(w, errNotFound)
 		return
 	}
 	if err := s.store.DeleteSource(ctx, name); err != nil {
@@ -206,19 +217,6 @@ func (s *Server) getCatalog(w http.ResponseWriter, _ *http.Request) {
 		response = append(response, catalogResponse{Name: entry.Name, URL: entry.URL, Format: entry.Format.String()})
 	}
 	writeJSON(w, http.StatusOK, response)
-}
-
-func (s *Server) lookupSource(ctx context.Context, name string) (store.Source, error) {
-	sources, err := s.store.Sources(ctx)
-	if err != nil {
-		return store.Source{}, err
-	}
-	for _, source := range sources {
-		if source.Name == name {
-			return source, nil
-		}
-	}
-	return store.Source{}, errNotFound
 }
 
 func validateSourceURL(raw string) error {

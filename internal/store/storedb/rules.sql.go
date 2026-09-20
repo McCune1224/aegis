@@ -9,13 +9,16 @@ import (
 	"context"
 )
 
-const deleteRule = `-- name: DeleteRule :exec
+const deleteRule = `-- name: DeleteRule :execrows
 DELETE FROM rules WHERE id = ?
 `
 
-func (q *Queries) DeleteRule(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, deleteRule, id)
-	return err
+func (q *Queries) DeleteRule(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteRule, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const insertRule = `-- name: InsertRule :one
@@ -84,6 +87,27 @@ func (q *Queries) ListRules(ctx context.Context) ([]Rule, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const ruleByID = `-- name: RuleByID :one
+SELECT id, domain, kind, action, notes, created, schedule, client
+FROM rules WHERE id = ?
+`
+
+func (q *Queries) RuleByID(ctx context.Context, id int64) (Rule, error) {
+	row := q.db.QueryRowContext(ctx, ruleByID, id)
+	var i Rule
+	err := row.Scan(
+		&i.ID,
+		&i.Domain,
+		&i.Kind,
+		&i.Action,
+		&i.Notes,
+		&i.Created,
+		&i.Schedule,
+		&i.Client,
+	)
+	return i, err
 }
 
 const updateRule = `-- name: UpdateRule :exec

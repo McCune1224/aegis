@@ -65,3 +65,14 @@ func (q *Queries) SaveSchedule(ctx context.Context, arg SaveScheduleParams) (str
 	err := row.Scan(&name)
 	return name, err
 }
+
+const scheduleExists = `-- name: ScheduleExists :one
+SELECT EXISTS(SELECT 1 FROM schedules WHERE name = ?)
+`
+
+func (q *Queries) ScheduleExists(ctx context.Context, name string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, scheduleExists, name)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}

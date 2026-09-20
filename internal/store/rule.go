@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"net/netip"
 	"time"
@@ -91,6 +93,22 @@ func (s *Store) Rules(ctx context.Context) ([]Rule, error) {
 	return s.loadRules(ctx)
 }
 
+// RuleByID returns one user-created rule, and reports whether the store holds it.
+func (s *Store) RuleByID(ctx context.Context, id int64) (Rule, bool, error) {
+	row, err := s.queries.RuleByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Rule{}, false, nil
+	}
+	if err != nil {
+		return Rule{}, false, fmt.Errorf("store: rule %d: %w", id, err)
+	}
+	rule, err := parseRule(row)
+	if err != nil {
+		return Rule{}, false, err
+	}
+	return rule, true, nil
+}
+
 func (s *Store) loadRules(ctx context.Context) ([]Rule, error) {
 	rows, err := s.queries.ListRules(ctx)
 	if err != nil {
@@ -166,10 +184,12 @@ func (s *Store) SaveRule(ctx context.Context, rule Rule) (int64, error) {
 	return rule.ID, nil
 }
 
-// DeleteRule removes one user-created rule.
-func (s *Store) DeleteRule(ctx context.Context, id int64) error {
-	if err := s.queries.DeleteRule(ctx, id); err != nil {
-		return fmt.Errorf("store: delete rule %d: %w", id, err)
+// DeleteRule removes one user-created rule, and reports whether the store held
+// it.
+func (s *Store) DeleteRule(ctx context.Context, id int64) (bool, error) {
+	deleted, err := s.queries.DeleteRule(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("store: delete rule %d: %w", id, err)
 	}
-	return nil
+	return deleted > 0, nil
 }

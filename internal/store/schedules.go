@@ -46,6 +46,15 @@ func (s *Store) Schedules(ctx context.Context) ([]filter.ScheduleSpec, error) {
 	return schedules, nil
 }
 
+// ScheduleExists reports whether the store holds one named schedule.
+func (s *Store) ScheduleExists(ctx context.Context, name string) (bool, error) {
+	found, err := s.queries.ScheduleExists(ctx, name)
+	if err != nil {
+		return false, fmt.Errorf("store: schedule %s: %w", name, err)
+	}
+	return found != 0, nil
+}
+
 // DeleteSchedule removes one named schedule. Rules that name it fail the next
 // reload, which is the loud outcome; the rules API refuses the deletion of a
 // schedule rules still name.

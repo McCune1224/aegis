@@ -118,9 +118,13 @@ func (s *Server) postRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stored, err := s.lookupRule(ctx, id)
+	stored, found, err := s.store.RuleByID(ctx, id)
 	if err != nil {
 		writeError(w, err)
+		return
+	}
+	if !found {
+		writeError(w, errNotFound)
 		return
 	}
 	writeJSON(w, http.StatusCreated, ruleResponseFrom(stored))
@@ -144,9 +148,13 @@ func (s *Server) putRule(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	ctx := r.Context()
 
-	rule, err := s.lookupRule(ctx, id)
+	rule, found, err := s.store.RuleByID(ctx, id)
 	if err != nil {
 		writeError(w, err)
+		return
+	}
+	if !found {
+		writeError(w, errNotFound)
 		return
 	}
 	if request.Domain != nil || request.Kind != nil || request.Action != nil || request.Schedule != nil || request.Client != nil {
@@ -200,9 +208,13 @@ func (s *Server) putRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stored, err := s.lookupRule(ctx, id)
+	stored, found, err := s.store.RuleByID(ctx, id)
 	if err != nil {
 		writeError(w, err)
+		return
+	}
+	if !found {
+		writeError(w, errNotFound)
 		return
 	}
 	writeJSON(w, http.StatusOK, ruleResponseFrom(stored))
@@ -219,12 +231,13 @@ func (s *Server) deleteRule(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	ctx := r.Context()
 
-	if _, err := s.lookupRule(ctx, id); err != nil {
+	deleted, err := s.store.DeleteRule(ctx, id)
+	if err != nil {
 		writeError(w, err)
 		return
 	}
-	if err := s.store.DeleteRule(ctx, id); err != nil {
-		writeError(w, err)
+	if !deleted {
+		writeError(w, errNotFound)
 		return
 	}
 	if err := s.reloader.Reload(ctx); err != nil {
@@ -270,16 +283,14 @@ func parseRuleFields(request ruleRequest) (store.Rule, error) {
 // scheduleExists refuses a rule that names a schedule the store does not hold,
 // because a rule whose schedule never exists would fail every reload.
 func (s *Server) scheduleExists(ctx context.Context, name string) error {
-	schedules, err := s.store.Schedules(ctx)
+	found, err := s.store.ScheduleExists(ctx, name)
 	if err != nil {
 		return err
 	}
-	for _, schedule := range schedules {
-		if schedule.Name == name {
-			return nil
-		}
+	if !found {
+		return fmt.Errorf("schedule %q does not exist", name)
 	}
-	return fmt.Errorf("schedule %q does not exist", name)
+	return nil
 }
 
 func parseRuleID(r *http.Request) (int64, error) {
@@ -288,17 +299,4 @@ func parseRuleID(r *http.Request) (int64, error) {
 		return 0, errors.New("a rule id must be a number")
 	}
 	return id, nil
-}
-
-func (s *Server) lookupRule(ctx context.Context, id int64) (store.Rule, error) {
-	rules, err := s.store.Rules(ctx)
-	if err != nil {
-		return store.Rule{}, err
-	}
-	for _, rule := range rules {
-		if rule.ID == id {
-			return rule, nil
-		}
-	}
-	return store.Rule{}, errNotFound
 }

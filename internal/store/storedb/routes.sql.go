@@ -9,13 +9,16 @@ import (
 	"context"
 )
 
-const deleteRoute = `-- name: DeleteRoute :exec
+const deleteRoute = `-- name: DeleteRoute :execrows
 DELETE FROM routes WHERE id = ?
 `
 
-func (q *Queries) DeleteRoute(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, deleteRoute, id)
-	return err
+func (q *Queries) DeleteRoute(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteRoute, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const insertRoute = `-- name: InsertRoute :one
@@ -68,7 +71,7 @@ func (q *Queries) ListRoutes(ctx context.Context) ([]Route, error) {
 	return items, nil
 }
 
-const updateRoute = `-- name: UpdateRoute :exec
+const updateRoute = `-- name: UpdateRoute :execrows
 UPDATE routes
 SET domain = ?, client = ?, upstream = ?
 WHERE id = ?
@@ -81,12 +84,15 @@ type UpdateRouteParams struct {
 	ID       int64
 }
 
-func (q *Queries) UpdateRoute(ctx context.Context, arg UpdateRouteParams) error {
-	_, err := q.db.ExecContext(ctx, updateRoute,
+func (q *Queries) UpdateRoute(ctx context.Context, arg UpdateRouteParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateRoute,
 		arg.Domain,
 		arg.Client,
 		arg.Upstream,
 		arg.ID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
