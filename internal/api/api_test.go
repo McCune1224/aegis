@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -25,14 +24,6 @@ import (
 	"aegis/internal/runtime"
 	"aegis/internal/store"
 )
-
-// deadResolver never answers: the harness exercises the API surface, so no
-// query should reach an upstream.
-type deadResolver struct{}
-
-func (deadResolver) Resolve(_ context.Context, _ *mdns.Msg) (*mdns.Msg, error) {
-	return nil, errors.New("the api harness has no resolver")
-}
 
 type harness struct {
 	apiURL     string
@@ -71,7 +62,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 	log := querylog.New(database, quietLogger())
 	handler, err := dns.NewHandler(dns.Config{
 		Decider:   rt,
-		Upstream:  deadResolver{},
+		Upstream:  rt.Upstreams(),
 		Rewriter:  rt,
 		Observers: []dns.Observer{hub, log},
 	})
