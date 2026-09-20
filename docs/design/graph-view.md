@@ -36,6 +36,23 @@ The fit control asks for the framed view back, and it is the only other caller.
 A resize does not re-frame either: the stars stay where they were and the
 viewport shows more or less of the sky.
 
+## Live flow
+
+A decision arriving on the stream draws a particle along the edges its verdict took:
+client to profile, then profile to upstream for an allowed query, and client to
+profile alone for a blocked one, with a pulse left at the profile. The particle is
+colored by verdict, so a block reads differently from an allow. The identity comes
+from the stream rather than from the address, because a device identified by its
+hardware address or by a lease cannot be found from the address alone.
+
+`web/src/flow.ts` owns the animation state and the two numbers that bound it. A
+particle is admitted at most once every `SPAWN_INTERVAL_MS`, so a busy network shows a
+sample of its traffic rather than every query. At `MAX_PARTICLES` in flight the oldest
+is dropped, so the newest is the one on screen. At the shipped interval the throttle
+is what bounds concurrency, since a particle lives about a second on a short path, and
+the cap is the backstop for a long one. `admit` gates the whole decision, so a blocked
+query's pulse is refused with its streak rather than flashing alone.
+
 ## Verification
 
 The camera has unit tests, and the graph has a browser check over CDP against
@@ -53,11 +70,30 @@ are:
 The last row is the one that catches the defect: without the guard the same
 screen point lands on nothing, because the view has been re-framed underneath it.
 
+The flow has unit tests for its budget, and a second browser check for the edge a
+decision travels. It reads the star tints to find the rows and then the pixels of the
+color only a blocked decision draws, which no star uses.
+
+| Step | Signal | Result |
+| --- | --- | --- |
+| find the rows | star tints | client 199, profile 421, upstream 651 |
+| 24 blocked queries | blockColor pixels | spanned y 206 to 460 |
+
+The span is the point. It starts at the client row and stops at the profile row, so
+the particle ran the edge the verdict named, and it never reached the upstream row the
+allowed path continues to.
+
 ## What is not built
 
 **No keyboard navigation and no minimap.** The graph is pointer-driven. A
 keyboard path would need a focus model over the stars, and a minimap needs a
 second camera and a scaled render pass; neither is asked for yet.
+
+**No measured frame budget for the flow.** A burst of identical queries starts its
+particles together, so they overlap and a pixel count cannot tell twenty from two
+hundred. Frame time under a software renderer separated a throttled build from an
+unthrottled one by 146 frames to 135 over two seconds, which is noise. The budget is
+unit-tested and its effect on frame time needs a real GPU to measure.
 
 **No camera persistence.** The view resets when the tab is left, because the
 graph is unmounted with its Pixi application. Storing it would mean lifting the

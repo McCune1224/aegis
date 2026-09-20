@@ -7,6 +7,7 @@ import type { Decision } from "./api";
 import { effectiveMode } from "./resolve";
 import type { QueryLog } from "./querylog";
 import { buildTopology, clientFor, upstreamNodeID, type Topology } from "./topology";
+import { admit, advance, emptyFlow, PULSE_LIFE_SECONDS, segment, streak, trail, type Flow } from "./flow";
 
 type Props = {
   profiles: Profile[];
@@ -29,18 +30,6 @@ type Placed = {
   y: number;
   phase: number;
 };
-
-type Segment = { from: { x: number; y: number }; to: { x: number; y: number } };
-
-type Particle = {
-  segments: Segment[];
-  travelled: number;
-  length: number;
-  speed: number;
-  color: number;
-};
-
-type Pulse = { x: number; y: number; age: number; color: number };
 
 const kindColor: Record<Kind, number> = {
   client: 0x7dd3fc,
@@ -134,8 +123,7 @@ export default function Graph(props: Props) {
 
   const [selected, setSelected] = createSignal<string>();
   const placed = new Map<string, Placed>();
-  const particles: Particle[] = [];
-  const pulses: Pulse[] = [];
+  const flow: Flow = emptyFlow();
 
   let world: Container | undefined;
   let haloLayer: Container | undefined;
@@ -355,52 +343,21 @@ export default function Graph(props: Props) {
       return;
     }
     const blocked = decision.action === "block";
+    const upstream = blocked ? undefined : placed.get(upstreamNodeID(props.upstreams[0] ?? ""));
+    if (!blocked && !upstream) {
+      return;
+    }
+    if (!admit(flow, performance.now())) {
+      return;
+    }
     if (blocked) {
-      particles.push(streak([segment(from, profile)], blockColor, 240));
-      pulses.push({ x: profile.x, y: profile.y, age: 0, color: blockColor });
+      flow.particles.push(streak([segment(from, profile)], blockColor, 240));
+      flow.pulses.push({ x: profile.x, y: profile.y, age: 0, color: blockColor });
       return;
     }
-    const upstream = placed.get(upstreamNodeID(props.upstreams[0] ?? ""));
-    if (!upstream) {
-      return;
+    if (upstream) {
+      flow.particles.push(streak([segment(from, profile), segment(profile, upstream)], allowColor, 200));
     }
-    particles.push(streak([segment(from, profile), segment(profile, upstream)], allowColor, 200));
-  }
-
-  function streak(segments: Segment[], color: number, speed: number): Particle {
-    return {
-      segments,
-      travelled: 0,
-      length: segments.reduce((total, current) => total + distance(current), 0),
-      speed,
-      color,
-    };
-  }
-
-  function segment(from: Placed, to: Placed): Segment {
-    return { from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y } };
-  }
-
-  function distance(segment: Segment): number {
-    const dx = segment.to.x - segment.from.x;
-    const dy = segment.to.y - segment.from.y;
-    return Math.hypot(dx, dy);
-  }
-
-  function pointAt(segments: Segment[], travelled: number): { x: number; y: number } {
-    let remaining = travelled;
-    for (const segment of segments) {
-      const length = distance(segment);
-      if (remaining <= length) {
-        const ratio = length === 0 ? 0 : remaining / length;
-        return {
-          x: segment.from.x + (segment.to.x - segment.from.x) * ratio,
-          y: segment.from.y + (segment.to.y - segment.from.y) * ratio,
-        };
-      }
-      remaining -= length;
-    }
-    return segments[segments.length - 1]?.to ?? { x: 0, y: 0 };
   }
 
   function tick(deltaSeconds: number) {
@@ -409,41 +366,28 @@ export default function Graph(props: Props) {
     }
     fxLayer.clear();
 
-    particles.forEach((particle) => {
-      particle.travelled += particle.speed * deltaSeconds;
-    });
-    for (let index = particles.length - 1; index >= 0; index--) {
-      const particle = particles[index];
-      if (particle.travelled > particle.length + 24) {
-        particles.splice(index, 1);
-      }
-    }
-    for (const particle of particles) {
-      const trailFrom = pointAt(particle.segments, Math.max(0, particle.travelled - 26));
-      const head = pointAt(particle.segments, Math.min(particle.travelled, particle.length));
+    advance(flow, deltaSeconds);
+
+    for (const particle of flow.particles) {
+      const ends = trail(particle);
       fxLayer
-        .moveTo(trailFrom.x, trailFrom.y)
-        .lineTo(head.x, head.y)
+        .moveTo(ends.from.x, ends.from.y)
+        .lineTo(ends.to.x, ends.to.y)
         .stroke({ width: 2, color: particle.color, alpha: 0.35, cap: "round" });
-      fxLayer.circle(head.x, head.y, 2.4).fill(particle.color);
+      fxLayer.circle(ends.to.x, ends.to.y, 2.4).fill(particle.color);
     }
 
-    for (let index = pulses.length - 1; index >= 0; index--) {
-      const pulse = pulses[index];
-      pulse.age += deltaSeconds;
-      if (pulse.age > 0.5) {
-        pulses.splice(index, 1);
-        continue;
-      }
-      const ratio = pulse.age / 0.5;
+    for (const pulse of flow.pulses) {
+      const ratio = pulse.age / PULSE_LIFE_SECONDS;
       fxLayer
         .circle(pulse.x, pulse.y, 10 + ratio * 26)
         .stroke({ width: 1.6 * (1 - ratio), color: pulse.color, alpha: 1 - ratio });
     }
 
     const time = performance.now() / 1000;
+    const nodes = [...placed.values()];
     haloLayer?.children.forEach((child, index) => {
-      const node = [...placed.values()][index];
+      const node = nodes[index];
       if (node) {
         child.alpha = 0.45 + Math.sin(time * 0.9 + node.phase) * 0.12;
       }
