@@ -111,7 +111,7 @@ func TestFetchReadsAFileSourceConditionally(t *testing.T) {
 }
 
 func TestFetchOfAMissingFileIsAnError(t *testing.T) {
-	_, err := blocklist.NewFetcher(5 * time.Second).Fetch(context.Background(), "file:///no/such/list.txt", "")
+	_, err := blocklist.NewFetcher(5*time.Second).Fetch(context.Background(), "file:///no/such/list.txt", "")
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no such file")
