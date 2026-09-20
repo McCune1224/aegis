@@ -21,12 +21,14 @@ import {
   listRoutes,
   listRules,
   listSchedules,
+  listSafesearch,
   listServices,
   listSources,
   listUpstreams,
   refreshServices as postRefreshServices,
   saveClient as putClient,
   saveProfile as putProfile,
+  saveProfileSafesearch as putProfileSafesearch,
   saveProfileServices as putProfileServices,
   saveRewrite as putRewrite,
   saveSchedule as putSchedule,
@@ -42,6 +44,7 @@ import {
   type Profile,
   type ProfileInput,
   type BlockedService,
+  type SafesearchEngine,
   type Rewrite,
   type Route,
   type RouteInput,
@@ -109,6 +112,7 @@ export default function App() {
   const [catalog, setCatalog] = createSignal<CatalogEntry[]>([]);
   const [services, setServices] = createSignal<BlockedService[]>([]);
   const [serviceGroups, setServiceGroups] = createSignal<string[]>([]);
+  const [safesearch, setSafesearch] = createSignal<SafesearchEngine[]>([]);
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [schedules, setSchedules] = createSignal<Schedule[]>([]);
   const [rewrites, setRewrites] = createSignal<Rewrite[]>([]);
@@ -126,7 +130,7 @@ export default function App() {
   const log = createQueryLog({ live: live() });
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices, nextSafesearch] =
       await Promise.all([
         listProfiles(),
         listClients(),
@@ -141,6 +145,7 @@ export default function App() {
         getDefaultProfile(),
         getStatus(),
         listServices(),
+        listSafesearch(),
       ]);
     setProfiles(nextProfiles);
     setClients(nextClients);
@@ -157,6 +162,7 @@ export default function App() {
     setRuleCount(nextStatus.rules ?? 0);
     setServices(nextServices.services);
     setServiceGroups(nextServices.groups);
+    setSafesearch(nextSafesearch.engines);
   }
 
   createEffect(
@@ -272,6 +278,11 @@ export default function App() {
     await refresh();
   }
 
+  async function saveProfileSafesearch(name: string, engines: string[]) {
+    await putProfileSafesearch(name, engines);
+    await refresh();
+  }
+
   async function saveAccess(input: AccessSettings) {
     await putAccess(input);
     await refresh();
@@ -365,11 +376,13 @@ export default function App() {
                   defaultProfile={defaultProfile()}
                   services={services()}
                   serviceGroups={serviceGroups()}
+                  safesearch={safesearch()}
                   onSave={saveProfile}
                   onDelete={deleteProfile}
                   onSetDefault={makeDefault}
                   onSaveServices={saveProfileServices}
                   onRefreshServices={refreshServiceCatalog}
+                  onSaveSafesearch={saveProfileSafesearch}
                 />
               </div>
             </Show>
