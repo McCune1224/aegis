@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,7 @@ type harness struct {
 	hub        *api.Hub
 	listPath   string
 	log        *querylog.QueryLog
+	database   *store.Store
 }
 
 // startHarness runs the store, runtime, DNS server, and API in process, the way
@@ -57,6 +59,11 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 	rt := runtime.New(database, lists, quietLogger(), options...)
 	require.NoError(t, rt.Reload(ctx))
 	sync := runtime.NewSourceSync(database, blocklist.NewFetcher(2*time.Second), rt, quietLogger())
+	catalogServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(harnessCatalog))
+	}))
+	t.Cleanup(catalogServer.Close)
+	catalog := runtime.NewServiceSync(database, blocklist.NewFetcher(2*time.Second), catalogServer.URL, rt, quietLogger())
 
 	hub := api.NewHub(nil)
 	log := querylog.New(database, quietLogger())
@@ -72,7 +79,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = dnsServer.Shutdown(context.Background()) })
 
-	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Sources: sync, Preview: sync, Hub: hub, Upstreams: rt.Upstreams(), Address: "127.0.0.1:0"})
+	apiServer, err := api.Start(api.Config{Store: database, Reloader: rt, Sources: sync, Preview: sync, Catalog: catalog, Hub: hub, Upstreams: rt.Upstreams(), Address: "127.0.0.1:0"})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = apiServer.Shutdown(context.Background()) })
 
@@ -82,6 +89,7 @@ func startHarnessWithClock(t *testing.T, now func() time.Time) *harness {
 		hub:        hub,
 		listPath:   lists[0].Path,
 		log:        log,
+		database:   database,
 	}
 }
 
@@ -111,6 +119,11 @@ func listFileWith(t *testing.T, content string) runtime.ListFile {
 // listedName is the name the harness's list server blocks, and the name every
 // DNS-path test in this package asks for.
 const listedName = "tracker.example.net"
+
+// harnessCatalog is the services catalog the harness's fake catalog server
+// serves, so a refresh test exercises the fetch, parse, store, and publish
+// path rather than a hand-written store row.
+const harnessCatalog = `{"blocked_services":[{"id":"youtube","name":"YouTube","group":"streaming","rules":["||youtube.com^"]}],"groups":[{"id":"streaming"}]}`
 
 // deadUpstream is the row the harness seeds, so the runtime's reload always
 // has an enabled resolver. Nothing listens there, so a query the filter lets

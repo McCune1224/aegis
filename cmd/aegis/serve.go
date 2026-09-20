@@ -28,6 +28,7 @@ import (
 	"aegis/internal/ratelimit"
 	"aegis/internal/rewrite"
 	"aegis/internal/runtime"
+	"aegis/internal/services"
 	"aegis/internal/store"
 	"aegis/internal/upstream"
 	"aegis/web"
@@ -43,6 +44,11 @@ const sourceTimeout = 30 * time.Second
 // sourceRefreshTick is how often the background loop looks for sources whose
 // refresh schedule has elapsed.
 const sourceRefreshTick = time.Minute
+
+// catalogRefreshInterval is how often the blocked-services catalog is fetched.
+// The sets change between releases, so a daily fetch keeps them current
+// without an operator action.
+const catalogRefreshInterval = 24 * time.Hour
 
 func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -155,6 +161,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := sync.RefreshSources(ctx); err != nil {
 		return err
 	}
+	catalog := runtime.NewServiceSync(database, blocklist.NewFetcher(sourceTimeout), services.DefaultCatalogURL, engine, logger)
 
 	hub := api.NewHub(logger)
 	log := querylog.New(database, logger)
@@ -224,6 +231,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Reloader:  engine,
 		Sources:   sync,
 		Preview:   sync,
+		Catalog:   catalog,
 		Hub:       hub,
 		Files:     web.Files(),
 		Address:   cfg.APIAddress,
@@ -259,6 +267,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	refreshCtx, refreshCancel := context.WithCancel(stop)
 	defer refreshCancel()
 	go runSourceRefreshLoop(refreshCtx, sync, refreshInterval, logger)
+	go runCatalogRefreshLoop(refreshCtx, catalog, logger)
 
 	<-stop.Done()
 
@@ -353,6 +362,30 @@ func runSourceRefreshLoop(ctx context.Context, sync *runtime.SourceSync, default
 			if fetched > 0 {
 				logger.Info("refreshed blocklist sources", "count", fetched)
 			}
+		}
+	}
+}
+
+// runCatalogRefreshLoop fetches the services catalog once at boot and then on
+// an interval. It runs beside the server rather than before it, because
+// blocked services are optional: a catalog that cannot be reached must not
+// stop the resolver from serving, and the stored copy keeps working.
+func runCatalogRefreshLoop(ctx context.Context, sync *runtime.ServiceSync, logger *slog.Logger) {
+	refresh := func() {
+		if err := sync.RefreshCatalog(ctx); err != nil {
+			logger.Warn("services catalog refresh failed", "error", err)
+		}
+	}
+	refresh()
+
+	ticker := time.NewTicker(catalogRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refresh()
 		}
 	}
 }
