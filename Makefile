@@ -39,7 +39,7 @@ lint:
 tools:
 	$(GO) install github.com/pressly/goose/v3/cmd/goose@latest
 	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-	$(GO) install github.com/goreleaser/goreleaser/v2@latest
+	$(GO) install github.com/goreleaser/goreleaser/v2@v2.17.0
 	$(GO) install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
 clean:

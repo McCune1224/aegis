@@ -39,3 +39,25 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make crossbuild
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build the snapshot artifact set
+        run: go run github.com/goreleaser/goreleaser/v2@v2.17.0 release --snapshot --clean
+      - name: The snapshot binary reports its version, not dev
+        run: |
+          tar -xzf dist/aegis_*_linux_amd64.tar.gz -C dist
+          out=$(./dist/aegis version)
+          echo "$out"
+          echo "$out" | grep -q "SNAPSHOT" || {
+            echo "the released binary reports dev" >&2
+            exit 1
+          }
+          test -f dist/checksums.txt
