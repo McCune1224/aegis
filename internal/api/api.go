@@ -159,6 +159,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/upstreams", s.listUpstreams)
 	mux.HandleFunc("PUT /api/v1/upstreams/{name}", s.putUpstream)
 	mux.HandleFunc("DELETE /api/v1/upstreams/{name}", s.deleteUpstream)
+	mux.HandleFunc("GET /api/v1/access", s.getAccess)
+	mux.HandleFunc("PUT /api/v1/access", s.putAccess)
 	mux.HandleFunc("GET /api/v1/routes", s.listRoutes)
 	mux.HandleFunc("POST /api/v1/routes", s.postRoute)
 	mux.HandleFunc("PUT /api/v1/routes/{id}", s.putRoute)

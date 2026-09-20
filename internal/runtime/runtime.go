@@ -39,6 +39,7 @@ type snapshot struct {
 	identity *client.Resolver
 	rewrites *rewrite.Table
 	routes   *upstream.Router
+	gate     gate
 }
 
 // Runtime owns the engine's contents and rebuilds them when the configuration
@@ -158,7 +159,7 @@ func (r *Runtime) publish(ctx context.Context) error {
 	}
 
 	r.switcher.Swap(pool)
-	r.current.Store(&snapshot{set: set, identity: identity, rewrites: rewrite.New(cfg.Rewrites), routes: upstream.NewRouter(routes)})
+	r.current.Store(&snapshot{set: set, identity: identity, rewrites: rewrite.New(cfg.Rewrites), routes: upstream.NewRouter(routes), gate: gate{allowed: cfg.Allowed, disallowed: cfg.Disallowed}})
 	return nil
 }
 
@@ -193,6 +194,16 @@ func (r *Runtime) Decide(name filter.Domain, address netip.Addr) filter.Verdict 
 	verdict := current.set.Decide(name, key, address, r.now())
 	verdict.Route = current.routes.Lookup(string(key), name.String())
 	return verdict
+}
+
+// Allows reports whether the client at address may ask at all, from the same
+// snapshot generation Decide reads. No snapshot yet allows everyone.
+func (r *Runtime) Allows(address netip.Addr) bool {
+	current := r.current.Load()
+	if current == nil {
+		return true
+	}
+	return current.gate.Allows(address)
 }
 
 // ClientKey names the identity policy keys on for one address, from the same

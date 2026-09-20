@@ -189,6 +189,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Decider:   engine,
 		Upstream:  resolver,
 		Rewriter:  engine,
+		Gate:      engine,
 		Observers: []dns.Observer{hub, log, verdictCounter{counts}},
 	}
 	// A nil *ratelimit.Limiter inside the interface would look non-nil to the

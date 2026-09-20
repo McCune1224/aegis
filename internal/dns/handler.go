@@ -48,6 +48,14 @@ type RateLimiter interface {
 	Allow(address netip.Addr) bool
 }
 
+// Gate decides whether the client at one address may ask at all. It carries
+// the listener's stored client sets: a disallowed client is refused before any
+// processing, and a non-empty allowed set serves only the clients it lists.
+// A nil Gate allows everyone.
+type Gate interface {
+	Allows(address netip.Addr) bool
+}
+
 // Rewriter answers one query from the configured rewrite table, the seam the
 // runtime fills with one snapshot generation. Lookup maps a name to its
 // record; Reverse maps an address back to the name that pins it.
@@ -68,6 +76,7 @@ type Config struct {
 	Rewriter  Rewriter
 	Observers []Observer
 	Limiter   RateLimiter
+	Gate      Gate
 }
 
 // Decision is one resolved query, as the live stream and the query log consume
@@ -93,6 +102,7 @@ type Handler struct {
 	rewriter  Rewriter
 	observers []Observer
 	limiter   RateLimiter
+	gate      Gate
 }
 
 // NewHandler checks the config and returns a Handler.
@@ -103,7 +113,7 @@ func NewHandler(cfg Config) (*Handler, error) {
 	if cfg.Upstream == nil {
 		return nil, errors.New("dns: Config.Upstream is required")
 	}
-	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream, rewriter: cfg.Rewriter, observers: cfg.Observers, limiter: cfg.Limiter}, nil
+	return &Handler{decider: cfg.Decider, upstream: cfg.Upstream, rewriter: cfg.Rewriter, observers: cfg.Observers, limiter: cfg.Limiter, gate: cfg.Gate}, nil
 }
 
 // Handle answers one query for the client at address. A name with a rewrite
@@ -111,6 +121,9 @@ func NewHandler(cfg Config) (*Handler, error) {
 // answered locally, and a name rewrite becomes a CNAME whose target is
 // filtered and forwarded in the query's place.
 func (h *Handler) Handle(ctx context.Context, req *mdns.Msg, address netip.Addr) (*mdns.Msg, error) {
+	if h.gate != nil && !h.gate.Allows(address) {
+		return reply(req, mdns.RcodeRefused), nil
+	}
 	if len(req.Question) != 1 {
 		return reply(req, mdns.RcodeFormatError), nil
 	}

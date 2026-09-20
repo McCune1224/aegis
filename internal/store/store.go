@@ -40,7 +40,12 @@ type Config struct {
 	Rewrites  []rewrite.Record
 	Upstreams []Upstream
 	Routes    []Route
-	Default   filter.ProfileID
+	// Allowed and Disallowed gate the listener itself: a disallowed client is
+	// refused before any processing, and a non-empty allowed set makes the
+	// listener serve only the clients it lists.
+	Allowed    []netip.Prefix
+	Disallowed []netip.Prefix
+	Default    filter.ProfileID
 }
 
 // ClientSpecs is the client list in the shape filter.Compile takes.
@@ -66,6 +71,9 @@ func (c Config) Selectors() []client.Spec {
 // the database.
 func (c Config) Validate() error {
 	if _, err := client.New(c.Selectors()); err != nil {
+		return err
+	}
+	if err := validateAccess(c.Allowed, c.Disallowed); err != nil {
 		return err
 	}
 	if _, err := filter.Compile(filter.Config{
@@ -219,15 +227,22 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 
+	allowed, disallowed, err := loadAccess(ctx, s.queries)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
-		Profiles:  profiles,
-		Clients:   clients,
-		Rules:     specs,
-		Schedules: schedules,
-		Rewrites:  rewrites,
-		Upstreams: upstreams,
-		Routes:    routes,
-		Default:   filter.ProfileID(defaultProfile),
+		Profiles:   profiles,
+		Clients:    clients,
+		Rules:      specs,
+		Schedules:  schedules,
+		Rewrites:   rewrites,
+		Upstreams:  upstreams,
+		Routes:     routes,
+		Allowed:    allowed,
+		Disallowed: disallowed,
+		Default:    filter.ProfileID(defaultProfile),
 	}, nil
 }
 
