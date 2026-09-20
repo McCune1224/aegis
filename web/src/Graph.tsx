@@ -1,7 +1,8 @@
 import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
-import { createEffect, createSignal, onCleanup, Show } from "solid-js";
-import type { Client, Profile, Rule } from "./api";
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import type { Client, Profile, ProfileInput, Rule } from "./api";
+import { BLOCKING_MODES } from "./api";
 import { frame, pan, toWorld, zoomAt, type Box, type Camera } from "./camera";
 import type { Decision } from "./api";
 import { effectiveMode } from "./resolve";
@@ -17,6 +18,7 @@ type Props = {
   upstreams: string[];
   log: QueryLog;
   onSaveClient: (name: string, input: { profile: string; notes: string; addresses: string[]; macs: string[]; prefixes: string[] }) => Promise<void>;
+  onSaveProfile: (name: string, input: ProfileInput) => Promise<void>;
   onSetDefault: (name: string) => Promise<void>;
 };
 
@@ -584,6 +586,12 @@ export default function Graph(props: Props) {
               <p class="muted">
                 {props.clients.filter((client) => client.profile === profile().name).length} clients bound
               </p>
+              <ProfilePanel
+                profile={profile()}
+                onSave={async (input) => {
+                  await props.onSaveProfile(profile().name, input);
+                }}
+              />
               <Show when={props.defaultProfile !== profile().name}>
                 <button type="button" class="btn" onClick={() => void props.onSetDefault(profile().name)}>
                   Make default
@@ -619,6 +627,60 @@ export default function Graph(props: Props) {
           </div>
         )}
       </Show>
+    </div>
+  );
+}
+
+function ProfilePanel(props: { profile: Profile; onSave: (input: ProfileInput) => Promise<void> }) {
+  const [mode, setMode] = createSignal(props.profile.mode ?? "");
+  const [custom, setCustom] = createSignal(props.profile.custom ?? "");
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<string>();
+
+  const untouched = () => mode() === (props.profile.mode ?? "") && custom() === (props.profile.custom ?? "");
+
+  async function save() {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await props.onSave({ extends: props.profile.extends ?? "", mode: mode(), custom: custom() });
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <label>
+        Blocking mode
+        <select data-testid="graph-panel-mode" value={mode()} onInput={(event) => setMode(event.currentTarget.value)}>
+          <option value="">inherit</option>
+          <For each={BLOCKING_MODES}>{(value) => <option value={value}>{value}</option>}</For>
+        </select>
+      </label>
+      <Show when={mode() === "custom-address"}>
+        <label>
+          Custom address
+          <input
+            data-testid="graph-panel-custom"
+            value={custom()}
+            placeholder="10.0.0.1"
+            onInput={(event) => setCustom(event.currentTarget.value)}
+          />
+        </label>
+      </Show>
+      <button
+        type="button"
+        class="btn-solid"
+        data-testid="graph-panel-mode-save"
+        disabled={busy() || untouched()}
+        onClick={() => void save()}
+      >
+        Save mode
+      </button>
+      {error() ? <p class="error">{error()}</p> : null}
     </div>
   );
 }

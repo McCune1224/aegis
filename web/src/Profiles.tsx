@@ -1,8 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import type { BlockedService, Profile, ProfileInput, SafesearchEngine } from "./api";
+import { BLOCKING_MODES } from "./api";
 import { groupServices, toggled } from "./services";
-
-const modes = ["nxdomain", "null-address", "custom-address", "refused"];
 
 type Props = {
   profiles: Profile[];
@@ -212,7 +211,7 @@ export default function Profiles(props: Props) {
             onInput={(event) => setMode(event.currentTarget.value)}
           >
             <option value="">inherit</option>
-            <For each={modes}>{(value) => <option value={value}>{value}</option>}</For>
+            <For each={BLOCKING_MODES}>{(value) => <option value={value}>{value}</option>}</For>
           </select>
         </label>
         <Show when={mode() === "custom-address"}>

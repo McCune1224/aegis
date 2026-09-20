@@ -5,6 +5,10 @@ export type Profile = {
   custom?: string;
 };
 
+// BLOCKING_MODES is the vocabulary the server accepts for a profile's mode, in
+// the order the screens list it. A profile with no mode inherits its parent's.
+export const BLOCKING_MODES = ["nxdomain", "null-address", "custom-address", "refused"] as const;
+
 export type Client = {
   name: string;
   profile: string;

@@ -383,6 +383,7 @@ export default function App() {
                 upstreams={upstreams()}
                 log={log}
                 onSaveClient={saveClient}
+                onSaveProfile={saveProfile}
                 onSetDefault={makeDefault}
               />
             </Show>
