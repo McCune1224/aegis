@@ -7,7 +7,7 @@ import { frame, ensureVisible, pan, toWorld, zoomAt, type Box, type Camera } fro
 import type { Decision } from "./api";
 import { effectiveMode } from "./resolve";
 import type { QueryLog } from "./querylog";
-import { buildTopology, clientFor, defaultClientID, upstreamNodeID, type NodeKind, type Topology } from "./topology";
+import { buildTopology, clientFor, upstreamNodeID, type NodeKind, type Topology } from "./topology";
 import { admit, advance, emptyFlow, PULSE_LIFE_SECONDS, segment, streak, trail, type Flow } from "./flow";
 import { linkIntent, type LinkIntent } from "./edit";
 
@@ -594,11 +594,11 @@ export default function Graph(props: Props) {
     if (!origin) {
       return;
     }
-    const world_ = toWorld(camera, screenX, screenY);
+    const cursor = toWorld(camera, screenX, screenY);
     const target = pick(screenX, screenY);
     const legal =
       target !== undefined && target !== from && linkIntent([...placed.values()], from, target) !== undefined;
-    draft = { from, x: world_.x, y: world_.y, target: target === from ? undefined : target, legal };
+    draft = { from, x: cursor.x, y: cursor.y, target: target === from ? undefined : target, legal };
     drawDraft();
   }
 
@@ -666,10 +666,12 @@ export default function Graph(props: Props) {
     }
     setCreating(true);
     setGraphError(undefined);
+    // reveal is claimed before the write so the redraw the refresh triggers
+    // cannot land between the save and the claim.
+    reveal = `profile:${name}`;
     try {
       await props.onSaveProfile(name, {});
       setNewProfile("");
-      reveal = `profile:${name}`;
     } catch (cause) {
       setGraphError(String(cause));
     } finally {
