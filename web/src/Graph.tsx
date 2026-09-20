@@ -162,7 +162,6 @@ export default function Graph(props: Props) {
   let starTextures: Map<NodeKind, Texture>;
   // reveal is the node a create should land on once the layout has placed it.
   let reveal: string | undefined;
-  // draft is the link a drag is drawing, undefined when no drag is under way.
   let draft: { from: string; x: number; y: number; target?: string; legal: boolean } | undefined;
 
   createEffect(
@@ -586,8 +585,6 @@ export default function Graph(props: Props) {
     world.position.set(camera.x, camera.y);
     world.scale.set(camera.scale);
   }
-
-  // ── Link gestures ─────────────────────────────────────────────────────
 
   function updateDraft(from: string, screenX: number, screenY: number) {
     const origin = placed.get(from);
