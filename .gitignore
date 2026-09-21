@@ -19,6 +19,7 @@ profile.cov
 
 # Build output
 /bin/
+/dist/
 
 # Web app
 /web/node_modules/
