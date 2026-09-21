@@ -96,16 +96,27 @@ func ParseCatalog(body []byte) (Catalog, error) {
 	return catalog, nil
 }
 
+// Scope is where one enabled service's rules apply and when. A profile scope
+// covers every client on that profile and is always on. A client scope covers
+// one identity only while Schedule covers the query minute; a client scope
+// without a schedule is rejected by filter.Compile, so the only producer of one
+// is a focus window.
+type Scope struct {
+	Profile  filter.ProfileID
+	Client   filter.ClientKey
+	Schedule string
+}
+
 // Specs converts the rules of one service into the rule specs that enabling it
-// for a profile activates. The catalog's dialect is the AdGuard one; the forms
+// for a scope activates. The catalog's dialect is the AdGuard one; the forms
 // without a DNS meaning are counted in skipped, the way a list import counts a
 // line it cannot use, so one odd rule does not cost the service.
-func Specs(service Service, profile filter.ProfileID) ([]filter.RuleSpec, int) {
+func Specs(service Service, scope Scope) ([]filter.RuleSpec, int) {
 	source := filter.Source{ID: service.ID, Name: service.Name}
 	specs := make([]filter.RuleSpec, 0, len(service.Rules))
 	skipped := 0
 	for index, line := range service.Rules {
-		spec, ok := ruleSpec(line, source, profile, index+1)
+		spec, ok := ruleSpec(line, source, scope, index+1)
 		if !ok {
 			skipped++
 			continue
@@ -115,20 +126,33 @@ func Specs(service Service, profile filter.ProfileID) ([]filter.RuleSpec, int) {
 	return specs, skipped
 }
 
+// ruleID names one generated rule. The service id and line are unique within a
+// service, so only a client scope needs to add anything: two clients sharing a
+// window must not share a provenance id.
+func ruleID(service string, scope Scope, line int) string {
+	id := service + ":" + strconv.Itoa(line)
+	if scope.Client != "" {
+		id += "~" + string(scope.Client)
+	}
+	return id
+}
+
 // ruleSpec reads one catalog rule. ||host^ covers the host and everything
 // under it, the anchor AGH means by a service set; |host^ pins one host, which
 // is how the catalog names a CDN edge; a pattern is taken as written.
-func ruleSpec(text string, source filter.Source, profile filter.ProfileID, line int) (filter.RuleSpec, bool) {
+func ruleSpec(text string, source filter.Source, scope Scope, line int) (filter.RuleSpec, bool) {
 	rule := strings.TrimSpace(text)
 	if rule == "" {
 		return filter.RuleSpec{}, false
 	}
 
 	spec := filter.RuleSpec{
-		ID:      source.ID + ":" + strconv.Itoa(line),
-		Source:  source,
-		Action:  filter.ActionBlock,
-		Profile: profile,
+		ID:       ruleID(source.ID, scope, line),
+		Source:   source,
+		Action:   filter.ActionBlock,
+		Profile:  scope.Profile,
+		Client:   scope.Client,
+		Schedule: scope.Schedule,
 	}
 	switch {
 	case len(rule) > 1 && strings.HasPrefix(rule, "/") && strings.HasSuffix(rule, "/"):
