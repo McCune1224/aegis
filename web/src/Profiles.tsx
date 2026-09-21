@@ -166,7 +166,7 @@ export default function Profiles(props: Props) {
                 <button type="button" onClick={() => edit(profile)}>
                   Edit
                 </button>
-                <button type="button" onClick={() => void remove(profile.name)}>
+                <button type="button" class="btn-danger" onClick={() => void remove(profile.name)}>
                   Delete
                 </button>
               </div>

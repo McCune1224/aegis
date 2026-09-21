@@ -130,7 +130,7 @@ export default function Rules(props: Props) {
                 >
                   <For each={actions}>{(value) => <option value={value}>{value}</option>}</For>
                 </select>
-                <button type="button" data-testid="rule-delete" onClick={() => void remove(rule.id)}>
+                <button type="button" class="btn-danger" data-testid="rule-delete" onClick={() => void remove(rule.id)}>
                   Delete
                 </button>
               </div>

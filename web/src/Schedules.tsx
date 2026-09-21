@@ -89,6 +89,7 @@ export default function Schedules(props: Props) {
               <div class="row-actions">
                 <button
                   type="button"
+                  class="btn-danger"
                   data-testid="schedule-delete"
                   onClick={() => void remove(schedule.name)}
                 >

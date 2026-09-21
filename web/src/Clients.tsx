@@ -103,7 +103,7 @@ export default function Clients(props: Props) {
                 <button type="button" onClick={() => edit(client)}>
                   Edit
                 </button>
-                <button type="button" onClick={() => void remove(client.name)}>
+                <button type="button" class="btn-danger" onClick={() => void remove(client.name)}>
                   Delete
                 </button>
               </div>

@@ -17,13 +17,11 @@ type Props = {
   onFilter: (filter: { client?: string; name?: string }) => void;
 };
 
-// Canvas text cannot read CSS custom properties, so the chart mirrors the
-// constellation tokens from app.css by value.
-const ink = "#8b96b5";
-const grid = "rgba(255, 255, 255, 0.07)";
-const accent = "#7dd3fc";
-const block = "#fb7185";
-const axisFont = '12px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const ink = "#6e7681";
+const grid = "rgba(255, 255, 255, 0.04)";
+const accent = "#58a6ff";
+const block = "#f85149";
+const axisFont = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif';
 
 const CHART_HEIGHT = 200;
 
@@ -241,17 +239,15 @@ function SeriesChart(props: { series: { t: number; total: number; blocked: numbe
     return {
       width: width(),
       height: CHART_HEIGHT,
-      // The legend is drawn in the panel header instead, because uPlot's own
-      // one reserves a row that reads as an empty "VALUE: --" line.
       legend: { show: false },
       cursor: { show: false },
-      padding: [10, 12, 0, 0],
+      padding: [12, 12, 0, 0],
       scales: { x: { time: false } },
       axes: [
         {
           stroke: ink,
           font: axisFont,
-          size: 32,
+          size: 30,
           grid: { stroke: grid },
           ticks: { stroke: grid },
           values: (_plot, values) =>
@@ -264,15 +260,15 @@ function SeriesChart(props: { series: { t: number; total: number; blocked: numbe
         {
           label: "total",
           stroke: accent,
-          fill: "rgba(125, 211, 252, 0.12)",
-          width: 1.8,
+          fill: "rgba(88, 166, 255, 0.06)",
+          width: 2,
           points: { show: false },
         },
         {
           label: "blocked",
           stroke: block,
-          fill: "rgba(251, 113, 133, 0.1)",
-          width: 1.8,
+          fill: "rgba(248, 81, 73, 0.04)",
+          width: 2,
           points: { show: false },
         },
       ],

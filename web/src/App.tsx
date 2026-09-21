@@ -63,14 +63,12 @@ import {
   type UpstreamInput,
   type AccessSettings,
 } from "./api";
-import { IconClients, IconClock, IconDashboard, IconGear, IconGraph, IconLog, IconRewrite, IconRules, IconShield, IconSources, IconUpstream } from "./Icons";
+import { IconClients, IconClock, IconDashboard, IconGear, IconLog, IconRewrite, IconRules, IconShield, IconSources, IconUpstream } from "./Icons";
 import Clients from "./Clients";
 import Dashboard from "./Dashboard";
-import Graph from "./Graph";
 import QueryLog from "./QueryLog";
 import Settings from "./Settings";
 import { createQueryLog } from "./querylog";
-import { starField } from "./sky";
 import Profiles from "./Profiles";
 import Rewrites from "./Rewrites";
 import Rules from "./Rules";
@@ -78,14 +76,13 @@ import Schedules from "./Schedules";
 import Sources from "./Sources";
 import Upstreams from "./Upstreams";
 
-type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "schedules" | "rewrites" | "upstreams" | "settings" | "graph";
+type Tab = "dashboard" | "log" | "profiles" | "clients" | "sources" | "rules" | "schedules" | "rewrites" | "upstreams" | "settings";
 
 type NavItem = { id: Tab; label: string; icon: () => JSX.Element };
 
 const NAV: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: IconDashboard },
   { id: "log", label: "Query Log", icon: IconLog },
-  { id: "graph", label: "Constellation", icon: IconGraph },
   { id: "clients", label: "Clients", icon: IconClients },
   { id: "profiles", label: "Profiles", icon: IconShield },
   { id: "rules", label: "Rules", icon: IconRules },
@@ -99,7 +96,6 @@ const NAV: NavItem[] = [
 const TITLES: Record<Tab, string> = {
   dashboard: "Dashboard",
   log: "Query Log",
-  graph: "Constellation",
   clients: "Clients",
   profiles: "Profiles",
   rules: "Rules",
@@ -109,10 +105,6 @@ const TITLES: Record<Tab, string> = {
   upstreams: "Upstreams",
   settings: "Settings",
 };
-
-const sky = starField();
-// The two tiles travel as custom properties so app.css owns the layering.
-const skyLayers = { "--sky-far": sky.far, "--sky-near": sky.near } as JSX.CSSProperties;
 
 export default function App() {
   const [tab, setTab] = createSignal<Tab>("dashboard");
@@ -299,8 +291,6 @@ export default function App() {
     await refresh();
   }
 
-  // claimDiscovery makes the device a client on the default profile, which is
-  // where an unnamed device lands anyway; the operator can move it afterwards.
   async function claimDiscovery(discovery: Discovery, name: string) {
     await saveClient(name, {
       profile: defaultProfile(),
@@ -320,14 +310,35 @@ export default function App() {
 
   return (
     <>
-      <div class="sky" style={skyLayers} />
       <div class="shell">
-        <aside class="sidebar">
+        <nav class="sidebar">
           <div class="brand">
-            <strong>Aegis</strong>
-            <span>sinkhole</span>
+            <div class="brand-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="4" r="1.5" fill="white"/>
+                <circle cx="4" cy="12" r="1.5" fill="white"/>
+                <circle cx="20" cy="12" r="1.5" fill="white"/>
+                <circle cx="12" cy="20" r="1.5" fill="white"/>
+                <circle cx="8" cy="8" r="1" fill="white" opacity="0.6"/>
+                <circle cx="16" cy="8" r="1" fill="white" opacity="0.6"/>
+                <circle cx="8" cy="16" r="1" fill="white" opacity="0.6"/>
+                <circle cx="16" cy="16" r="1" fill="white" opacity="0.6"/>
+                <line x1="12" y1="4" x2="4" y2="12" stroke="white" stroke-width="1" opacity="0.5"/>
+                <line x1="12" y1="4" x2="20" y2="12" stroke="white" stroke-width="1" opacity="0.5"/>
+                <line x1="4" y1="12" x2="12" y2="20" stroke="white" stroke-width="1" opacity="0.5"/>
+                <line x1="20" y1="12" x2="12" y2="20" stroke="white" stroke-width="1" opacity="0.5"/>
+                <line x1="8" y1="8" x2="16" y2="8" stroke="white" stroke-width="0.5" opacity="0.3"/>
+                <line x1="8" y1="16" x2="16" y2="16" stroke="white" stroke-width="0.5" opacity="0.3"/>
+                <line x1="8" y1="8" x2="8" y2="16" stroke="white" stroke-width="0.5" opacity="0.3"/>
+                <line x1="16" y1="8" x2="16" y2="16" stroke="white" stroke-width="0.5" opacity="0.3"/>
+              </svg>
+            </div>
+            <div class="brand-text">
+              <strong>AEGIS</strong>
+              <span>sinkhole</span>
+            </div>
           </div>
-          <nav class="nav">
+          <div class="nav">
             {NAV.map((item) => (
               <button
                 type="button"
@@ -339,11 +350,11 @@ export default function App() {
                 {item.label}
               </button>
             ))}
-          </nav>
+          </div>
           <div class="foot">
             {rules().length} custom · {ruleCount()} list rules
           </div>
-        </aside>
+        </nav>
         <div class="content">
           <header class="topbar">
             <h1 class="page-title">{TITLES[tab()]}</h1>
@@ -383,19 +394,6 @@ export default function App() {
                 onRuleAdded={async () => {
                   await refresh();
                 }}
-              />
-            </Show>
-            <Show when={tab() === "graph"}>
-              <Graph
-                profiles={profiles()}
-                clients={clients()}
-                rules={rules()}
-                defaultProfile={defaultProfile()}
-                upstreams={upstreams()}
-                log={log}
-                onSaveClient={saveClient}
-                onSaveProfile={saveProfile}
-                onSetDefault={makeDefault}
               />
             </Show>
             <Show when={tab() === "clients"}>

@@ -58,6 +58,7 @@ export default function Rewrites(props: Props) {
               <div class="row-actions">
                 <button
                   type="button"
+                  class="btn-danger"
                   data-testid="rewrite-delete"
                   onClick={() => void remove(rewrite.pattern)}
                 >
