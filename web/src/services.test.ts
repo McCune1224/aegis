@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { BlockedService } from "./api";
-import { groupServices, toggled } from "./services";
+import { groupServices, groupState, toggled, toggledGroup } from "./services";
 
 const youtube: BlockedService = {
   id: "youtube",
@@ -65,5 +65,40 @@ describe("toggled", () => {
 
   test("keeps the services already on when adding", () => {
     expect(toggled(["4chan"], "youtube")).toEqual(["4chan", "youtube"]);
+  });
+});
+
+describe("groupState", () => {
+  const group = ["youtube", "4chan"];
+
+  test("is none when no service in the group is selected", () => {
+    expect(groupState(group, [])).toBe("none");
+    expect(groupState(group, ["netflix"])).toBe("none");
+  });
+
+  test("is some when part of the group is selected", () => {
+    expect(groupState(group, ["youtube"])).toBe("some");
+  });
+
+  test("is all when every service in the group is selected", () => {
+    expect(groupState(group, ["youtube", "4chan"])).toBe("all");
+    expect(groupState(group, ["netflix", "youtube", "4chan"])).toBe("all");
+  });
+});
+
+describe("toggledGroup", () => {
+  const group = ["youtube", "4chan"];
+
+  test("adds every service when the group is not fully selected", () => {
+    expect(toggledGroup(["youtube"], group)).toEqual(["youtube", "4chan"]);
+  });
+
+  test("removes every service when the group is fully selected", () => {
+    expect(toggledGroup(["youtube", "4chan", "netflix"], group)).toEqual(["netflix"]);
+  });
+
+  test("does not duplicate a service already selected", () => {
+    expect(toggledGroup(["youtube"], ["youtube"])).toEqual([]);
+    expect(toggledGroup(["youtube"], ["youtube", "netflix"])).toEqual(["youtube", "netflix"]);
   });
 });

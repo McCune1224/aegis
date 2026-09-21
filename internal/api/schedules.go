@@ -123,8 +123,9 @@ func parseSchedule(name string, priority int, windows []scheduleWindow) (filter.
 	return spec, nil
 }
 
-// deleteSchedule removes one schedule. Rules still naming it would fail every
-// later reload, so the deletion is refused with the names instead.
+// deleteSchedule removes one schedule. Rules and focus windows still naming it
+// would fail every later reload, so the deletion is refused with the names
+// instead.
 func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	s.mu.Lock()
@@ -140,6 +141,16 @@ func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 	for _, rule := range rules {
 		if rule.Schedule == name {
 			users = append(users, fmt.Sprintf("rule %d", rule.ID))
+		}
+	}
+	windows, err := s.store.FocusWindows(ctx)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	for _, window := range windows {
+		if window.Schedule == name {
+			users = append(users, fmt.Sprintf("focus window %q", window.Name))
 		}
 	}
 	if len(users) > 0 {

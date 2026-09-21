@@ -80,7 +80,7 @@ func TestSpecsTurnCatalogRulesIntoProfileScopedBlockRules(t *testing.T) {
 		},
 	}
 
-	specs, skipped := services.Specs(service, "kids")
+	specs, skipped := services.Specs(service, services.Scope{Profile: "kids"})
 
 	require.Equal(t, 0, skipped)
 	require.Equal(t, []filter.RuleSpec{
@@ -131,7 +131,7 @@ func TestSpecsSkipLinesTheDnsDialectCannotExpress(t *testing.T) {
 		},
 	}
 
-	specs, skipped := services.Specs(service, "kids")
+	specs, skipped := services.Specs(service, services.Scope{Profile: "kids"})
 
 	require.Equal(t, 3, skipped)
 	require.Len(t, specs, 1)

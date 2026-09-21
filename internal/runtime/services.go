@@ -68,10 +68,7 @@ func serviceRules(cfg store.Config) ([]filter.RuleSpec, error) {
 		return nil, nil
 	}
 
-	byID := make(map[string]services.Service, len(cfg.Services))
-	for _, row := range cfg.Services {
-		byID[row.ID] = services.Service{ID: row.ID, Name: row.Name, Group: row.Group, Rules: row.Rules}
-	}
+	byID := catalogByID(cfg)
 
 	var rules []filter.RuleSpec
 	for _, enable := range cfg.ProfileServices {
@@ -79,8 +76,18 @@ func serviceRules(cfg store.Config) ([]filter.RuleSpec, error) {
 		if !exists {
 			return nil, fmt.Errorf("runtime: profile %q blocks service %q, which is not in the catalog", enable.Profile, enable.Service)
 		}
-		specs, _ := services.Specs(service, enable.Profile)
+		specs, _ := services.Specs(service, services.Scope{Profile: enable.Profile})
 		rules = append(rules, specs...)
 	}
 	return rules, nil
+}
+
+// catalogByID indexes the fetched catalog by service id, the form both the
+// profile enablements and the focus windows name a service by.
+func catalogByID(cfg store.Config) map[string]services.Service {
+	byID := make(map[string]services.Service, len(cfg.Services))
+	for _, row := range cfg.Services {
+		byID[row.ID] = services.Service{ID: row.ID, Name: row.Name, Group: row.Group, Rules: row.Rules}
+	}
+	return byID
 }

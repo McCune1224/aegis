@@ -345,6 +345,37 @@ export function deleteSchedule(name: string): Promise<void> {
   return request<void>(`/api/v1/schedules/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
+// A focus window blocks a set of services for a set of clients, but only while
+// its schedule covers the query minute. Outside the window it changes nothing.
+export type FocusWindow = {
+  name: string;
+  schedule: string;
+  clients: string[];
+  services: string[];
+};
+
+// The body is the whole window, so a client or service left out is dropped.
+export type FocusWindowInput = {
+  schedule: string;
+  clients: string[];
+  services: string[];
+};
+
+export function listFocus(): Promise<FocusWindow[]> {
+  return request<FocusWindow[]>("/api/v1/focus");
+}
+
+export function saveFocus(name: string, input: FocusWindowInput): Promise<FocusWindow> {
+  return request<FocusWindow>(`/api/v1/focus/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteFocus(name: string): Promise<void> {
+  return request<void>(`/api/v1/focus/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
 export type Rewrite = {
   pattern: string;
   target: string;

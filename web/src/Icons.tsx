@@ -42,6 +42,14 @@ export const IconLog = () =>
     </>,
   );
 
+export const IconFocus = () =>
+  base(
+    <>
+      <circle cx="8" cy="8" r="5.5" />
+      <circle cx="8" cy="8" r="1.6" />
+    </>,
+  );
+
 export const IconClock = () =>
   base(
     <>

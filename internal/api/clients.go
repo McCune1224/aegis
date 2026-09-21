@@ -152,6 +152,13 @@ func (s *Server) deleteClient(w http.ResponseWriter, r *http.Request) {
 							return conflict{fmt.Errorf("route %d still sends its queries to client %q", route.ID, key)}
 						}
 					}
+					for _, window := range cfg.FocusWindows {
+						for _, client := range window.Clients {
+							if client == key {
+								return conflict{fmt.Errorf("focus window %q still blocks client %q", window.Name, key)}
+							}
+						}
+					}
 					cfg.Clients = append(cfg.Clients[:i], cfg.Clients[i+1:]...)
 					return nil
 				}
