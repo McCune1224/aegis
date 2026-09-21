@@ -36,3 +36,28 @@ export function groupServices(services: BlockedService[], groups: string[]): Ser
 export function toggled(current: string[], id: string): string[] {
   return current.includes(id) ? current.filter((service) => service !== id) : [...current, id];
 }
+
+// GroupState is how much of one catalog group is selected, which is what a
+// category toggle reads and shows.
+export type GroupState = "none" | "some" | "all";
+
+export function groupState(ids: string[], selected: string[]): GroupState {
+  const count = ids.filter((id) => selected.includes(id)).length;
+  if (count === 0) {
+    return "none";
+  }
+  if (count === ids.length) {
+    return "all";
+  }
+  return "some";
+}
+
+// toggledGroup turns a category toggle into a selection: every id in the group
+// is added unless they are all already selected, in which case every id is
+// removed. The result keeps the order selected earlier and drops duplicates.
+export function toggledGroup(current: string[], ids: string[]): string[] {
+  if (groupState(ids, current) === "all") {
+    return current.filter((id) => !ids.includes(id));
+  }
+  return [...new Set([...current, ...ids])];
+}

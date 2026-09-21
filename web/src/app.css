@@ -1014,12 +1014,40 @@ input[type="checkbox"] {
   min-width: 140px;
 }
 
+.focus-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.focus-group .group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.focus-group .group-head .toggle {
+  flex: 1;
+}
+
+.focus-group .group-services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-5);
+  padding-left: var(--sp-4);
+}
+
+.focus-group .group-services .toggle {
+  min-width: 140px;
+}
+
 .windows-editor {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
 }
-
 .window-editor {
   display: flex;
   align-items: center;
