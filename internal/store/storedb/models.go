@@ -38,6 +38,14 @@ type Discovery struct {
 	Last     int64
 }
 
+type FocusWindow struct {
+	ID       int64
+	Name     string
+	Schedule string
+	Clients  string
+	Services string
+}
+
 type Lease struct {
 	Address  string
 	Mac      string
