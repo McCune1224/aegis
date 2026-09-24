@@ -1,14 +1,18 @@
 # syntax=docker/dockerfile:1
 
-# The web bundle is built first, because the binary embeds it.
-FROM node:22-alpine AS web
+# The bundle embeds into the binary and has no architecture of its own, so it
+# is built once for the builder's platform. Built per target, the arm alpine
+# builds die in rolldown, whose 32-bit ARM musl binding is a 0.0.0 stub.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.26-alpine AS build
+# CGO is off, so every target binary cross-compiles natively. GOARM is empty
+# for the 64-bit targets, which the go tool accepts.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 WORKDIR /src
 ARG VERSION=dev
 ARG COMMIT=dev
@@ -17,7 +21,10 @@ RUN go mod download
 COPY . .
 RUN mkdir /empty
 COPY --from=web /src/web/dist web/dist
-RUN CGO_ENABLED=0 go build -trimpath \
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} go build -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -o /aegis ./cmd/aegis
 
