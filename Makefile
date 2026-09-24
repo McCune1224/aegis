@@ -3,9 +3,17 @@ BIN := bin/aegis
 WEB := web
 WEBSTAMP := $(WEB)/node_modules/.installed
 
-.PHONY: build test gen fmt vet lint mutants tools crossbuild clean web dev
+# Local dev stack. Override any of these: make dev DNS_ADDRESS=127.0.0.1:15399
+API_ADDRESS ?= 127.0.0.1:8080
+DNS_ADDRESS ?= 127.0.0.1:15353
+DEV_DB ?= bin/dev.db
+
+.PHONY: build server test check gen fmt vet lint mutants tools crossbuild clean web dev run
 
 build: web
+	$(GO) build -o $(BIN) ./cmd/aegis
+
+server:
 	$(GO) build -o $(BIN) ./cmd/aegis
 
 web: $(WEBSTAMP)
@@ -15,8 +23,40 @@ $(WEBSTAMP): $(WEB)/package.json $(WEB)/package-lock.json
 	npm --prefix $(WEB) ci
 	@touch $(WEBSTAMP)
 
-dev: $(WEBSTAMP)
+# dev runs the whole stack: the aegis server (API + DNS) behind the vite proxy,
+# then vite in the foreground. Ctrl-C stops both. The dev database persists in
+# bin/ between runs; make clean wipes it.
+dev: server $(WEBSTAMP)
+	@mkdir -p $(dir $(DEV_DB))
+	@$(BIN) serve \
+		--api-address $(API_ADDRESS) \
+		--dns-address $(DNS_ADDRESS) \
+		--db $(DEV_DB) & \
+	srv_pid=$$!; \
+	trap 'kill $$srv_pid 2>/dev/null' EXIT INT TERM HUP; \
+	ready=0; \
+	for i in $$(seq 1 50); do \
+		curl -sf http://$(API_ADDRESS)/api/v1/status > /dev/null && { ready=1; break; }; \
+		sleep 0.1; \
+	done; \
+	[ $$ready -eq 1 ] || { echo "aegis did not come up on $(API_ADDRESS)"; exit 1; }; \
+	echo "aegis   API $(API_ADDRESS)   DNS $(DNS_ADDRESS)   db $(DEV_DB)"; \
 	npm --prefix $(WEB) run dev
+
+# run starts only the server, foreground, with the dev database. Dig it:
+#   dig -p 15353 @127.0.0.1 example.com
+run: server
+	@mkdir -p $(dir $(DEV_DB))
+	$(BIN) serve \
+		--api-address $(API_ADDRESS) \
+		--dns-address $(DNS_ADDRESS) \
+		--db $(DEV_DB)
+
+# check runs every local gate: Go tests with the race detector, vet, lint,
+# the web unit tests, and the web typecheck.
+check: test vet lint
+	npm --prefix $(WEB) run test
+	npm --prefix $(WEB) run typecheck
 
 test:
 	$(GO) test -race ./...
