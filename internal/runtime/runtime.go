@@ -163,16 +163,16 @@ func (r *Runtime) publish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	focusList, err := focusRules(cfg)
+	windowList, err := windowRules(cfg)
 	if err != nil {
 		return err
 	}
-	rules := make([]filter.RuleSpec, 0, len(cfg.Rules)+len(listRules)+len(r.sourceRules)+len(serviceList)+len(focusList))
+	rules := make([]filter.RuleSpec, 0, len(cfg.Rules)+len(listRules)+len(r.sourceRules)+len(serviceList)+len(windowList))
 	rules = append(rules, cfg.Rules...)
 	rules = append(rules, listRules...)
 	rules = append(rules, r.sourceRules...)
 	rules = append(rules, serviceList...)
-	rules = append(rules, focusList...)
+	rules = append(rules, windowList...)
 	set, err := filter.Compile(filter.Config{
 		Rules:     rules,
 		Profiles:  cfg.Profiles,

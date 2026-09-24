@@ -1,16 +1,12 @@
 import uPlot, { type Options } from "uplot";
 import { createEffect, createSignal, For, Show } from "solid-js";
-import type { Discovery, QueryEntry, ThreatFinding } from "./api";
-import Discoveries from "./Discoveries";
+import type { QueryEntry, ThreatFinding } from "./api";
 import "uplot/dist/uPlot.min.css";
 import { aggregate } from "./stats";
 
 type Props = {
   entries: QueryEntry[];
-  discoveries: Discovery[];
   threats: ThreatFinding[];
-  onClaimDiscovery: (discovery: Discovery, name: string) => Promise<void>;
-  onDismissDiscovery: (mac: string) => Promise<void>;
   windowMinutes: number;
   onSetWindow: (minutes: number) => void;
   onOpenLog: () => void;
@@ -41,11 +37,6 @@ export default function Dashboard(props: Props) {
 
   return (
     <div class="screen-inner wide">
-      <Discoveries
-        discoveries={props.discoveries}
-        onClaim={props.onClaimDiscovery}
-        onDismiss={props.onDismissDiscovery}
-      />
       <Show when={props.threats.length > 0}>
         <section class="panel" data-testid="threat-panel">
           <header>

@@ -13,7 +13,8 @@ import (
 
 // queryNamedFrom asks the harness DNS server for one chosen name from a chosen
 // source address, so a test can watch one client's view of one service.
-func queryNamedFrom(t *testing.T, local, server, name string) *mdns.Msg {
+func queryNamedFrom(t *testing.T, local, server string) *mdns.Msg {
+	const name = "youtube.com"
 	t.Helper()
 	client := &mdns.Client{
 		Net:     "udp",
@@ -47,11 +48,11 @@ func TestAFocusWindowBlocksOneClientOnlyDuringItsSchedule(t *testing.T) {
 		`{"priority":1,"windows":[{"days":[1],"start":"21:00","end":"23:00"}]}`)
 	require.Equal(t, http.StatusOK, status, body)
 
-	status, body = h.do(t, http.MethodPut, "/api/v1/focus/school-nights",
+	status, body = h.do(t, http.MethodPut, "/api/v1/windows/school-nights",
 		`{"schedule":"school-nights","clients":["tablet"],"services":["youtube"]}`)
 	require.Equal(t, http.StatusOK, status, body)
 
-	status, body = h.do(t, http.MethodGet, "/api/v1/focus", "")
+	status, body = h.do(t, http.MethodGet, "/api/v1/windows", "")
 	require.Equal(t, http.StatusOK, status, body)
 	require.Contains(t, body, `"name":"school-nights"`)
 	require.Contains(t, body, `"clients":["tablet"]`)
@@ -59,13 +60,13 @@ func TestAFocusWindowBlocksOneClientOnlyDuringItsSchedule(t *testing.T) {
 
 	// Noon is outside the window, so youtube.com reaches the dead upstream and
 	// the wire answer is SERVFAIL rather than the blocked NXDOMAIN.
-	require.Equal(t, mdns.RcodeServerFailure, queryNamedFrom(t, "127.0.0.2", h.dnsAddress, "youtube.com").Rcode)
+	require.Equal(t, mdns.RcodeServerFailure, queryNamedFrom(t, "127.0.0.2", h.dnsAddress).Rcode)
 
 	clock.Store(night.Unix())
 
-	require.Equal(t, mdns.RcodeNameError, queryNamedFrom(t, "127.0.0.2", h.dnsAddress, "youtube.com").Rcode,
+	require.Equal(t, mdns.RcodeNameError, queryNamedFrom(t, "127.0.0.2", h.dnsAddress).Rcode,
 		"inside the window the named client is blocked")
-	require.Equal(t, mdns.RcodeServerFailure, queryNamedFrom(t, "127.0.0.1", h.dnsAddress, "youtube.com").Rcode,
+	require.Equal(t, mdns.RcodeServerFailure, queryNamedFrom(t, "127.0.0.1", h.dnsAddress).Rcode,
 		"a client the window does not name is unaffected")
 
 	// A client a focus window still blocks cannot be deleted out from under it.
@@ -77,7 +78,7 @@ func TestAFocusWindowBlocksOneClientOnlyDuringItsSchedule(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, body)
 	require.Contains(t, body, "school-nights")
 
-	status, body = h.do(t, http.MethodDelete, "/api/v1/focus/school-nights", "")
+	status, body = h.do(t, http.MethodDelete, "/api/v1/windows/school-nights", "")
 	require.Equal(t, http.StatusNoContent, status, body)
 
 	status, body = h.do(t, http.MethodDelete, "/api/v1/schedules/school-nights", "")
@@ -107,7 +108,7 @@ func TestFocusInputIsRejectedWithFourHundred(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			status, body := h.do(t, http.MethodPut, "/api/v1/focus/bad", testCase.body)
+			status, body := h.do(t, http.MethodPut, "/api/v1/windows/bad", testCase.body)
 			require.Equal(t, http.StatusBadRequest, status, body)
 			require.Contains(t, body, testCase.want)
 		})

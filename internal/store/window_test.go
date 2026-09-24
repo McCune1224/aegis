@@ -11,7 +11,7 @@ import (
 	"aegis/internal/store"
 )
 
-// focusFixture is the smallest configuration a focus window can name: two
+// focusFixture is the smallest configuration a window can name: two
 // clients on one profile, one schedule, and a catalog with two services.
 func focusFixture(t *testing.T, s *store.Store) {
 	t.Helper()
@@ -30,21 +30,21 @@ func focusFixture(t *testing.T, s *store.Store) {
 	}))
 }
 
-func TestFocusWindowsRoundTripAndValidate(t *testing.T) {
+func TestServiceWindowsRoundTripAndValidate(t *testing.T) {
 	s := open(t)
 	focusFixture(t, s)
 	ctx := t.Context()
 
-	require.NoError(t, s.SaveFocusWindow(ctx, store.FocusWindow{
+	require.NoError(t, s.SaveServiceWindow(ctx, store.ServiceWindow{
 		Name:     "school-nights",
 		Schedule: "school-nights",
 		Clients:  []filter.ClientKey{"kids-ipad", "kids-pc"},
 		Services: []string{"4chan", "youtube"},
 	}))
 
-	got, err := s.FocusWindows(ctx)
+	got, err := s.ServiceWindows(ctx)
 	require.NoError(t, err)
-	require.Equal(t, []store.FocusWindow{{
+	require.Equal(t, []store.ServiceWindow{{
 		ID:       1,
 		Name:     "school-nights",
 		Schedule: "school-nights",
@@ -55,31 +55,31 @@ func TestFocusWindowsRoundTripAndValidate(t *testing.T) {
 	cfg, err := s.Load(ctx)
 	require.NoError(t, err)
 	require.NoError(t, cfg.Validate())
-	require.Equal(t, got, cfg.FocusWindows)
+	require.Equal(t, got, cfg.ServiceWindows)
 }
 
-func TestSavingAFocusWindowReplacesWhatTheNameHeld(t *testing.T) {
+func TestSavingAWindowReplacesWhatTheNameHeld(t *testing.T) {
 	s := open(t)
 	focusFixture(t, s)
 	ctx := t.Context()
 
-	require.NoError(t, s.SaveFocusWindow(ctx, store.FocusWindow{
+	require.NoError(t, s.SaveServiceWindow(ctx, store.ServiceWindow{
 		Name:     "school-nights",
 		Schedule: "school-nights",
 		Clients:  []filter.ClientKey{"kids-ipad", "kids-pc"},
 		Services: []string{"youtube"},
 	}))
-	require.NoError(t, s.SaveFocusWindow(ctx, store.FocusWindow{
+	require.NoError(t, s.SaveServiceWindow(ctx, store.ServiceWindow{
 		Name:     "school-nights",
 		Schedule: "school-nights",
 		Clients:  []filter.ClientKey{"kids-pc"},
 		Services: []string{"4chan"},
 	}))
 
-	got, err := s.FocusWindows(ctx)
+	got, err := s.ServiceWindows(ctx)
 
 	require.NoError(t, err)
-	require.Equal(t, []store.FocusWindow{{
+	require.Equal(t, []store.ServiceWindow{{
 		ID:       1,
 		Name:     "school-nights",
 		Schedule: "school-nights",
@@ -88,36 +88,37 @@ func TestSavingAFocusWindowReplacesWhatTheNameHeld(t *testing.T) {
 	}}, got)
 }
 
-func TestDeletingAFocusWindowRemovesIt(t *testing.T) {
+func TestDeletingAWindowRemovesIt(t *testing.T) {
 	s := open(t)
 	focusFixture(t, s)
 	ctx := t.Context()
-	require.NoError(t, s.SaveFocusWindow(ctx, store.FocusWindow{
+	require.NoError(t, s.SaveServiceWindow(ctx, store.ServiceWindow{
 		Name:     "school-nights",
 		Schedule: "school-nights",
 		Clients:  []filter.ClientKey{"kids-ipad"},
 		Services: []string{"youtube"},
 	}))
 
-	require.NoError(t, s.DeleteFocusWindow(ctx, "school-nights"))
+	require.NoError(t, s.DeleteServiceWindow(ctx, "school-nights"))
 
-	got, err := s.FocusWindows(ctx)
+	got, err := s.ServiceWindows(ctx)
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
 
-func TestAFocusWindowOnAMissingReferenceIsInvalid(t *testing.T) {
+func TestAWindowOnAMissingReferenceIsInvalid(t *testing.T) {
 	cases := []struct {
 		name   string
-		window store.FocusWindow
+		window store.ServiceWindow
 		want   string
 	}{
-		{"schedule", store.FocusWindow{Name: "w", Schedule: "ghost", Clients: []filter.ClientKey{"kids-ipad"}, Services: []string{"youtube"}}, "ghost"},
-		{"client", store.FocusWindow{Name: "w", Schedule: "school-nights", Clients: []filter.ClientKey{"stranger"}, Services: []string{"youtube"}}, "stranger"},
-		{"service", store.FocusWindow{Name: "w", Schedule: "school-nights", Clients: []filter.ClientKey{"kids-ipad"}, Services: []string{"netflix"}}, "netflix"},
-		{"no client", store.FocusWindow{Name: "w", Schedule: "school-nights", Services: []string{"youtube"}}, "client"},
-		{"no service", store.FocusWindow{Name: "w", Schedule: "school-nights", Clients: []filter.ClientKey{"kids-ipad"}}, "service"},
-		{"no schedule", store.FocusWindow{Name: "w", Clients: []filter.ClientKey{"kids-ipad"}, Services: []string{"youtube"}}, "schedule"},
+		{"schedule", store.ServiceWindow{Name: "w", Schedule: "ghost", Clients: []filter.ClientKey{"kids-ipad"}, Services: []string{"youtube"}}, "ghost"},
+		{"client", store.ServiceWindow{Name: "w", Schedule: "school-nights", Clients: []filter.ClientKey{"stranger"}, Services: []string{"youtube"}}, "stranger"},
+		{"service", store.ServiceWindow{Name: "w", Schedule: "school-nights", Clients: []filter.ClientKey{"kids-ipad"}, Services: []string{"netflix"}}, "netflix"},
+		{"no client", store.ServiceWindow{Name: "w", Schedule: "school-nights", Services: []string{"youtube"}}, "client"},
+		{"no service", store.ServiceWindow{Name: "w", Schedule: "school-nights", Clients: []filter.ClientKey{"kids-ipad"}}, "service"},
+		{"no schedule", store.ServiceWindow{Name: "w", Clients: []filter.ClientKey{"kids-ipad"}, Services: []string{"youtube"}}, "schedule"},
+		{"action", store.ServiceWindow{Name: "w", Schedule: "school-nights", Action: filter.ActionRewrite, Clients: []filter.ClientKey{"kids-ipad"}, Services: []string{"youtube"}}, "action"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -125,7 +126,7 @@ func TestAFocusWindowOnAMissingReferenceIsInvalid(t *testing.T) {
 			focusFixture(t, s)
 			cfg, err := s.Load(t.Context())
 			require.NoError(t, err)
-			cfg.FocusWindows = append(cfg.FocusWindows, testCase.window)
+			cfg.ServiceWindows = append(cfg.ServiceWindows, testCase.window)
 
 			err = cfg.Validate()
 
@@ -135,13 +136,13 @@ func TestAFocusWindowOnAMissingReferenceIsInvalid(t *testing.T) {
 	}
 }
 
-func TestTwoFocusWindowsCannotShareAName(t *testing.T) {
+func TestTwoWindowsCannotShareAName(t *testing.T) {
 	s := open(t)
 	focusFixture(t, s)
 	cfg, err := s.Load(t.Context())
 	require.NoError(t, err)
-	window := store.FocusWindow{Name: "w", Schedule: "school-nights", Clients: []filter.ClientKey{"kids-ipad"}, Services: []string{"youtube"}}
-	cfg.FocusWindows = append(cfg.FocusWindows, window, window)
+	window := store.ServiceWindow{Name: "w", Schedule: "school-nights", Clients: []filter.ClientKey{"kids-ipad"}, Services: []string{"youtube"}}
+	cfg.ServiceWindows = append(cfg.ServiceWindows, window, window)
 
 	err = cfg.Validate()
 

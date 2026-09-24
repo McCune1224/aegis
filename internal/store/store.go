@@ -50,9 +50,10 @@ type Config struct {
 	ClientServices  []ClientService
 	// Safesearch is which profiles enforce which search engines' safe mode.
 	Safesearch []ProfileSafesearch
-	// FocusWindows are the time-scoped restrictions: a schedule, the clients it
-	// covers, and the services it blocks while it holds.
-	FocusWindows []FocusWindow
+	// ServiceWindows are the time-scoped changes to service blocking: a
+	// schedule, the clients it covers, the services it touches, and whether it
+	// blocks them or allows them while it holds.
+	ServiceWindows []ServiceWindow
 	// Allowed and Disallowed gate the listener itself: a disallowed client is
 	// refused before any processing, and a non-empty allowed set makes the
 	// listener serve only the clients it lists.
@@ -98,7 +99,7 @@ func (c Config) Validate() error {
 	if err := validateProfileSafesearch(c.Safesearch, c.Profiles); err != nil {
 		return err
 	}
-	if err := validateFocusWindows(c.FocusWindows, c.Schedules, c.Clients, c.Services); err != nil {
+	if err := validateServiceWindows(c.ServiceWindows, c.Schedules, c.Clients, c.Services); err != nil {
 		return err
 	}
 	if _, err := filter.Compile(filter.Config{
@@ -244,7 +245,7 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 
-	focusWindows, err := s.FocusWindows(ctx)
+	windows, err := s.ServiceWindows(ctx)
 	if err != nil {
 		return Config{}, err
 	}
@@ -301,7 +302,7 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		ProfileServices: enables,
 		ClientServices:  clientEnables,
 		Safesearch:      safeEnables,
-		FocusWindows:    focusWindows,
+		ServiceWindows:  windows,
 		Allowed:         allowed,
 		Disallowed:      disallowed,
 		Default:         filter.ProfileID(defaultProfile),
