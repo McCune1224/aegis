@@ -143,14 +143,14 @@ func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 			users = append(users, fmt.Sprintf("rule %d", rule.ID))
 		}
 	}
-	windows, err := s.store.FocusWindows(ctx)
+	windows, err := s.store.ServiceWindows(ctx)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	for _, window := range windows {
 		if window.Schedule == name {
-			users = append(users, fmt.Sprintf("focus window %q", window.Name))
+			users = append(users, fmt.Sprintf("window %q", window.Name))
 		}
 	}
 	if len(users) > 0 {

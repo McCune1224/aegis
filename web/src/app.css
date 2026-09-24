@@ -1014,7 +1014,7 @@ input[type="checkbox"] {
   min-width: 140px;
 }
 
-.focus-group {
+.window-group {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -1022,24 +1022,24 @@ input[type="checkbox"] {
   border-bottom: 1px solid var(--border);
 }
 
-.focus-group .group-head {
+.window-group .group-head {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
 }
 
-.focus-group .group-head .toggle {
+.window-group .group-head .toggle {
   flex: 1;
 }
 
-.focus-group .group-services {
+.window-group .group-services {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2) var(--sp-5);
   padding-left: var(--sp-4);
 }
 
-.focus-group .group-services .toggle {
+.window-group .group-services .toggle {
   min-width: 140px;
 }
 
@@ -1504,4 +1504,75 @@ input[type="checkbox"].switch:disabled {
   color: var(--accent-hover);
   font-size: 10px;
   padding: 2px 6px;
+}
+
+/* Time windows, merged into the services page */
+.windows-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.windows-head h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.windows-head p {
+  font-size: 13px;
+}
+
+.badge.allow-badge {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.badge.block-badge {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.window-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-3);
+  align-items: end;
+}
+
+.window-action-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.window-action-picker .muted {
+  font-size: 13px;
+}
+
+/* Clients page: seen devices first, manual entry second */
+.clients-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.clients-head h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.clients-head p {
+  font-size: 13px;
+}
+
+.seen-devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }

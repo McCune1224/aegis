@@ -102,11 +102,14 @@ func ParseCatalog(body []byte) (Catalog, error) {
 // Scope is where one enabled service's rules apply and when. A profile scope
 // covers every client on that profile and is always on. A client scope covers
 // one identity: always on by itself, and with a Schedule attached only while
-// Schedule covers the query minute, which is the form a focus window uses.
+// Schedule covers the query minute, which is the form a window uses. Action
+// names the verdict the rules carry; a window that allows a service during its
+// schedule emits allow rules through the same path.
 type Scope struct {
 	Profile  filter.ProfileID
 	Client   filter.ClientKey
 	Schedule string
+	Action   filter.Action
 }
 
 // Specs converts the rules of one service into the rule specs that enabling it
@@ -151,7 +154,7 @@ func ruleSpec(text string, source filter.Source, scope Scope, line int) (filter.
 	spec := filter.RuleSpec{
 		ID:       ruleID(source.ID, scope, line),
 		Source:   source,
-		Action:   filter.ActionBlock,
+		Action:   scope.Action,
 		Profile:  scope.Profile,
 		Client:   scope.Client,
 		Schedule: scope.Schedule,

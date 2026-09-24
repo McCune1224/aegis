@@ -14,7 +14,7 @@ import (
 )
 
 // focusStore holds two clients on one profile, a school-nights schedule, a
-// catalog with YouTube, and a focus window blocking YouTube for the tablet
+// catalog with YouTube, and a window blocking YouTube for the tablet
 // only during that schedule.
 func focusStore(t *testing.T) *store.Store {
 	t.Helper()
@@ -35,7 +35,7 @@ func focusStore(t *testing.T) *store.Store {
 	require.NoError(t, s.SaveCatalog(ctx, time.Unix(1_700_000_100, 0), []services.Service{
 		{ID: "youtube", Name: "YouTube", Group: "streaming", Rules: []string{"||youtube.com^"}},
 	}))
-	require.NoError(t, s.SaveFocusWindow(ctx, store.FocusWindow{
+	require.NoError(t, s.SaveServiceWindow(ctx, store.ServiceWindow{
 		Name:     "school-nights",
 		Schedule: "school-nights",
 		Clients:  []filter.ClientKey{"tablet"},
@@ -44,7 +44,7 @@ func focusStore(t *testing.T) *store.Store {
 	return s
 }
 
-func TestAFocusWindowBlocksOneClientOnlyDuringItsSchedule(t *testing.T) {
+func TestAWindowBlocksOneClientOnlyDuringItsSchedule(t *testing.T) {
 	ctx := t.Context()
 	mondayNoon := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	mondayNight := time.Date(2026, 9, 21, 22, 0, 0, 0, time.UTC)
@@ -57,7 +57,7 @@ func TestAFocusWindowBlocksOneClientOnlyDuringItsSchedule(t *testing.T) {
 	laptop := netip.MustParseAddr("10.9.9.3")
 
 	require.Equal(t, filter.ActionAllow, rt.Decide(youtube, tablet).Action,
-		"outside the window the focus window contributes nothing")
+		"outside the window the window contributes nothing")
 	require.Equal(t, filter.ActionAllow, rt.Decide(youtube, laptop).Action)
 
 	clock = mondayNight
@@ -70,10 +70,10 @@ func TestAFocusWindowBlocksOneClientOnlyDuringItsSchedule(t *testing.T) {
 		"a client the window does not name stays unblocked")
 }
 
-// TestAFocusWindowIsAdditiveAtTheProfileLevel covers the rule that a window
+// TestAWindowIsAdditiveAtTheProfileLevel covers the rule that a window
 // only ever adds blocking: the profile's always-on services stay blocked
 // outside every window.
-func TestAFocusWindowIsAdditiveAtTheProfileLevel(t *testing.T) {
+func TestAWindowIsAdditiveAtTheProfileLevel(t *testing.T) {
 	ctx := t.Context()
 	s := focusStore(t)
 	require.NoError(t, s.SetProfileServices(ctx, "kids", []string{"youtube"}))

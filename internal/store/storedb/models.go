@@ -43,14 +43,6 @@ type Discovery struct {
 	Last     int64
 }
 
-type FocusWindow struct {
-	ID       int64
-	Name     string
-	Schedule string
-	Clients  string
-	Services string
-}
-
 type Lease struct {
 	Address  string
 	Mac      string
@@ -123,6 +115,15 @@ type Service struct {
 	Rules     string
 	FetchedAt int64
 	IconSvg   string
+}
+
+type ServiceWindow struct {
+	ID       int64
+	Name     string
+	Schedule string
+	Clients  string
+	Services string
+	Action   string
 }
 
 type Setting struct {

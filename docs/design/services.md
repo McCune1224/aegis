@@ -54,7 +54,7 @@ skipped.
 the client and keeps one global set beside it; a client with its own list uses
 that list instead of the global one. Aegis has no global set. A client's
 profile is its base layer, and the client's own enablements add to it, the same
-rule the focus windows follow. Turning a service off for one device against a
+rule the time windows follow (see docs/design/windows.md). Turning a service off for one device against a
 profile that blocks it needs an allow rule, which the filter engine already
 expresses; the services page does not hide that from the operator, the query
 log names the service through the rule's `Source` either way.

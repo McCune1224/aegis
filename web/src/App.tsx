@@ -4,7 +4,6 @@ import {
   createRoute as postRoute,
   createRule as postRule,
   deleteClient as removeClient,
-  deleteFocus as removeFocus,
   deleteProfile as removeProfile,
   deleteRewrite as removeRewrite,
   deleteRoute as removeRoute,
@@ -17,11 +16,11 @@ import {
   getStatus,
   listCatalog,
   listClients,
-  listFocus,
   listProfiles,
   listRewrites,
   listRoutes,
   listRules,
+  listWindows,
   listSchedules,
   listSafesearch,
   listDiscoveries,
@@ -33,11 +32,12 @@ import {
   refreshServices as postRefreshServices,
   saveClient as putClient,
   saveClientServices as putClientServices,
-  saveFocus as putFocus,
   saveProfile as putProfile,
   saveProfileSafesearch as putProfileSafesearch,
   saveProfileServices as putProfileServices,
   saveRewrite as putRewrite,
+  saveWindow as putWindow,
+  deleteWindow as deleteWindowByName,
   saveSchedule as putSchedule,
   saveSource as putSource,
   saveUpstream as putUpstream,
@@ -48,8 +48,6 @@ import {
   type CatalogEntry,
   type Client,
   type ClientInput,
-  type FocusWindow,
-  type FocusWindowInput,
   type Profile,
   type ProfileInput,
   type BlockedService,
@@ -60,6 +58,8 @@ import {
   type Route,
   type RouteInput,
   type Rule,
+  type ServiceWindow,
+  type ServiceWindowInput,
   type RuleInput,
   type Schedule,
   type ScheduleInput,
@@ -69,11 +69,10 @@ import {
   type UpstreamInput,
   type AccessSettings,
 } from "./api";
-import { IconClients, IconClock, IconDashboard, IconFocus, IconGear, IconLog, IconRewrite, IconRules, IconServices, IconShield, IconSources, IconUpstream } from "./Icons";
+import { IconClients, IconClock, IconDashboard, IconGear, IconLog, IconRewrite, IconRules, IconServices, IconShield, IconSources, IconUpstream } from "./Icons";
 import BlockedServices, { type ServiceScope } from "./BlockedServices";
 import Clients from "./Clients";
 import Dashboard from "./Dashboard";
-import Focus from "./Focus";
 import QueryLog from "./QueryLog";
 import Settings from "./Settings";
 import { createQueryLog } from "./querylog";
@@ -84,7 +83,7 @@ import Schedules from "./Schedules";
 import Sources from "./Sources";
 import Upstreams from "./Upstreams";
 
-type Tab = "dashboard" | "log" | "clients" | "services" | "profiles" | "focus" | "sources" | "rules" | "schedules" | "rewrites" | "upstreams" | "settings";
+type Tab = "dashboard" | "log" | "clients" | "services" | "profiles" | "sources" | "rules" | "schedules" | "rewrites" | "upstreams" | "settings";
 
 type NavItem = { id: Tab; label: string; icon: () => JSX.Element };
 
@@ -94,7 +93,6 @@ const NAV: NavItem[] = [
   { id: "clients", label: "Clients", icon: IconClients },
   { id: "services", label: "Blocked Services", icon: IconServices },
   { id: "profiles", label: "Profiles", icon: IconShield },
-  { id: "focus", label: "Focus", icon: IconFocus },
   { id: "rules", label: "Rules", icon: IconRules },
   { id: "schedules", label: "Schedules", icon: IconClock },
   { id: "rewrites", label: "Rewrites", icon: IconRewrite },
@@ -109,7 +107,6 @@ const TITLES: Record<Tab, string> = {
   clients: "Clients",
   services: "Blocked Services",
   profiles: "Profiles",
-  focus: "Focus",
   rules: "Rules",
   schedules: "Schedules",
   rewrites: "Rewrites",
@@ -131,7 +128,7 @@ export default function App() {
   const [threats, setThreats] = createSignal<ThreatFinding[]>([]);
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [schedules, setSchedules] = createSignal<Schedule[]>([]);
-  const [focusWindows, setFocusWindows] = createSignal<FocusWindow[]>([]);
+  const [windows, setWindows] = createSignal<ServiceWindow[]>([]);
   const [rewrites, setRewrites] = createSignal<Rewrite[]>([]);
   const [upstreamRows, setUpstreamRows] = createSignal<Upstream[]>([]);
   const [routes, setRoutes] = createSignal<Route[]>([]);
@@ -147,7 +144,7 @@ export default function App() {
   const log = createQueryLog({ live: live() });
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextFocus, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices, nextSafesearch, nextDiscoveries, nextThreats] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextWindows, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices, nextSafesearch, nextDiscoveries, nextThreats] =
       await Promise.all([
         listProfiles(),
         listClients(),
@@ -155,7 +152,7 @@ export default function App() {
         listCatalog(),
         listRules(),
         listSchedules(),
-        listFocus(),
+        listWindows(),
         listRewrites(),
         listUpstreams(),
         listRoutes(),
@@ -173,7 +170,7 @@ export default function App() {
     setCatalog(nextCatalog);
     setRules(nextRules);
     setSchedules(nextSchedules);
-    setFocusWindows(nextFocus);
+    setWindows(nextWindows);
     setRewrites(nextRewrites);
     setUpstreamRows(nextUpstreams);
     setRoutes(nextRoutes);
@@ -251,13 +248,13 @@ export default function App() {
     await refresh();
   }
 
-  async function addFocus(name: string, input: FocusWindowInput) {
-    await putFocus(name, input);
+  async function addWindow(name: string, input: ServiceWindowInput) {
+    await putWindow(name, input);
     await refresh();
   }
 
-  async function deleteFocusWindow(name: string) {
-    await removeFocus(name);
+  async function deleteServiceWindow(name: string) {
+    await deleteWindowByName(name);
     await refresh();
   }
 
@@ -400,13 +397,7 @@ export default function App() {
             <Show when={tab() === "dashboard"}>
               <Dashboard
                 entries={log.entries()}
-                discoveries={discoveries()}
                 threats={threats()}
-                onClaimDiscovery={claimDiscovery}
-                onDismissDiscovery={async (mac) => {
-                  await removeDiscovery(mac);
-                  await refresh();
-                }}
                 windowMinutes={windowMinutes()}
                 onSetWindow={setWindowMinutes}
                 onOpenLog={() => setTab("log")}
@@ -430,6 +421,12 @@ export default function App() {
                 <Clients
                   clients={clients()}
                   profiles={profiles()}
+                  discoveries={discoveries()}
+                  onClaimDiscovery={claimDiscovery}
+                  onDismissDiscovery={async (mac) => {
+                    await removeDiscovery(mac);
+                    await refresh();
+                  }}
                   onSave={saveClient}
                   onDelete={deleteClient}
                 />
@@ -443,8 +440,12 @@ export default function App() {
                   profileNames={profiles().map((profile) => profile.name)}
                   clients={clients()}
                   defaultProfile={defaultProfile()}
+                  schedules={schedules()}
+                  windows={windows()}
                   onSave={saveClientServices}
                   onRefreshServices={refreshServiceCatalog}
+                  onSaveWindow={addWindow}
+                  onDeleteWindow={deleteServiceWindow}
                 />
               </div>
             </Show>
@@ -458,20 +459,6 @@ export default function App() {
                   onDelete={deleteProfile}
                   onSetDefault={makeDefault}
                   onSaveSafesearch={saveProfileSafesearch}
-                />
-              </div>
-            </Show>
-            <Show when={tab() === "focus"}>
-              <div class="screen-inner">
-                <Focus
-                  windows={focusWindows()}
-                  schedules={schedules()}
-                  clients={clients()}
-                  services={services()}
-                  serviceGroups={serviceGroups()}
-                  onSave={addFocus}
-                  onDelete={deleteFocusWindow}
-                  onRefreshServices={refreshServiceCatalog}
                 />
               </div>
             </Show>

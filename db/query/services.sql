@@ -34,3 +34,24 @@ DELETE FROM client_services WHERE client = ?;
 
 -- name: InsertClientService :exec
 INSERT INTO client_services (client, service) VALUES (?, ?);
+
+-- name: ListServiceWindows :many
+SELECT id, name, schedule, action, clients, services
+FROM service_windows ORDER BY name;
+
+-- name: ServiceWindowByName :one
+SELECT id, name, schedule, action, clients, services
+FROM service_windows WHERE name = ?;
+
+-- name: SaveServiceWindow :one
+INSERT INTO service_windows (name, schedule, action, clients, services)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (name) DO UPDATE SET
+    schedule = excluded.schedule,
+    action   = excluded.action,
+    clients  = excluded.clients,
+    services = excluded.services
+RETURNING id;
+
+-- name: DeleteServiceWindow :exec
+DELETE FROM service_windows WHERE name = ?;

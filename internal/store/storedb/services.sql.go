@@ -27,6 +27,15 @@ func (q *Queries) DeleteProfileServices(ctx context.Context, profile string) err
 	return err
 }
 
+const deleteServiceWindow = `-- name: DeleteServiceWindow :exec
+DELETE FROM service_windows WHERE name = ?
+`
+
+func (q *Queries) DeleteServiceWindow(ctx context.Context, name string) error {
+	_, err := q.db.ExecContext(ctx, deleteServiceWindow, name)
+	return err
+}
+
 const insertClientService = `-- name: InsertClientService :exec
 INSERT INTO client_services (client, service) VALUES (?, ?)
 `
@@ -96,6 +105,50 @@ func (q *Queries) ListProfileServices(ctx context.Context) ([]ProfileService, er
 	for rows.Next() {
 		var i ProfileService
 		if err := rows.Scan(&i.Profile, &i.Service); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServiceWindows = `-- name: ListServiceWindows :many
+SELECT id, name, schedule, action, clients, services
+FROM service_windows ORDER BY name
+`
+
+type ListServiceWindowsRow struct {
+	ID       int64
+	Name     string
+	Schedule string
+	Action   string
+	Clients  string
+	Services string
+}
+
+func (q *Queries) ListServiceWindows(ctx context.Context) ([]ListServiceWindowsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listServiceWindows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListServiceWindowsRow
+	for rows.Next() {
+		var i ListServiceWindowsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Schedule,
+			&i.Action,
+			&i.Clients,
+			&i.Services,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -204,6 +257,66 @@ func (q *Queries) ListServicesForProfile(ctx context.Context, profile string) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const saveServiceWindow = `-- name: SaveServiceWindow :one
+INSERT INTO service_windows (name, schedule, action, clients, services)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (name) DO UPDATE SET
+    schedule = excluded.schedule,
+    action   = excluded.action,
+    clients  = excluded.clients,
+    services = excluded.services
+RETURNING id
+`
+
+type SaveServiceWindowParams struct {
+	Name     string
+	Schedule string
+	Action   string
+	Clients  string
+	Services string
+}
+
+func (q *Queries) SaveServiceWindow(ctx context.Context, arg SaveServiceWindowParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, saveServiceWindow,
+		arg.Name,
+		arg.Schedule,
+		arg.Action,
+		arg.Clients,
+		arg.Services,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const serviceWindowByName = `-- name: ServiceWindowByName :one
+SELECT id, name, schedule, action, clients, services
+FROM service_windows WHERE name = ?
+`
+
+type ServiceWindowByNameRow struct {
+	ID       int64
+	Name     string
+	Schedule string
+	Action   string
+	Clients  string
+	Services string
+}
+
+func (q *Queries) ServiceWindowByName(ctx context.Context, name string) (ServiceWindowByNameRow, error) {
+	row := q.db.QueryRowContext(ctx, serviceWindowByName, name)
+	var i ServiceWindowByNameRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Schedule,
+		&i.Action,
+		&i.Clients,
+		&i.Services,
+	)
+	return i, err
 }
 
 const upsertService = `-- name: UpsertService :exec
