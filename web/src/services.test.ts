@@ -8,6 +8,7 @@ const youtube: BlockedService = {
   group: "streaming",
   rule_count: 2,
   profiles: [],
+  clients: [],
 };
 
 const fourchan: BlockedService = {
@@ -16,6 +17,7 @@ const fourchan: BlockedService = {
   group: "social_network",
   rule_count: 1,
   profiles: [],
+  clients: [],
 };
 
 const orphan: BlockedService = {
@@ -24,6 +26,7 @@ const orphan: BlockedService = {
   group: "",
   rule_count: 1,
   profiles: [],
+  clients: [],
 };
 
 describe("groupServices", () => {

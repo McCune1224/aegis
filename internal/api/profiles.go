@@ -130,6 +130,23 @@ func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 			for i := range cfg.Profiles {
 				if cfg.Profiles[i].ID == id {
 					cfg.Profiles = append(cfg.Profiles[:i], cfg.Profiles[i+1:]...)
+					// The database cascades the enablements away; dropping them
+					// here keeps the config the delete validates against
+					// consistent with what it will become.
+					enables := cfg.ProfileServices[:0]
+					for _, enable := range cfg.ProfileServices {
+						if enable.Profile != id {
+							enables = append(enables, enable)
+						}
+					}
+					cfg.ProfileServices = enables
+					searches := cfg.Safesearch[:0]
+					for _, enable := range cfg.Safesearch {
+						if enable.Profile != id {
+							searches = append(searches, enable)
+						}
+					}
+					cfg.Safesearch = searches
 					return nil
 				}
 			}

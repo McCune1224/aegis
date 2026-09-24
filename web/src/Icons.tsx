@@ -76,6 +76,15 @@ export const IconShield = () =>
     </>,
   );
 
+export const IconServices = () =>
+  base(
+    <>
+      <path d="M2.5 5h11 M2.5 11h11" />
+      <circle cx="10.5" cy="5" r="2" />
+      <circle cx="5.5" cy="11" r="2" />
+    </>,
+  );
+
 export const IconRules = () =>
   base(
     <>

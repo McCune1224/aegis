@@ -13,13 +13,15 @@ import (
 )
 
 // serviceResponse is one catalog entry as it leaves over HTTP, with the
-// profiles that block it.
+// profiles and the clients that block it.
 type serviceResponse struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
 	Group     string   `json:"group"`
 	RuleCount int      `json:"rule_count"`
+	IconSVG   string   `json:"icon_svg,omitempty"`
 	Profiles  []string `json:"profiles"`
+	Clients   []string `json:"clients"`
 }
 
 type servicesResponse struct {
@@ -37,6 +39,11 @@ type profileServicesResponse struct {
 	Services []string `json:"services"`
 }
 
+type clientServicesResponse struct {
+	Client   string   `json:"client"`
+	Services []string `json:"services"`
+}
+
 func (s *Server) listServices(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.store.Load(r.Context())
 	if err != nil {
@@ -48,6 +55,10 @@ func (s *Server) listServices(w http.ResponseWriter, r *http.Request) {
 	for _, enable := range cfg.ProfileServices {
 		byProfile[enable.Service] = append(byProfile[enable.Service], string(enable.Profile))
 	}
+	byClient := make(map[string][]string, len(cfg.ClientServices))
+	for _, enable := range cfg.ClientServices {
+		byClient[enable.Service] = append(byClient[enable.Service], string(enable.Client))
+	}
 
 	response := servicesResponse{Services: make([]serviceResponse, 0, len(cfg.Services)), Groups: []string{}}
 	groups := make(map[string]bool, len(cfg.Services))
@@ -58,12 +69,19 @@ func (s *Server) listServices(w http.ResponseWriter, r *http.Request) {
 			profiles = []string{}
 		}
 		sort.Strings(profiles)
+		clients := byClient[row.ID]
+		if clients == nil {
+			clients = []string{}
+		}
+		sort.Strings(clients)
 		response.Services = append(response.Services, serviceResponse{
 			ID:        row.ID,
 			Name:      row.Name,
 			Group:     row.Group,
 			RuleCount: len(row.Rules),
+			IconSVG:   row.IconSVG,
 			Profiles:  profiles,
+			Clients:   clients,
 		})
 		if row.Group != "" {
 			groups[row.Group] = true
@@ -125,14 +143,8 @@ func (s *Server) putProfileServices(w http.ResponseWriter, r *http.Request) {
 			if !profileExists(*cfg, id) {
 				return errNotFound
 			}
-			known := make(map[string]bool, len(cfg.Services))
-			for _, row := range cfg.Services {
-				known[row.ID] = true
-			}
-			for _, service := range set {
-				if !known[service] {
-					return badRequest{fmt.Errorf("service %q is not in the catalog", service)}
-				}
+			if err := checkServiceSet(*cfg, set); err != nil {
+				return err
 			}
 
 			enables := make([]store.ProfileService, 0, len(cfg.ProfileServices)+len(set))
@@ -154,6 +166,74 @@ func (s *Server) putProfileServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, profileServicesResponse{Profile: string(id), Services: set})
+}
+
+func (s *Server) getClientServices(w http.ResponseWriter, r *http.Request) {
+	key := filter.ClientKey(r.PathValue("name"))
+	cfg, err := s.store.Load(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !clientExists(cfg, key) {
+		writeError(w, errNotFound)
+		return
+	}
+
+	set := make([]string, 0)
+	for _, enable := range cfg.ClientServices {
+		if enable.Client == key {
+			set = append(set, enable.Service)
+		}
+	}
+	writeJSON(w, http.StatusOK, clientServicesResponse{Client: string(key), Services: set})
+}
+
+// putClientServices replaces the whole set of services one client blocks for
+// itself, the same whole-answer body the profile endpoint takes. The set adds
+// to what the client's profile blocks; it does not subtract from it.
+func (s *Server) putClientServices(w http.ResponseWriter, r *http.Request) {
+	key := filter.ClientKey(r.PathValue("name"))
+	request, err := decodeJSON[profileServicesRequest](r)
+	if err != nil {
+		writeError(w, badRequest{err})
+		return
+	}
+
+	set, err := normalizeIDSet(request.Services, "service")
+	if err != nil {
+		writeError(w, badRequest{err})
+		return
+	}
+
+	err = s.apply(r.Context(),
+		func(cfg *store.Config) error {
+			if !clientExists(*cfg, key) {
+				return errNotFound
+			}
+			if err := checkServiceSet(*cfg, set); err != nil {
+				return err
+			}
+
+			enables := make([]store.ClientService, 0, len(cfg.ClientServices)+len(set))
+			for _, enable := range cfg.ClientServices {
+				if enable.Client != key {
+					enables = append(enables, enable)
+				}
+			}
+			for _, service := range set {
+				enables = append(enables, store.ClientService{Client: key, Service: service})
+			}
+			cfg.ClientServices = enables
+			return nil
+		},
+		func(ctx context.Context) error { return s.store.SetClientServices(ctx, key, set) },
+	)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, clientServicesResponse{Client: string(key), Services: set})
 }
 
 // refreshServices fetches the catalog now and republishes, so an operator sees
@@ -198,4 +278,28 @@ func profileExists(cfg store.Config, id filter.ProfileID) bool {
 		}
 	}
 	return false
+}
+
+func clientExists(cfg store.Config, key filter.ClientKey) bool {
+	for _, record := range cfg.Clients {
+		if record.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// checkServiceSet refuses a set naming a service the catalog does not carry,
+// so an enablement cannot silently block nothing.
+func checkServiceSet(cfg store.Config, set []string) error {
+	known := make(map[string]bool, len(cfg.Services))
+	for _, row := range cfg.Services {
+		known[row.ID] = true
+	}
+	for _, service := range set {
+		if !known[service] {
+			return badRequest{fmt.Errorf("service %q is not in the catalog", service)}
+		}
+	}
+	return nil
 }

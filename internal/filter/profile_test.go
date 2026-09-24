@@ -115,6 +115,20 @@ func TestProfileScopeBreaksTiesByDeclarationOrderAcrossScopes(t *testing.T) {
 	require.Equal(t, "listed", unscoped.Match.RuleID)
 }
 
+func TestClientScopedRuleAnswersOnlyForTheClientItNames(t *testing.T) {
+	spec := hagezi("block-video", filter.MatchSubdomains, "video.example")
+	spec.Client = "tablet"
+	spec.Action = filter.ActionBlock
+	rs := compileProfiles(t, twoProfiles([]filter.RuleSpec{spec}))
+
+	blocked := rs.Decide(domain(t, "video.example"), "tablet", noAddress, testNow)
+	require.Equal(t, filter.ActionBlock, blocked.Action)
+	require.NotNil(t, blocked.Match)
+	require.Equal(t, "block-video", blocked.Match.RuleID)
+
+	require.Equal(t, filter.ActionAllow, rs.Decide(domain(t, "video.example"), "laptop", noAddress, testNow).Action)
+}
+
 func TestScheduledRuleScopeIsTheProfileItNames(t *testing.T) {
 	cfg := twoProfiles([]filter.RuleSpec{
 		scheduledRule("block-games", filter.MatchSubdomains, filter.ActionBlock, "games.example", "night", ""),

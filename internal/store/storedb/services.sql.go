@@ -9,12 +9,35 @@ import (
 	"context"
 )
 
+const deleteClientServices = `-- name: DeleteClientServices :exec
+DELETE FROM client_services WHERE client = ?
+`
+
+func (q *Queries) DeleteClientServices(ctx context.Context, client string) error {
+	_, err := q.db.ExecContext(ctx, deleteClientServices, client)
+	return err
+}
+
 const deleteProfileServices = `-- name: DeleteProfileServices :exec
 DELETE FROM profile_services WHERE profile = ?
 `
 
 func (q *Queries) DeleteProfileServices(ctx context.Context, profile string) error {
 	_, err := q.db.ExecContext(ctx, deleteProfileServices, profile)
+	return err
+}
+
+const insertClientService = `-- name: InsertClientService :exec
+INSERT INTO client_services (client, service) VALUES (?, ?)
+`
+
+type InsertClientServiceParams struct {
+	Client  string
+	Service string
+}
+
+func (q *Queries) InsertClientService(ctx context.Context, arg InsertClientServiceParams) error {
+	_, err := q.db.ExecContext(ctx, insertClientService, arg.Client, arg.Service)
 	return err
 }
 
@@ -30,6 +53,33 @@ type InsertProfileServiceParams struct {
 func (q *Queries) InsertProfileService(ctx context.Context, arg InsertProfileServiceParams) error {
 	_, err := q.db.ExecContext(ctx, insertProfileService, arg.Profile, arg.Service)
 	return err
+}
+
+const listClientServices = `-- name: ListClientServices :many
+SELECT client, service FROM client_services ORDER BY client, service
+`
+
+func (q *Queries) ListClientServices(ctx context.Context) ([]ClientService, error) {
+	rows, err := q.db.QueryContext(ctx, listClientServices)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClientService
+	for rows.Next() {
+		var i ClientService
+		if err := rows.Scan(&i.Client, &i.Service); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listProfileServices = `-- name: ListProfileServices :many
@@ -60,28 +110,65 @@ func (q *Queries) ListProfileServices(ctx context.Context) ([]ProfileService, er
 }
 
 const listServices = `-- name: ListServices :many
-SELECT id, name, group_name, rules, fetched_at FROM services ORDER BY id
+SELECT id, name, group_name, rules, icon_svg, fetched_at FROM services ORDER BY id
 `
 
-func (q *Queries) ListServices(ctx context.Context) ([]Service, error) {
+type ListServicesRow struct {
+	ID        string
+	Name      string
+	GroupName string
+	Rules     string
+	IconSvg   string
+	FetchedAt int64
+}
+
+func (q *Queries) ListServices(ctx context.Context) ([]ListServicesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listServices)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Service
+	var items []ListServicesRow
 	for rows.Next() {
-		var i Service
+		var i ListServicesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
 			&i.GroupName,
 			&i.Rules,
+			&i.IconSvg,
 			&i.FetchedAt,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServicesForClient = `-- name: ListServicesForClient :many
+SELECT service FROM client_services WHERE client = ? ORDER BY service
+`
+
+func (q *Queries) ListServicesForClient(ctx context.Context, client string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listServicesForClient, client)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var service string
+		if err := rows.Scan(&service); err != nil {
+			return nil, err
+		}
+		items = append(items, service)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -120,12 +207,13 @@ func (q *Queries) ListServicesForProfile(ctx context.Context, profile string) ([
 }
 
 const upsertService = `-- name: UpsertService :exec
-INSERT INTO services (id, name, group_name, rules, fetched_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO services (id, name, group_name, rules, icon_svg, fetched_at)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (id) DO UPDATE SET
     name = excluded.name,
     group_name = excluded.group_name,
     rules = excluded.rules,
+    icon_svg = excluded.icon_svg,
     fetched_at = excluded.fetched_at
 `
 
@@ -134,6 +222,7 @@ type UpsertServiceParams struct {
 	Name      string
 	GroupName string
 	Rules     string
+	IconSvg   string
 	FetchedAt int64
 }
 
@@ -143,6 +232,7 @@ func (q *Queries) UpsertService(ctx context.Context, arg UpsertServiceParams) er
 		arg.Name,
 		arg.GroupName,
 		arg.Rules,
+		arg.IconSvg,
 		arg.FetchedAt,
 	)
 	return err

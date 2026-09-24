@@ -158,7 +158,9 @@ export type BlockedService = {
   name: string;
   group: string;
   rule_count: number;
+  icon_svg?: string;
   profiles: string[];
+  clients: string[];
 };
 
 export type ServiceCatalog = {
@@ -169,6 +171,11 @@ export type ServiceCatalog = {
 
 export type ProfileServices = {
   profile: string;
+  services: string[];
+};
+
+export type ClientServices = {
+  client: string;
   services: string[];
 };
 
@@ -183,6 +190,19 @@ export function listProfileServices(name: string): Promise<ProfileServices> {
 // saveProfileServices replaces the whole set of services one profile blocks.
 export function saveProfileServices(name: string, services: string[]): Promise<ProfileServices> {
   return request<ProfileServices>(`/api/v1/profiles/${encodeURIComponent(name)}/services`, {
+    method: "PUT",
+    body: JSON.stringify({ services }),
+  });
+}
+
+export function listClientServices(name: string): Promise<ClientServices> {
+  return request<ClientServices>(`/api/v1/clients/${encodeURIComponent(name)}/services`);
+}
+
+// saveClientServices replaces the whole set of services one client blocks for
+// itself, on top of what its profile blocks.
+export function saveClientServices(name: string, services: string[]): Promise<ClientServices> {
+  return request<ClientServices>(`/api/v1/clients/${encodeURIComponent(name)}/services`, {
     method: "PUT",
     body: JSON.stringify({ services }),
   });

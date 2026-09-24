@@ -164,9 +164,10 @@ type Source struct {
 // rejects a rule whose payload does not fit its kind. A rule may name a
 // Schedule, which keeps it active only while that schedule covers the query
 // minute, and at most one scope: a Client, which keeps it to one identity, or
-// a Profile, which keeps it to every client on that profile. A client scope
-// without a schedule has no meaning, so Compile rejects it; a profile scope is
-// the way a service set applies to a whole policy group and needs no schedule.
+// a Profile, which keeps it to every client on that profile. Either scope
+// stands without a schedule; the client scope is how a per-client enablement
+// applies to one device always, and the profile scope is how a service set
+// applies to a whole policy group.
 type RuleSpec struct {
 	ID       string
 	Source   Source
@@ -224,8 +225,8 @@ type RuleSet struct {
 }
 
 // entry holds the winner among the rules for one name plus the ones scoped to
-// a profile, which cannot be folded at compile time because the winner depends
-// on who asks.
+// a profile or a client, which cannot be folded at compile time because the
+// winner depends on who asks.
 type entry struct {
 	best   *candidate
 	scoped []candidate
@@ -237,16 +238,24 @@ type candidate struct {
 	labels     int
 	exact      bool
 	order      int
-	// profile names the profile this candidate is scoped to. Empty means every
-	// profile, so an unscoped rule is a candidate for everyone.
+	// profile and client name the scope this candidate carries, at most one of
+	// the two. Both empty means every query, so an unscoped rule is a candidate
+	// for everyone.
 	profile ProfileID
+	client  ClientKey
 }
 
 // applies reports whether this candidate is a candidate for a client on
 // profile. Scope only filters candidacy; the tier, specificity, and order
 // comparison is unchanged.
-func (c *candidate) applies(profile ProfileID) bool {
-	return c.profile == "" || c.profile == profile
+func (c *candidate) applies(profile ProfileID, client ClientKey) bool {
+	if c.profile != "" {
+		return c.profile == profile
+	}
+	if c.client != "" {
+		return c.client == client
+	}
+	return true
 }
 
 // patternRule is one compiled wildcard or regex rule. A wildcard compiles to
@@ -282,14 +291,14 @@ func (p *patternIndex) add(rule patternRule, kind MatchKind, pattern string) {
 
 // match returns the winner among the pattern rules that can match name: the ones
 // in the buckets name's own labels name, plus the ones every name tests.
-func (p *patternIndex) match(name string, profile ProfileID) *candidate {
+func (p *patternIndex) match(name string, profile ProfileID, client ClientKey) *candidate {
 	var best *candidate
 	for start := 0; ; {
 		label := name[start:]
 		if bucket, held := p.byTail[label]; held {
 			for i := range bucket {
 				rule := &bucket[i]
-				if rule.candidate.applies(profile) && rule.re.MatchString(name) {
+				if rule.candidate.applies(profile, client) && rule.re.MatchString(name) {
 					best = better(best, &rule.candidate)
 				}
 			}
@@ -302,7 +311,7 @@ func (p *patternIndex) match(name string, profile ProfileID) *candidate {
 	}
 	for i := range p.always {
 		rule := &p.always[i]
-		if rule.candidate.applies(profile) && rule.re.MatchString(name) {
+		if rule.candidate.applies(profile, client) && rule.re.MatchString(name) {
 			best = better(best, &rule.candidate)
 		}
 	}
@@ -397,9 +406,6 @@ func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int, kn
 		if spec.Profile != "" && !knownProfiles[spec.Profile] {
 			return fmt.Errorf("filter: rule %q names profile %q, which is not defined", spec.ID, spec.Profile)
 		}
-		if spec.Client != "" && spec.Schedule == "" {
-			return fmt.Errorf("filter: rule %q names a client but no schedule", spec.ID)
-		}
 
 		switch spec.Kind {
 		case MatchExact, MatchSubdomains:
@@ -416,6 +422,7 @@ func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int, kn
 				exact:      spec.Kind == MatchExact,
 				order:      order,
 				profile:    spec.Profile,
+				client:     spec.Client,
 			}
 			if spec.Schedule != "" {
 				if err := rs.schedule(spec, scheduleIndex, scheduledRule{
@@ -437,7 +444,7 @@ func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int, kn
 				e = &entry{}
 				table[spec.Domain.name] = e
 			}
-			if candidate.profile == "" {
+			if candidate.profile == "" && candidate.client == "" {
 				e.best = better(e.best, &candidate)
 			} else {
 				e.scoped = append(e.scoped, candidate)
@@ -455,6 +462,7 @@ func (rs *RuleSet) indexRules(specs []RuleSpec, scheduleIndex map[string]int, kn
 				action:     spec.Action,
 				order:      order,
 				profile:    spec.Profile,
+				client:     spec.Client,
 			}
 			if spec.Schedule != "" {
 				if err := rs.schedule(spec, scheduleIndex, scheduledRule{
@@ -553,14 +561,14 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 
 	if e := rs.exact[name.name]; e != nil {
 		best = better(best, e.best)
-		best = addScoped(best, e.scoped, scope.profile)
+		best = addScoped(best, e.scoped, scope.profile, client)
 	}
 
 	for start := 0; ; {
 		label := name.name[start:]
 		if e := rs.subdomains[label]; e != nil {
 			best = better(best, e.best)
-			best = addScoped(best, e.scoped, scope.profile)
+			best = addScoped(best, e.scoped, scope.profile, client)
 		}
 		dot := strings.IndexByte(label, '.')
 		if dot < 0 {
@@ -572,7 +580,7 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 	// A pattern ranks below an indexed rule of the same tier, since a pattern
 	// carries no specificity to compare. The action is the tier winner either
 	// way, so this orders only the provenance.
-	best = better(best, rs.patterns.match(name.name, scope.profile))
+	best = better(best, rs.patterns.match(name.name, scope.profile, client))
 
 	// The minute table names the schedule that owns this minute of the week;
 	// its rules join the comparison like any other candidate.
@@ -598,12 +606,12 @@ func (rs *RuleSet) Decide(name Domain, client ClientKey, address netip.Addr, now
 	return Verdict{Action: best.action, Match: &best.provenance, Policy: policy, Client: client}
 }
 
-// addScoped folds the candidates one name holds for the asking profile into
-// the running winner. A rule scoped to another profile is not a candidate at
-// all, so it cannot lose a comparison it was never in.
-func addScoped(current *candidate, scoped []candidate, profile ProfileID) *candidate {
+// addScoped folds the candidates one name holds for the asking profile and
+// client into the running winner. A rule scoped to someone else is not a
+// candidate at all, so it cannot lose a comparison it was never in.
+func addScoped(current *candidate, scoped []candidate, profile ProfileID, client ClientKey) *candidate {
 	for i := range scoped {
-		if scoped[i].applies(profile) {
+		if scoped[i].applies(profile, client) {
 			current = better(current, &scoped[i])
 		}
 	}

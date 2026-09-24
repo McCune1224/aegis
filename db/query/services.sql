@@ -1,13 +1,14 @@
 -- name: ListServices :many
-SELECT id, name, group_name, rules, fetched_at FROM services ORDER BY id;
+SELECT id, name, group_name, rules, icon_svg, fetched_at FROM services ORDER BY id;
 
 -- name: UpsertService :exec
-INSERT INTO services (id, name, group_name, rules, fetched_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO services (id, name, group_name, rules, icon_svg, fetched_at)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (id) DO UPDATE SET
     name = excluded.name,
     group_name = excluded.group_name,
     rules = excluded.rules,
+    icon_svg = excluded.icon_svg,
     fetched_at = excluded.fetched_at;
 
 -- name: ListProfileServices :many
@@ -21,3 +22,15 @@ DELETE FROM profile_services WHERE profile = ?;
 
 -- name: InsertProfileService :exec
 INSERT INTO profile_services (profile, service) VALUES (?, ?);
+
+-- name: ListClientServices :many
+SELECT client, service FROM client_services ORDER BY client, service;
+
+-- name: ListServicesForClient :many
+SELECT service FROM client_services WHERE client = ? ORDER BY service;
+
+-- name: DeleteClientServices :exec
+DELETE FROM client_services WHERE client = ?;
+
+-- name: InsertClientService :exec
+INSERT INTO client_services (client, service) VALUES (?, ?);

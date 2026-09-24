@@ -40,7 +40,7 @@ func TestParseCatalogReadsServicesAndGroups(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, []services.Service{
-		{ID: "youtube", Name: "YouTube", Group: "streaming", Rules: []string{"||youtube.com^", "||youtu.be^"}},
+		{ID: "youtube", Name: "YouTube", Group: "streaming", Rules: []string{"||youtube.com^", "||youtu.be^"}, IconSVG: "<svg/>"},
 		{ID: "4chan", Name: "4chan", Group: "social_network", Rules: []string{"||4chan.org^"}},
 	}, catalog.Services)
 	require.Equal(t, []string{"streaming", "social_network"}, catalog.Groups)

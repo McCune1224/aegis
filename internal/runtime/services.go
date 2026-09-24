@@ -59,12 +59,13 @@ func (s *ServiceSync) RefreshCatalog(ctx context.Context) error {
 	return s.engine.Reload(ctx)
 }
 
-// serviceRules turns every profile's enabled services into the block rules the
-// filter engine indexes, scoped to the profile that enabled them. The enable
-// list is stored in profile then service order, so declaration-order ties do
-// not shuffle between reloads.
+// serviceRules turns every enablement into the block rules the filter engine
+// indexes: a profile enablement is scoped to that profile, a client enablement
+// to that client, so both arrive as ordinary rules and nothing downstream grows
+// a case for services. The enable lists are stored in profile then client then
+// service order, so declaration-order ties do not shuffle between reloads.
 func serviceRules(cfg store.Config) ([]filter.RuleSpec, error) {
-	if len(cfg.ProfileServices) == 0 {
+	if len(cfg.ProfileServices) == 0 && len(cfg.ClientServices) == 0 {
 		return nil, nil
 	}
 
@@ -77,6 +78,14 @@ func serviceRules(cfg store.Config) ([]filter.RuleSpec, error) {
 			return nil, fmt.Errorf("runtime: profile %q blocks service %q, which is not in the catalog", enable.Profile, enable.Service)
 		}
 		specs, _ := services.Specs(service, services.Scope{Profile: enable.Profile})
+		rules = append(rules, specs...)
+	}
+	for _, enable := range cfg.ClientServices {
+		service, exists := byID[enable.Service]
+		if !exists {
+			return nil, fmt.Errorf("runtime: client %q blocks service %q, which is not in the catalog", enable.Client, enable.Service)
+		}
+		specs, _ := services.Specs(service, services.Scope{Client: enable.Client})
 		rules = append(rules, specs...)
 	}
 	return rules, nil
