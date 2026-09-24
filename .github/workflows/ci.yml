@@ -42,6 +42,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v3
@@ -60,7 +61,17 @@ jobs:
           docker rm -f ci-amd64 > /dev/null
       - name: Build and answer a query on arm64
         run: |
-          docker buildx build --platform linux/arm64 --build-arg VERSION=snapshot -t aegis:ci-arm64 --load .
+          for attempt in 1 2; do
+            echo "arm64 build attempt $attempt"
+            if docker buildx build --platform linux/arm64 --build-arg VERSION=snapshot -t aegis:ci-arm64 --load .; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "arm64 build failed on both attempts" >&2
+              exit 1
+            fi
+            sleep 10
+          done
           docker run -d --name ci-arm64 --platform linux/arm64 -p 127.0.0.1:15381:53/udp aegis:ci-arm64
           sleep 3
           python3 .github/queries.py 127.0.0.1 15381
