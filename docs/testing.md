@@ -119,10 +119,12 @@ ssh pi '~/aegis serve --dns-address 0.0.0.0:5353 --upstream 9.9.9.9:53'
 dig -p 5353 @<pi-address> ads.example.com
 ```
 
-The household keeps resolving through AdGuard the whole time. Only for the final
-"does the television stop showing ads" check does aegis take port 53, and only
-after it can manage upstreams and roll back. Do not remove AdGuard before then,
-because aegis has no way to put the network back yet.
+The household keeps resolving through AdGuard the whole time. The cutover
+described here was retired on 2026-09-24. AdGuard keeps port 53 permanently and
+aegis keeps the high port, so this tier never moves aegis onto 53 and never
+needs a rollback path for the household network. The two questions tier 5
+still answers are whether the binary runs on the hardware and what the filter
+costs there. #31 records both for the Pi.
 
 ## What this means for a VM
 

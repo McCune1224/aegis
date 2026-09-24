@@ -73,11 +73,31 @@ loopback, so the whole service runs as the login user.
 `enable-linger` is what makes a user unit outlive the SSH session and start at
 boot; without it the service stops when the last session closes.
 
-The high port is deliberate. AdGuard Home, or whatever already holds port 53,
-keeps it, and the household keeps resolving while aegis is evaluated. Only the
-final cutover moves aegis onto 53, and only once it can manage upstreams and be
-rolled back, which `docs/testing.md` tier 5 states as the boundary. AdGuard
-should not be removed before then.
+The high port is deliberate. AdGuard Home already holds port 53 and keeps it.
+The cutover this document used to describe was retired on 2026-09-24. Aegis
+stays a second resolver on `:15353` and never takes `:53`, so there is no
+cutover to survive and no household rollback to write.
+
+## What the Pi blocks
+
+The unit above starts with an empty database, so blocking is a decision made
+through the API rather than a flag. Since 2026-09-24 the evaluation unit
+enables two sources, `adguard-dns` and `oisd-basic`, both on a daily refresh,
+and the `default` profile blocks the catalog's gambling and dating services
+(betano, betfair, betway, blaze, fdj_united, grindr, plenty_of_fish, tinder,
+wizz). Two ad-focused sources and the two service groups with the least
+collateral were the small set chosen to make the unit enforce something real
+while leaving streaming, social, messaging, and the AI services untouched.
+
+Both settings live in the API, so rolling them back is three calls:
+
+    ssh pi 'curl -sX DELETE http://127.0.0.1:18099/api/v1/sources/adguard-dns'
+    ssh pi 'curl -sX DELETE http://127.0.0.1:18099/api/v1/sources/oisd-basic'
+    ssh pi 'curl -sX PUT http://127.0.0.1:18099/api/v1/profiles/default/services \
+      -H "Content-Type: application/json" --data "{\"services\":[]}"'
+
+Verify against the high port. `dig -p 15353 @<pi-address> doubleclick.net`
+answers NXDOMAIN while blocking is on and NOERROR after the rollback.
 
 ## Container
 
