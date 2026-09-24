@@ -42,7 +42,8 @@ func askFrom(t *testing.T, local, name, server string) *mdns.Msg {
 
 // placeClients puts one client on the kids profile and one on the default
 // profile, so a service enabled for kids has a client it should reach and a
-// client it should not.
+// client it should not. A third client shares the kids profile with tablet, so
+// a test can tell a client-scoped enablement from a profile-scoped one.
 func placeClients(t *testing.T, h *harness) {
 	t.Helper()
 	status, body := h.do(t, http.MethodPut, "/api/v1/profiles/kids", `{}`)
@@ -51,6 +52,78 @@ func placeClients(t *testing.T, h *harness) {
 	require.Equal(t, http.StatusOK, status, body)
 	status, body = h.do(t, http.MethodPut, "/api/v1/clients/laptop", `{"profile":"default","addresses":["127.0.0.3"]}`)
 	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodPut, "/api/v1/clients/console", `{"profile":"kids","addresses":["127.0.0.4"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+}
+
+func TestEnablingAServiceBlocksOnlyTheClientThatEnabledIt(t *testing.T) {
+	h := startHarness(t)
+	seedCatalog(t, h)
+	placeClients(t, h)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/clients/tablet/services", `{"services":["youtube"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	require.Equal(t, mdns.RcodeNameError, askFrom(t, "127.0.0.2", "youtube.com.", h.dnsAddress).Rcode)
+	require.Equal(t, mdns.RcodeServerFailure, askFrom(t, "127.0.0.3", "youtube.com.", h.dnsAddress).Rcode)
+	require.Equal(t, mdns.RcodeServerFailure, askFrom(t, "127.0.0.4", "youtube.com.", h.dnsAddress).Rcode)
+
+	status, body = h.do(t, http.MethodPut, "/api/v1/clients/tablet/services", `{"services":[]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	require.Equal(t, mdns.RcodeServerFailure, askFrom(t, "127.0.0.2", "youtube.com.", h.dnsAddress).Rcode)
+}
+
+func TestClientServicesAddToWhatTheProfileBlocks(t *testing.T) {
+	h := startHarness(t)
+	seedCatalog(t, h)
+	placeClients(t, h)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/profiles/kids/services", `{"services":["youtube"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodPut, "/api/v1/clients/tablet/services", `{"services":["4chan"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	require.Equal(t, mdns.RcodeNameError, askFrom(t, "127.0.0.2", "youtube.com.", h.dnsAddress).Rcode)
+	require.Equal(t, mdns.RcodeNameError, askFrom(t, "127.0.0.2", "4chan.org.", h.dnsAddress).Rcode)
+	require.Equal(t, mdns.RcodeNameError, askFrom(t, "127.0.0.4", "youtube.com.", h.dnsAddress).Rcode)
+	require.Equal(t, mdns.RcodeServerFailure, askFrom(t, "127.0.0.4", "4chan.org.", h.dnsAddress).Rcode)
+}
+
+func TestReadingBackAClientServicesReturnsTheWholeSet(t *testing.T) {
+	h := startHarness(t)
+	seedCatalog(t, h)
+	placeClients(t, h)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/clients/tablet/services", `{"services":["youtube","4chan"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/clients/tablet/services", "")
+	require.Equal(t, http.StatusOK, status, body)
+	var set struct {
+		Client   string   `json:"client"`
+		Services []string `json:"services"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &set))
+	require.Equal(t, "tablet", set.Client)
+	require.Equal(t, []string{"4chan", "youtube"}, set.Services)
+}
+
+func TestClientServicesRefuseAnUnknownClientOrService(t *testing.T) {
+	h := startHarness(t)
+	seedCatalog(t, h)
+	placeClients(t, h)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/clients/tablet/services", `{"services":["tiktok"]}`)
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Contains(t, body, "tiktok")
+
+	status, body = h.do(t, http.MethodPut, "/api/v1/clients/ghosts/services", `{"services":["youtube"]}`)
+	require.Equal(t, http.StatusNotFound, status, body)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/clients/tablet/services", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"services":[]`)
 }
 
 func TestEnablingAServiceBlocksOnlyTheProfileThatEnabledIt(t *testing.T) {
@@ -145,6 +218,52 @@ func TestRefreshingTheCatalogOverHTTPMakesAServiceBlockable(t *testing.T) {
 	status, body = h.do(t, http.MethodPut, "/api/v1/profiles/kids/services", `{"services":["youtube"]}`)
 	require.Equal(t, http.StatusOK, status, body)
 	require.Equal(t, mdns.RcodeNameError, askFrom(t, "127.0.0.2", "youtube.com.", h.dnsAddress).Rcode)
+}
+
+func TestDeletingAClientDropsItsServiceEnablements(t *testing.T) {
+	h := startHarness(t)
+	seedCatalog(t, h)
+	placeClients(t, h)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/clients/tablet/services", `{"services":["youtube"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	status, body = h.do(t, http.MethodDelete, "/api/v1/clients/tablet", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+
+	// A new client reusing the name starts with an empty set, so the delete
+	// cascaded the stored rows instead of only relaxing the validation.
+	status, body = h.do(t, http.MethodPut, "/api/v1/clients/tablet", `{"profile":"kids","addresses":["127.0.0.2"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodGet, "/api/v1/clients/tablet/services", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"services":[]`)
+}
+
+func TestDeletingAProfileDropsItsServiceEnablements(t *testing.T) {
+	h := startHarness(t)
+	seedCatalog(t, h)
+	placeClients(t, h)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/profiles/kids/services", `{"services":["youtube"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodPut, "/api/v1/profiles/kids/safesearch", `{"engines":["google"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	// Clients hold the profile with a restrict, so they leave first.
+	status, body = h.do(t, http.MethodDelete, "/api/v1/clients/tablet", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+	status, body = h.do(t, http.MethodDelete, "/api/v1/clients/console", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+
+	status, body = h.do(t, http.MethodDelete, "/api/v1/profiles/kids", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+
+	status, body = h.do(t, http.MethodPut, "/api/v1/profiles/kids", `{}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodGet, "/api/v1/profiles/kids/services", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"services":[]`)
 }
 
 func TestEnablingAnUnknownServiceOrProfileIsRefused(t *testing.T) {

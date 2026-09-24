@@ -160,6 +160,16 @@ func (s *Server) deleteClient(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 					cfg.Clients = append(cfg.Clients[:i], cfg.Clients[i+1:]...)
+					// The database cascades the enablements away; dropping them
+					// here keeps the config the delete validates against
+					// consistent with what it will become.
+					enables := cfg.ClientServices[:0]
+					for _, enable := range cfg.ClientServices {
+						if enable.Client != key {
+							enables = append(enables, enable)
+						}
+					}
+					cfg.ClientServices = enables
 					return nil
 				}
 			}

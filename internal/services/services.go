@@ -17,13 +17,14 @@ import (
 // the binary.
 const DefaultCatalogURL = "https://adguardteam.github.io/HostlistsRegistry/assets/services.json"
 
-// Service is one catalog entry: the rules that carry it and the group it
-// belongs to.
+// Service is one catalog entry: the rules that carry it, the group it
+// belongs to, and the inline icon the UI renders beside its name.
 type Service struct {
-	ID    string
-	Name  string
-	Group string
-	Rules []string
+	ID      string
+	Name    string
+	Group   string
+	Rules   []string
+	IconSVG string
 }
 
 // Catalog is the parsed services document.
@@ -45,6 +46,7 @@ type catalogService struct {
 	Group   string   `json:"group"`
 	GroupID string   `json:"group_id"`
 	Rules   []string `json:"rules"`
+	IconSVG string   `json:"icon_svg"`
 }
 
 type catalogGroup struct {
@@ -87,10 +89,11 @@ func ParseCatalog(body []byte) (Catalog, error) {
 			group = entry.GroupID
 		}
 		catalog.Services = append(catalog.Services, Service{
-			ID:    entry.ID,
-			Name:  name,
-			Group: group,
-			Rules: entry.Rules,
+			ID:      entry.ID,
+			Name:    name,
+			Group:   group,
+			Rules:   entry.Rules,
+			IconSVG: entry.IconSVG,
 		})
 	}
 	return catalog, nil
@@ -98,9 +101,8 @@ func ParseCatalog(body []byte) (Catalog, error) {
 
 // Scope is where one enabled service's rules apply and when. A profile scope
 // covers every client on that profile and is always on. A client scope covers
-// one identity only while Schedule covers the query minute; a client scope
-// without a schedule is rejected by filter.Compile, so the only producer of one
-// is a focus window.
+// one identity: always on by itself, and with a Schedule attached only while
+// Schedule covers the query minute, which is the form a focus window uses.
 type Scope struct {
 	Profile  filter.ProfileID
 	Client   filter.ClientKey

@@ -42,10 +42,12 @@ type Config struct {
 	Rewrites  []rewrite.Record
 	Upstreams []Upstream
 	Routes    []Route
-	// Services is the fetched catalog of blockable online services, and
-	// ProfileServices is which profiles block which of them.
+	// Services is the fetched catalog of blockable online services,
+	// ProfileServices is which profiles block which of them, and
+	// ClientServices is which clients block which of them for themselves.
 	Services        []BlockedService
 	ProfileServices []ProfileService
+	ClientServices  []ClientService
 	// Safesearch is which profiles enforce which search engines' safe mode.
 	Safesearch []ProfileSafesearch
 	// FocusWindows are the time-scoped restrictions: a schedule, the clients it
@@ -88,6 +90,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := validateProfileServices(c.ProfileServices, c.Services, c.Profiles); err != nil {
+		return err
+	}
+	if err := validateClientServices(c.ClientServices, c.Services, c.Clients); err != nil {
 		return err
 	}
 	if err := validateProfileSafesearch(c.Safesearch, c.Profiles); err != nil {
@@ -274,6 +279,11 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 
+	clientEnables, err := s.ClientServices(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+
 	safeEnables, err := s.ProfileSafesearch(ctx)
 	if err != nil {
 		return Config{}, err
@@ -289,6 +299,7 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		Routes:          routes,
 		Services:        catalog,
 		ProfileServices: enables,
+		ClientServices:  clientEnables,
 		Safesearch:      safeEnables,
 		FocusWindows:    focusWindows,
 		Allowed:         allowed,

@@ -12,18 +12,27 @@ import (
 )
 
 // BlockedService is one row of the fetched services catalog: the rules that
-// carry the service and the group it belongs to.
+// carry the service, the group it belongs to, and its inline icon.
 type BlockedService struct {
-	ID        string
-	Name      string
-	Group     string
-	Rules     []string
+	ID      string
+	Name    string
+	Group   string
+	Rules   []string
+	IconSVG string
+
 	FetchedAt time.Time
 }
 
 // ProfileService is one enablement: the profile blocks the service.
 type ProfileService struct {
 	Profile filter.ProfileID
+	Service string
+}
+
+// ClientService is one enablement: the client blocks the service for itself,
+// on top of whatever its profile blocks.
+type ClientService struct {
+	Client  filter.ClientKey
 	Service string
 }
 
@@ -44,6 +53,7 @@ func (s *Store) Services(ctx context.Context) ([]BlockedService, error) {
 			Name:      row.Name,
 			Group:     row.GroupName,
 			Rules:     rules,
+			IconSVG:   row.IconSvg,
 			FetchedAt: unixSeconds(row.FetchedAt),
 		})
 	}
@@ -67,6 +77,7 @@ func (s *Store) SaveCatalog(ctx context.Context, fetched time.Time, catalog []se
 				Name:      service.Name,
 				GroupName: service.Group,
 				Rules:     string(rules),
+				IconSvg:   service.IconSVG,
 				FetchedAt: fetched.Unix(),
 			}); err != nil {
 				return fmt.Errorf("store: service %q: %w", service.ID, err)
@@ -109,6 +120,39 @@ func (s *Store) SetProfileServices(ctx context.Context, profile filter.ProfileID
 	})
 }
 
+// ClientServices returns every client enablement, so a reload can rebuild the
+// rules each client blocks for itself.
+func (s *Store) ClientServices(ctx context.Context) ([]ClientService, error) {
+	rows, err := s.queries.ListClientServices(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: client services: %w", err)
+	}
+	enables := make([]ClientService, 0, len(rows))
+	for _, row := range rows {
+		enables = append(enables, ClientService{Client: filter.ClientKey(row.Client), Service: row.Service})
+	}
+	return enables, nil
+}
+
+// SetClientServices replaces the set of services one client blocks, so the
+// stored set is always the whole answer to what that client blocks.
+func (s *Store) SetClientServices(ctx context.Context, key filter.ClientKey, serviceIDs []string) error {
+	return s.inTx(ctx, func(q *storedb.Queries) error {
+		if err := q.DeleteClientServices(ctx, string(key)); err != nil {
+			return fmt.Errorf("store: client %q services: %w", key, err)
+		}
+		for _, id := range serviceIDs {
+			if err := q.InsertClientService(ctx, storedb.InsertClientServiceParams{
+				Client:  string(key),
+				Service: id,
+			}); err != nil {
+				return fmt.Errorf("store: client %q service %q: %w", key, id, err)
+			}
+		}
+		return nil
+	})
+}
+
 // validateProfileServices refuses an enablement that names a profile or a
 // service the configuration does not hold, because it would fail every reload.
 func validateProfileServices(enables []ProfileService, catalog []BlockedService, profiles []filter.ProfileSpec) error {
@@ -116,10 +160,7 @@ func validateProfileServices(enables []ProfileService, catalog []BlockedService,
 	for _, spec := range profiles {
 		knownProfile[spec.ID] = true
 	}
-	knownService := make(map[string]bool, len(catalog))
-	for _, row := range catalog {
-		knownService[row.ID] = true
-	}
+	knownService := knownServices(catalog)
 	for _, enable := range enables {
 		if !knownProfile[enable.Profile] {
 			return fmt.Errorf("store: profile %q blocks services but is not defined", enable.Profile)
@@ -129,4 +170,34 @@ func validateProfileServices(enables []ProfileService, catalog []BlockedService,
 		}
 	}
 	return nil
+}
+
+// validateClientServices refuses an enablement that names a client or a
+// service the configuration does not hold, for the same reason the profile
+// validation refuses one.
+func validateClientServices(enables []ClientService, catalog []BlockedService, clients []Client) error {
+	knownClient := make(map[filter.ClientKey]bool, len(clients))
+	for _, record := range clients {
+		knownClient[record.Key] = true
+	}
+	knownService := knownServices(catalog)
+	for _, enable := range enables {
+		if !knownClient[enable.Client] {
+			return fmt.Errorf("store: client %q blocks services but is not defined", enable.Client)
+		}
+		if !knownService[enable.Service] {
+			return fmt.Errorf("store: client %q blocks service %q, which is not in the catalog", enable.Client, enable.Service)
+		}
+	}
+	return nil
+}
+
+// knownServices indexes the catalog by id, the form every validator checks
+// enablements against.
+func knownServices(catalog []BlockedService) map[string]bool {
+	known := make(map[string]bool, len(catalog))
+	for _, row := range catalog {
+		known[row.ID] = true
+	}
+	return known
 }

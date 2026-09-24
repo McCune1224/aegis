@@ -6,8 +6,8 @@ export type ServiceGroup = {
 };
 
 // groupServices orders the catalog the way the API lists its groups, with the
-// services that name no group last, so the profile screen keeps one order
-// between loads.
+// services that name no group last, so the blocked-services screen keeps one
+// order between loads.
 export function groupServices(services: BlockedService[], groups: string[]): ServiceGroup[] {
   const byGroup = new Map<string, BlockedService[]>();
   for (const service of services) {

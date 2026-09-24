@@ -32,6 +32,7 @@ import {
   listUpstreams,
   refreshServices as postRefreshServices,
   saveClient as putClient,
+  saveClientServices as putClientServices,
   saveFocus as putFocus,
   saveProfile as putProfile,
   saveProfileSafesearch as putProfileSafesearch,
@@ -68,7 +69,8 @@ import {
   type UpstreamInput,
   type AccessSettings,
 } from "./api";
-import { IconClients, IconClock, IconDashboard, IconFocus, IconGear, IconLog, IconRewrite, IconRules, IconShield, IconSources, IconUpstream } from "./Icons";
+import { IconClients, IconClock, IconDashboard, IconFocus, IconGear, IconLog, IconRewrite, IconRules, IconServices, IconShield, IconSources, IconUpstream } from "./Icons";
+import BlockedServices, { type ServiceScope } from "./BlockedServices";
 import Clients from "./Clients";
 import Dashboard from "./Dashboard";
 import Focus from "./Focus";
@@ -82,7 +84,7 @@ import Schedules from "./Schedules";
 import Sources from "./Sources";
 import Upstreams from "./Upstreams";
 
-type Tab = "dashboard" | "log" | "profiles" | "clients" | "focus" | "sources" | "rules" | "schedules" | "rewrites" | "upstreams" | "settings";
+type Tab = "dashboard" | "log" | "clients" | "services" | "profiles" | "focus" | "sources" | "rules" | "schedules" | "rewrites" | "upstreams" | "settings";
 
 type NavItem = { id: Tab; label: string; icon: () => JSX.Element };
 
@@ -90,6 +92,7 @@ const NAV: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: IconDashboard },
   { id: "log", label: "Query Log", icon: IconLog },
   { id: "clients", label: "Clients", icon: IconClients },
+  { id: "services", label: "Blocked Services", icon: IconServices },
   { id: "profiles", label: "Profiles", icon: IconShield },
   { id: "focus", label: "Focus", icon: IconFocus },
   { id: "rules", label: "Rules", icon: IconRules },
@@ -104,6 +107,7 @@ const TITLES: Record<Tab, string> = {
   dashboard: "Dashboard",
   log: "Query Log",
   clients: "Clients",
+  services: "Blocked Services",
   profiles: "Profiles",
   focus: "Focus",
   rules: "Rules",
@@ -297,8 +301,12 @@ export default function App() {
     await refresh();
   }
 
-  async function saveProfileServices(name: string, serviceIDs: string[]) {
-    await putProfileServices(name, serviceIDs);
+  async function saveClientServices(scope: ServiceScope, serviceIDs: string[]) {
+    if (scope.kind === "client") {
+      await putClientServices(scope.name, serviceIDs);
+    } else {
+      await putProfileServices(scope.name, serviceIDs);
+    }
     await refresh();
   }
 
@@ -427,19 +435,28 @@ export default function App() {
                 />
               </div>
             </Show>
+            <Show when={tab() === "services"}>
+              <div class="screen-inner">
+                <BlockedServices
+                  services={services()}
+                  serviceGroups={serviceGroups()}
+                  profileNames={profiles().map((profile) => profile.name)}
+                  clientNames={clients().map((client) => client.name)}
+                  defaultProfile={defaultProfile()}
+                  onSave={saveClientServices}
+                  onRefreshServices={refreshServiceCatalog}
+                />
+              </div>
+            </Show>
             <Show when={tab() === "profiles"}>
               <div class="screen-inner">
                 <Profiles
                   profiles={profiles()}
                   defaultProfile={defaultProfile()}
-                  services={services()}
-                  serviceGroups={serviceGroups()}
                   safesearch={safesearch()}
                   onSave={saveProfile}
                   onDelete={deleteProfile}
                   onSetDefault={makeDefault}
-                  onSaveServices={saveProfileServices}
-                  onRefreshServices={refreshServiceCatalog}
                   onSaveSafesearch={saveProfileSafesearch}
                 />
               </div>

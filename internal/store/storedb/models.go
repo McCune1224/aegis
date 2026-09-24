@@ -30,6 +30,11 @@ type ClientPrefix struct {
 	Client string
 }
 
+type ClientService struct {
+	Client  string
+	Service string
+}
+
 type Discovery struct {
 	Mac      string
 	Address  string
@@ -117,6 +122,7 @@ type Service struct {
 	GroupName string
 	Rules     string
 	FetchedAt int64
+	IconSvg   string
 }
 
 type Setting struct {

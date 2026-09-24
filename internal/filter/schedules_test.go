@@ -236,12 +236,6 @@ func TestCompileRejectsBrokenSchedules(t *testing.T) {
 			want:      "night",
 		},
 		{
-			name:      "a rule with a client scope and no schedule",
-			schedules: nil,
-			specs:     []filter.RuleSpec{scheduledRule("r1", filter.MatchExact, filter.ActionBlock, "games.example", "", "tablet")},
-			want:      "schedule",
-		},
-		{
 			name:      "a rule naming a schedule for a name kind payload mismatch stays an error",
 			schedules: []filter.ScheduleSpec{schedule("night", 1, allDays(0, 60))},
 			specs: []filter.RuleSpec{{

@@ -187,6 +187,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/services/refresh", s.refreshServices)
 	mux.HandleFunc("GET /api/v1/profiles/{name}/services", s.getProfileServices)
 	mux.HandleFunc("PUT /api/v1/profiles/{name}/services", s.putProfileServices)
+	mux.HandleFunc("GET /api/v1/clients/{name}/services", s.getClientServices)
+	mux.HandleFunc("PUT /api/v1/clients/{name}/services", s.putClientServices)
 	mux.HandleFunc("GET /api/v1/safesearch", s.listSafesearch)
 	mux.HandleFunc("GET /api/v1/profiles/{name}/safesearch", s.getProfileSafesearch)
 	mux.HandleFunc("PUT /api/v1/profiles/{name}/safesearch", s.putProfileSafesearch)

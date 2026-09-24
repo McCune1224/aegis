@@ -6,17 +6,19 @@ and where the two products differ.
 
 ## The decision
 
-A service is a catalog entry with an id, a name, a group, and the rules that
-carry it. Aegis fetches the catalog AdGuard publishes for its own build step:
+A service is a catalog entry with an id, a name, a group, an inline icon, and
+the rules that carry it. Aegis fetches the catalog AdGuard publishes for its own
+build step:
 
     https://adguardteam.github.io/HostlistsRegistry/assets/services.json
 
-and stores it in `services`. A second table, `profile_services`, is the
-enablement: which profile blocks which service. A reload turns every
-enablement into ordinary `filter.RuleSpec`s with `Action: Block`, a `Source`
-naming the service, and `Profile` naming the profile that enabled it, so
-verdicts, provenance, and the query log keep one code path with every other
-rule.
+and stores it in `services`. Two tables hold the enablements:
+`profile_services` (which profile blocks which service) and `client_services`
+(which client blocks which service for itself). A reload turns every enablement
+into ordinary `filter.RuleSpec`s with `Action: Block` and a `Source` naming the
+service. A profile enablement carries `Profile`, a client enablement carries
+`Client`, so verdicts, provenance, and the query log keep one code path with
+every other rule.
 
 The alternative was a generated Go file per release, which is what AdGuard Home
 does. It was rejected because the sets change between releases: an operator
@@ -48,18 +50,20 @@ skipped.
 
 ## Where Aegis diverges from AdGuard Home
 
-**The scope is the profile, not the client.** AdGuard Home keys blocked services
-on the client and keeps a separate global set beside it. Aegis keys the
-enablement on the profile, and the global set is the default profile's set. The
-client stays the only place an operator assigns policy, and there is no second
-place a service set can hide; the query log names the service through the rule's
-`Source` either way.
+**The layers add instead of override.** AdGuard Home keys blocked services on
+the client and keeps one global set beside it; a client with its own list uses
+that list instead of the global one. Aegis has no global set. A client's
+profile is its base layer, and the client's own enablements add to it, the same
+rule the focus windows follow. Turning a service off for one device against a
+profile that blocks it needs an allow rule, which the filter engine already
+expresses; the services page does not hide that from the operator, the query
+log names the service through the rule's `Source` either way.
 
-**The catalog is fetched, not generated.** AdGuard Home builds its sets into the
-binary at release time. Aegis stores the same public JSON and refreshes it on a
-background interval, so a set an operator enables is current between releases.
-The trade is a first-boot fetch and an offline first boot that has no services
-until the catalog arrives.
+**The catalog is fetched, not generated.** AdGuard Home builds its sets into
+the binary at release time. Aegis stores the same public JSON and refreshes it
+on a background interval, so a set an operator enables is current between
+releases. The trade is a first-boot fetch and an offline first boot that has no
+services until the catalog arrives.
 
 **The dialect is a declared subset.** AdGuard Home matches the catalog rules
 against every query with its general rule engine. Aegis converts the subset with
