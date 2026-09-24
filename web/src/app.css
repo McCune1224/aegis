@@ -1451,3 +1451,57 @@ input[type="checkbox"].switch:disabled {
   opacity: 0.5;
   cursor: default;
 }
+
+.blocked-services-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 22px;
+}
+
+.blocked-services-summary p {
+  font-size: 13px;
+}
+
+.badge.saved {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.blocked-services-toolbar {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.service-search {
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+}
+
+.blocked-services-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+  flex: 1;
+}
+
+.service-section-head .service-count {
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.service-card.inherited {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.badge.profile-badge {
+  background: var(--accent-bg);
+  color: var(--accent-hover);
+  font-size: 10px;
+  padding: 2px 6px;
+}
