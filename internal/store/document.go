@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"sort"
 	"time"
 
 	"aegis/internal/blocklist"
 	"aegis/internal/client"
 	"aegis/internal/filter"
 	"aegis/internal/rewrite"
+	"aegis/internal/safesearch"
+	"aegis/internal/services"
 )
 
 // docVersion is the export format this build writes and the only version
@@ -34,6 +37,19 @@ type Document struct {
 	Routes         []routeDoc    `json:"routes"`
 	Access         accessDoc     `json:"access"`
 	Sources        []sourceDoc   `json:"sources"`
+
+	// The four sections below were added after version 1 and are optional:
+	// an older file leaves them nil, which means the target keeps what it
+	// holds, the same rule every unnamed row follows on import.
+	ProfileServices []profileServicesDoc   `json:"profile_services"`
+	ClientServices  []clientServicesDoc    `json:"client_services"`
+	Safesearch      []profileSafesearchDoc `json:"safesearch"`
+	Windows         []windowDoc            `json:"windows"`
+	// Services carries only the catalog rows the sections above reference, so
+	// an import into an offline store can satisfy its foreign keys and compile
+	// before any fetch. The fetch record stays out; a later refresh replaces
+	// the rules with the current ones.
+	Services []serviceDoc `json:"services"`
 }
 
 type profileDoc struct {
@@ -103,6 +119,37 @@ type sourceDoc struct {
 	URL     string `json:"url"`
 	Format  string `json:"format"`
 	Enabled bool   `json:"enabled"`
+}
+
+type profileServicesDoc struct {
+	Profile  string   `json:"profile"`
+	Services []string `json:"services"`
+}
+
+type clientServicesDoc struct {
+	Client   string   `json:"client"`
+	Services []string `json:"services"`
+}
+
+type profileSafesearchDoc struct {
+	Profile string   `json:"profile"`
+	Engines []string `json:"engines"`
+}
+
+type windowDoc struct {
+	Name     string   `json:"name"`
+	Action   string   `json:"action"`
+	Schedule string   `json:"schedule"`
+	Clients  []string `json:"clients"`
+	Services []string `json:"services"`
+}
+
+type serviceDoc struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Group   string   `json:"group"`
+	Rules   []string `json:"rules"`
+	IconSVG string   `json:"icon_svg"`
 }
 
 // ParseDocument reads one exported configuration. A file without the version
@@ -238,6 +285,50 @@ func (s *Store) ReadDocument(ctx context.Context) (Document, error) {
 		})
 	}
 
+	referenced := make(map[string]bool)
+	for _, group := range groupStrings(profileServiceRows(cfg.ProfileServices)) {
+		document.ProfileServices = append(document.ProfileServices, profileServicesDoc{Profile: group.Key, Services: group.Values})
+		for _, id := range group.Values {
+			referenced[id] = true
+		}
+	}
+	for _, group := range groupStrings(clientServiceRows(cfg.ClientServices)) {
+		document.ClientServices = append(document.ClientServices, clientServicesDoc{Client: group.Key, Services: group.Values})
+		for _, id := range group.Values {
+			referenced[id] = true
+		}
+	}
+	for _, group := range groupStrings(safesearchRows(cfg.Safesearch)) {
+		document.Safesearch = append(document.Safesearch, profileSafesearchDoc{Profile: group.Key, Engines: group.Values})
+	}
+	for _, window := range cfg.ServiceWindows {
+		clients := make([]string, 0, len(window.Clients))
+		for _, client := range window.Clients {
+			clients = append(clients, string(client))
+		}
+		document.Windows = append(document.Windows, windowDoc{
+			Name:     window.Name,
+			Action:   window.Action.String(),
+			Schedule: window.Schedule,
+			Clients:  clients,
+			Services: window.Services,
+		})
+		for _, id := range window.Services {
+			referenced[id] = true
+		}
+	}
+	for _, row := range cfg.Services {
+		if referenced[row.ID] {
+			document.Services = append(document.Services, serviceDoc{
+				ID:      row.ID,
+				Name:    row.Name,
+				Group:   row.Group,
+				Rules:   row.Rules,
+				IconSVG: row.IconSVG,
+			})
+		}
+	}
+
 	return document, nil
 }
 
@@ -371,6 +462,82 @@ func (s *Store) ApplyDocument(ctx context.Context, document Document) error {
 		}
 	}
 
+	// Materialize the catalog rows the document references, but only the ones
+	// this store does not hold: a repeat import never regresses a fresher copy,
+	// and an offline import can still satisfy the enablements that follow.
+	if len(document.Services) > 0 {
+		existing, err := s.Services(ctx)
+		if err != nil {
+			return err
+		}
+		known := make(map[string]bool, len(existing))
+		for _, row := range existing {
+			known[row.ID] = true
+		}
+		missing := make([]services.Service, 0, len(document.Services))
+		for _, row := range document.Services {
+			if !known[row.ID] {
+				missing = append(missing, services.Service{
+					ID:      row.ID,
+					Name:    row.Name,
+					Group:   row.Group,
+					Rules:   row.Rules,
+					IconSVG: row.IconSVG,
+				})
+			}
+		}
+		if len(missing) > 0 {
+			if err := s.SaveCatalog(ctx, time.Now().UTC(), missing); err != nil {
+				return err
+			}
+		}
+	}
+
+	if document.ProfileServices != nil {
+		for _, group := range document.ProfileServices {
+			if err := s.SetProfileServices(ctx, filter.ProfileID(group.Profile), group.Services); err != nil {
+				return err
+			}
+		}
+	}
+	if document.ClientServices != nil {
+		for _, group := range document.ClientServices {
+			if err := s.SetClientServices(ctx, filter.ClientKey(group.Client), group.Services); err != nil {
+				return err
+			}
+		}
+	}
+	if document.Safesearch != nil {
+		for _, group := range document.Safesearch {
+			engines := make([]safesearch.EngineID, 0, len(group.Engines))
+			for _, id := range group.Engines {
+				engines = append(engines, safesearch.EngineID(id))
+			}
+			if err := s.SetProfileSafesearch(ctx, filter.ProfileID(group.Profile), engines); err != nil {
+				return err
+			}
+		}
+	}
+	for _, window := range document.Windows {
+		action, err := filter.ParseAction(window.Action)
+		if err != nil {
+			return fmt.Errorf("store: window %q: %w", window.Name, err)
+		}
+		clients := make([]filter.ClientKey, 0, len(window.Clients))
+		for _, client := range window.Clients {
+			clients = append(clients, filter.ClientKey(client))
+		}
+		if err := s.SaveServiceWindow(ctx, ServiceWindow{
+			Name:     window.Name,
+			Schedule: window.Schedule,
+			Action:   action,
+			Clients:  clients,
+			Services: window.Services,
+		}); err != nil {
+			return err
+		}
+	}
+
 	cfg, err := s.Load(ctx)
 	if err != nil {
 		return err
@@ -479,6 +646,55 @@ func (s *Store) ruleIDs(ctx context.Context) (map[int64]bool, error) {
 		known[rule.ID] = true
 	}
 	return known, nil
+}
+
+// groupEntry is one scope and the values it holds.
+type groupEntry struct {
+	Key    string
+	Values []string
+}
+
+// groupStrings folds (scope, values) rows into one entry per scope, ordered by
+// scope, so two exports of the same configuration are byte-identical.
+func groupStrings(rows [][2]string) []groupEntry {
+	var order []string
+	grouped := make(map[string][]string)
+	for _, row := range rows {
+		if _, seen := grouped[row[0]]; !seen {
+			order = append(order, row[0])
+		}
+		grouped[row[0]] = append(grouped[row[0]], row[1])
+	}
+	sort.Strings(order)
+	entries := make([]groupEntry, 0, len(order))
+	for _, key := range order {
+		entries = append(entries, groupEntry{Key: key, Values: grouped[key]})
+	}
+	return entries
+}
+
+func profileServiceRows(enables []ProfileService) [][2]string {
+	rows := make([][2]string, 0, len(enables))
+	for _, enable := range enables {
+		rows = append(rows, [2]string{string(enable.Profile), enable.Service})
+	}
+	return rows
+}
+
+func clientServiceRows(enables []ClientService) [][2]string {
+	rows := make([][2]string, 0, len(enables))
+	for _, enable := range enables {
+		rows = append(rows, [2]string{string(enable.Client), enable.Service})
+	}
+	return rows
+}
+
+func safesearchRows(enables []ProfileSafesearch) [][2]string {
+	rows := make([][2]string, 0, len(enables))
+	for _, enable := range enables {
+		rows = append(rows, [2]string{string(enable.Profile), string(enable.Engine)})
+	}
+	return rows
 }
 
 func parsePrefixSet(kind string, list []string) ([]netip.Prefix, error) {
