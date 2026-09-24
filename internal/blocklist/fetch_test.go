@@ -1,6 +1,7 @@
 package blocklist_test
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -36,6 +37,35 @@ func TestFetchReadsABodyAndItsETag(t *testing.T) {
 	require.False(t, result.NotModified)
 	require.Equal(t, `"v1"`, result.ETag)
 	require.Contains(t, string(result.Body), "ads.example.com")
+}
+
+func TestFetchAcceptsABodyAtTheSizeCapAndRefusesOnePastIt(t *testing.T) {
+	// Exactly at the cap the body passes; one byte more is refused. A limit
+	// that is off by one either drops full-size lists or admits oversized ones.
+	const capBytes = 32 << 20
+	atCap := string(bytes.Repeat([]byte{0}, capBytes))
+	pastCap := atCap + "x"
+
+	server := listServer(t, atCap)
+	result, err := blocklist.NewFetcher(30*time.Second).Fetch(context.Background(), server.URL, "")
+	require.NoError(t, err, "a body at the cap is accepted")
+	require.Len(t, result.Body, capBytes)
+
+	past := listServer(t, pastCap)
+	_, err = blocklist.NewFetcher(30*time.Second).Fetch(context.Background(), past.URL, "")
+	require.ErrorIs(t, err, blocklist.ErrTooLarge, "a body one byte past the cap is refused")
+
+	// The file source reads under the same cap with the same edge.
+	filePath := filepath.Join(t.TempDir(), "list.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte(atCap), 0o644))
+	fromFile, err := blocklist.NewFetcher(30*time.Second).Fetch(context.Background(), "file://"+filePath, "")
+	require.NoError(t, err, "a file at the cap is accepted whole")
+	require.Len(t, fromFile.Body, capBytes, "the reader must not truncate at the cap")
+
+	pastPath := filepath.Join(t.TempDir(), "big.txt")
+	require.NoError(t, os.WriteFile(pastPath, []byte(pastCap), 0o644))
+	_, err = blocklist.NewFetcher(30*time.Second).Fetch(context.Background(), "file://"+pastPath, "")
+	require.ErrorIs(t, err, blocklist.ErrTooLarge, "a file one byte past the cap is refused")
 }
 
 func TestFetchIsConditional(t *testing.T) {

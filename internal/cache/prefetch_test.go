@@ -153,9 +153,18 @@ func TestPrefetchRefreshesAPopularNameBeforeItExpires(t *testing.T) {
 	require.Equal(t, 1, stub.saw())
 	stub.drainArrived()
 
+	// Asked with just over a fifth of its life left, the entry is still
+	// served without arming a refresh: 61 seconds remain against a 60-second
+	// prefetch window.
+	fake.Advance(239 * time.Second)
+	early, err := resolver.Resolve(ctx, name, "")
+	require.NoError(t, err)
+	require.Equal(t, "203.0.113.1", answeredAddress(t, early))
+	require.Equal(t, 1, stub.saw(), "the prefetch window is not open yet")
+
 	// Asked with a fifth of its life left, the entry is served from memory
 	// while the refresh runs behind it.
-	fake.Advance(241 * time.Second)
+	fake.Advance(2 * time.Second)
 	near, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.1", answeredAddress(t, near), "the client never waits for the refresh")
