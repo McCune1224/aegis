@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { BlockedService } from "./api";
-import { groupServices, groupState, toggled, toggledGroup } from "./services";
+import { groupServices, serviceGroupLabel, groupState, toggled, toggledGroup } from "./services";
 
 const youtube: BlockedService = {
   id: "youtube",
@@ -103,5 +103,22 @@ describe("toggledGroup", () => {
   test("does not duplicate a service already selected", () => {
     expect(toggledGroup(["youtube"], ["youtube"])).toEqual([]);
     expect(toggledGroup(["youtube"], ["youtube", "netflix"])).toEqual(["youtube", "netflix"]);
+  });
+});
+
+describe("serviceGroupLabel", () => {
+  test("names the known catalog groups in plain words", () => {
+    expect(serviceGroupLabel("ai")).toBe("Artificial intelligence");
+    expect(serviceGroupLabel("social_network")).toBe("Social networks");
+    expect(serviceGroupLabel("gambling")).toBe("Gambling and betting");
+  });
+
+  test("renders an unknown group id readably instead of raw", () => {
+    expect(serviceGroupLabel("cloud_gaming")).toBe("Cloud Gaming");
+    expect(serviceGroupLabel("crypto")).toBe("Crypto");
+  });
+
+  test("the empty group is Other", () => {
+    expect(serviceGroupLabel("")).toBe("Other");
   });
 });

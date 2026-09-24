@@ -31,6 +31,36 @@ export function groupServices(services: BlockedService[], groups: string[]): Ser
   return ordered;
 }
 
+// groupLabels gives the catalog's group ids the names the blocked-services
+// page shows. Ids the catalog gains later fall back to a readable rendering,
+// so a new category never appears as a raw identifier.
+const groupLabels: Record<string, string> = {
+  ai: "Artificial intelligence",
+  cdn: "Content delivery networks",
+  dating: "Dating services",
+  gambling: "Gambling and betting",
+  gaming: "Gaming",
+  hosting: "Web hosting",
+  messenger: "Messengers",
+  privacy: "Privacy",
+  shopping: "Shopping",
+  social_network: "Social networks",
+  software: "Software and development",
+  streaming: "Streaming",
+};
+
+export function serviceGroupLabel(group: string): string {
+  const known = groupLabels[group];
+  if (known) {
+    return known;
+  }
+  if (group === "") {
+    return "Other";
+  }
+  const words = group.split(/[_\s-]+/).filter(Boolean);
+  return words.map((word) => word[0].toUpperCase() + word.slice(1)).join(" ");
+}
+
 // toggled returns the set with one service added or removed, which is the whole
 // body the profile services endpoint replaces.
 export function toggled(current: string[], id: string): string[] {

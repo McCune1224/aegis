@@ -160,16 +160,17 @@ func TestPrefetchRefreshesAPopularNameBeforeItExpires(t *testing.T) {
 	early, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.1", answeredAddress(t, early))
-	require.Equal(t, 1, stub.saw(), "the prefetch window is not open yet")
+	stub.waitArrivedNothing(t)
 
 	// Asked with a fifth of its life left, the entry is served from memory
-	// while the refresh runs behind it.
+	// while the refresh runs behind it. A synchronous refresh would answer
+	// with the new address; the old one proves the client never waited.
 	fake.Advance(2 * time.Second)
 	near, err := resolver.Resolve(ctx, name, "")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.1", answeredAddress(t, near), "the client never waits for the refresh")
-	require.Equal(t, 1, stub.saw())
 	stub.waitArrived(t)
+	require.Equal(t, 2, stub.saw(), "the refresh runs behind the answer, not in front of it")
 
 	// Once the refresh lands, the entry answers with the new address.
 	deadline := time.Now().Add(2 * time.Second)

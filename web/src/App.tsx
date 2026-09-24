@@ -441,7 +441,7 @@ export default function App() {
                   services={services()}
                   serviceGroups={serviceGroups()}
                   profileNames={profiles().map((profile) => profile.name)}
-                  clientNames={clients().map((client) => client.name)}
+                  clients={clients()}
                   defaultProfile={defaultProfile()}
                   onSave={saveClientServices}
                   onRefreshServices={refreshServiceCatalog}
