@@ -11,6 +11,8 @@ import (
 	"aegis/internal/blocklist"
 	"aegis/internal/filter"
 	"aegis/internal/rewrite"
+	"aegis/internal/safesearch"
+	"aegis/internal/services"
 	"aegis/internal/store"
 )
 
@@ -51,6 +53,20 @@ func populateForDocument(t *testing.T, database *store.Store) {
 		URL:     "file:///tmp/lists/one.txt",
 		Format:  blocklist.FormatHosts,
 		Enabled: true,
+	}))
+	require.NoError(t, database.SaveCatalog(ctx, time.Now().UTC(), []services.Service{
+		{ID: "youtube", Name: "YouTube", Group: "streaming", Rules: []string{"||youtube.com^"}},
+		{ID: "4chan", Name: "4chan", Group: "social_network", Rules: []string{"||4chan.org^"}},
+	}))
+	require.NoError(t, database.SetProfileServices(ctx, "kids", []string{"youtube"}))
+	require.NoError(t, database.SetClientServices(ctx, "tablet", []string{"4chan"}))
+	require.NoError(t, database.SetProfileSafesearch(ctx, "kids", []safesearch.EngineID{"google"}))
+	require.NoError(t, database.SaveServiceWindow(ctx, store.ServiceWindow{
+		Name:     "video-time",
+		Schedule: "night",
+		Action:   filter.ActionAllow,
+		Clients:  []filter.ClientKey{"tablet"},
+		Services: []string{"youtube"},
 	}))
 }
 
@@ -113,6 +129,23 @@ func TestADocumentRoundTripsEverySection(t *testing.T) {
 	require.Equal(t, netip.MustParseAddr("10.9.9.77"), cfg.Rewrites[0].Addr)
 	require.Equal(t, []netip.Prefix{netip.MustParsePrefix("10.9.8.0/24")}, cfg.Allowed)
 	require.Equal(t, []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, cfg.Disallowed)
+
+	require.Equal(t, []store.ProfileService{{Profile: "kids", Service: "youtube"}}, cfg.ProfileServices,
+		"the profile service set carries through export and import")
+	require.Equal(t, []store.ClientService{{Client: "tablet", Service: "4chan"}}, cfg.ClientServices,
+		"the client service set carries through export and import")
+	require.Equal(t, []store.ProfileSafesearch{{Profile: "kids", Engine: "google"}}, cfg.Safesearch,
+		"the safe search enforcement carries through export and import")
+	require.Len(t, cfg.ServiceWindows, 1, "the window carries through export and import")
+	importedWindow := cfg.ServiceWindows[0]
+	importedWindow.ID = 0
+	require.Equal(t, store.ServiceWindow{
+		Name:     "video-time",
+		Schedule: "night",
+		Action:   filter.ActionAllow,
+		Clients:  []filter.ClientKey{"tablet"},
+		Services: []string{"youtube"},
+	}, importedWindow, "the window carries its action through export and import")
 
 	upstreams, err := b.Upstreams(ctx)
 	require.NoError(t, err)

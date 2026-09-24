@@ -16,6 +16,8 @@ import (
 	"aegis/internal/filter"
 	"aegis/internal/rewrite"
 	"aegis/internal/runtime"
+	"aegis/internal/safesearch"
+	"aegis/internal/services"
 	"aegis/internal/store"
 )
 
@@ -88,6 +90,20 @@ func populateTransferStore(t *testing.T, path, primary, spare, list string) {
 	_, err = database.SaveRoute(ctx, store.Route{Domain: "routed.example", Upstream: "primary"})
 	require.NoError(t, err)
 	require.NoError(t, database.SetAccess(ctx, []netip.Prefix{netip.MustParsePrefix("10.9.8.0/24")}, nil))
+	require.NoError(t, database.SaveCatalog(ctx, time.Now().UTC(), []services.Service{
+		{ID: "youtube", Name: "YouTube", Group: "streaming", Rules: []string{"||youtube.com^", "||youtu.be^"}},
+		{ID: "4chan", Name: "4chan", Group: "social_network", Rules: []string{"||4chan.org^"}},
+	}))
+	require.NoError(t, database.SetProfileServices(ctx, "kids", []string{"youtube"}))
+	require.NoError(t, database.SetClientServices(ctx, "tablet", []string{"4chan"}))
+	require.NoError(t, database.SetProfileSafesearch(ctx, "kids", []safesearch.EngineID{"google"}))
+	require.NoError(t, database.SaveServiceWindow(ctx, store.ServiceWindow{
+		Name:     "video-time",
+		Schedule: "night",
+		Action:   filter.ActionBlock,
+		Clients:  []filter.ClientKey{"tablet"},
+		Services: []string{"youtube"},
+	}))
 	require.NoError(t, database.SaveSource(ctx, store.Source{
 		Name:    "local",
 		URL:     "file://" + list,
@@ -137,7 +153,7 @@ func TestAnExportImportsIntoAnEmptyStoreAndProducesTheSameVerdicts(t *testing.T)
 
 	tablet := netip.MustParseAddr("10.9.9.2")
 	outsider := netip.MustParseAddr("10.9.9.9")
-	names := []string{"games.example", "example.com", "x.routed.example", "anything.example.net"}
+	names := []string{"games.example", "example.com", "x.routed.example", "anything.example.net", "youtube.com", "4chan.org"}
 	for _, name := range names {
 		parsed := parseName(t, name)
 		require.Equal(t, rtA.Decide(parsed, tablet), rtB.Decide(parsed, tablet), name)
@@ -150,6 +166,15 @@ func TestAnExportImportsIntoAnEmptyStoreAndProducesTheSameVerdicts(t *testing.T)
 	plain := parseName(t, "example.com")
 	require.Equal(t, filter.Refused, rtB.Decide(plain, tablet).Policy.Mode)
 	require.Equal(t, filter.ActionAllow, rtB.Decide(plain, outsider).Action)
+
+	youtube := parseName(t, "youtube.com")
+	require.Equal(t, filter.ActionBlock, rtB.Decide(youtube, tablet).Action,
+		"the imported profile service set blocks on both sides")
+	require.Equal(t, filter.ActionAllow, rtB.Decide(youtube, outsider).Action)
+	fourchan := parseName(t, "4chan.org")
+	require.Equal(t, filter.ActionBlock, rtB.Decide(fourchan, tablet).Action,
+		"the imported client service set blocks for its client only")
+	require.Equal(t, filter.ActionAllow, rtB.Decide(fourchan, outsider).Action)
 
 	routed := parseName(t, "x.routed.example")
 	require.Equal(t, "primary", rtA.Decide(routed, tablet).Route)
