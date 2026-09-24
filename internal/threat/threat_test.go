@@ -2,9 +2,12 @@ package threat
 
 import (
 	"net/netip"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"aegis/internal/dns"
 	"aegis/internal/filter"
@@ -106,6 +109,29 @@ func TestDetectorFlagsADGASequenceWithEvidence(t *testing.T) {
 	if !strings.Contains(joined, ".biz") {
 		t.Fatalf("evidence %q does not name the generated names", joined)
 	}
+}
+
+func TestEvidenceCapsAtTenNamesAndKeepsTheAlphabeticalHead(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)}
+	detector := NewDetector(WithClock(clock.Now))
+
+	asked := make([]string, 0, dgaThreshold+1)
+	var findings []Finding
+	for i := 0; len(findings) == 0; i++ {
+		name := dgaName(i)
+		asked = append(asked, name)
+		findings = detector.Observe(decision(clock, "phone", name, "A"))
+		if len(findings) == 0 {
+			clock.advance(time.Second)
+		}
+	}
+	if len(findings) != 1 {
+		t.Fatalf("want one finding, got %d", len(findings))
+	}
+
+	want := append([]string(nil), asked...)
+	sort.Strings(want)
+	require.Equal(t, want[:10], findings[0].Evidence, "evidence is the first ten of the sorted names")
 }
 
 func TestDetectorNeedsBothShapeAndVolume(t *testing.T) {

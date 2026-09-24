@@ -73,6 +73,36 @@ func TestCloseFlushesWhatItHolds(t *testing.T) {
 	require.Len(t, entries, 1)
 }
 
+func TestTheLogFlushesAtTheBatchBound(t *testing.T) {
+	database := open(t)
+	log := querylog.New(database, quiet())
+	defer func() { _ = log.Close() }()
+
+	// One decision short of the bound nothing persists: the writer is waiting
+	// on its period, which has not elapsed.
+	for range querylog.FlushSize - 1 {
+		log.Observe(decisionFor("ads.example.com", filter.ActionBlock))
+	}
+	time.Sleep(50 * time.Millisecond)
+	entries, err := database.Queries(t.Context(), store.QueryFilter{Limit: querylog.FlushSize})
+	require.NoError(t, err)
+	require.Empty(t, entries, "nothing persists before the bound or the period")
+
+	// The decision that reaches the bound flushes the whole batch at once.
+	log.Observe(decisionFor("example.com", filter.ActionAllow))
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		entries, err = database.Queries(t.Context(), store.QueryFilter{Limit: querylog.FlushSize})
+		require.NoError(t, err)
+		if len(entries) == querylog.FlushSize {
+			require.Equal(t, "example.com", entries[0].Name.String(), "newest first")
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the bound never flushed, held %d entries", len(entries))
+}
+
 func TestTheLogTrimsItselfToTheBound(t *testing.T) {
 	database := open(t)
 	log := querylog.New(database, quiet())

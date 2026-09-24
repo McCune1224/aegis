@@ -191,6 +191,38 @@ func TestParseListRejectsAnUnknownFormat(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestFormatStringNamesAnOutOfRangeFormat(t *testing.T) {
+	require.Equal(t, "format(3)", blocklist.Format(3).String(), "the first value past the named formats")
+	require.Equal(t, "adblock", blocklist.FormatAdBlock.String())
+}
+
+func TestAdblockEdgesAtIndexZero(t *testing.T) {
+	const fixture = `||ads.example.com^$third-party
+`
+
+	got, err := blocklist.ParseList(strings.NewReader(fixture), source, blocklist.FormatAdBlock)
+
+	require.NoError(t, err)
+	require.Equal(t, []filter.RuleSpec{
+		rule("test:1", "ads.example.com", filter.ActionBlock),
+	}, got.Rules, "the modifier after the separator never enters the name")
+	require.Equal(t, 0, got.Skipped)
+}
+
+func TestHostsEdgesAtIndexZero(t *testing.T) {
+	const fixture = `#comment as the first byte
+0.0.0.0 ads.example.com
+`
+
+	got, err := blocklist.ParseList(strings.NewReader(fixture), source, blocklist.FormatHosts)
+
+	require.NoError(t, err)
+	require.Equal(t, []filter.RuleSpec{
+		rule("test:2", "ads.example.com", filter.ActionBlock),
+	}, got.Rules, "the comment line vanishes and the address line stays whole")
+	require.Equal(t, 1, got.Skipped)
+}
+
 func TestParsedListDecidesAQueryAndNamesTheLineThatDecidedIt(t *testing.T) {
 	const fixture = `! comment
 ||ads.example.com^
