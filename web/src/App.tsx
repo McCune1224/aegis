@@ -69,22 +69,6 @@ import {
   type UpstreamInput,
   type AccessSettings,
 } from "./api";
-import {
-  IconClients,
-  IconClock,
-  IconConstellation,
-  IconDashboard,
-  IconGear,
-  IconLog,
-  IconRewrite,
-  IconRules,
-  IconSearch,
-  IconServices,
-  IconShield,
-  IconSources,
-  IconSystem,
-  IconUpstream,
-} from "./Icons";
 import BlockedServices, { type ServiceScope } from "./BlockedServices";
 import Clients from "./Clients";
 import Dashboard from "./Dashboard";
@@ -98,7 +82,6 @@ import Sources from "./Sources";
 import Upstreams from "./Upstreams";
 import Settings from "./Settings";
 import { createQueryLog } from "./querylog";
-import { starField } from "./sky";
 
 type Tab =
   | "dashboard"
@@ -114,17 +97,17 @@ type Tab =
 
 type SystemView = "upstreams" | "sources" | "settings";
 
-const RAIL: { id: Tab; label: string; icon: () => JSX.Element }[] = [
-  { id: "dashboard", label: "Overview", icon: IconDashboard },
-  { id: "constellation", label: "Constellation", icon: IconConstellation },
-  { id: "log", label: "Query Log", icon: IconLog },
-  { id: "clients", label: "Clients", icon: IconClients },
-  { id: "profiles", label: "Profiles", icon: IconShield },
-  { id: "rules", label: "Rules", icon: IconRules },
-  { id: "schedules", label: "Schedules", icon: IconClock },
-  { id: "rewrites", label: "Rewrites", icon: IconRewrite },
-  { id: "services", label: "Blocked Services", icon: IconServices },
-  { id: "system", label: "System", icon: IconSystem },
+const RAIL: { id: Tab; label: string }[] = [
+  { id: "dashboard", label: "Overview" },
+  { id: "constellation", label: "Constellation" },
+  { id: "log", label: "Query Log" },
+  { id: "clients", label: "Clients" },
+  { id: "profiles", label: "Profiles" },
+  { id: "rules", label: "Rules" },
+  { id: "schedules", label: "Schedules" },
+  { id: "rewrites", label: "Rewrites" },
+  { id: "services", label: "Blocked Services" },
+  { id: "system", label: "System" },
 ];
 
 const VIEW_NAMES: Record<Tab, string> = {
@@ -145,9 +128,6 @@ const SYSTEM_VIEWS: { id: SystemView; label: string }[] = [
   { id: "sources", label: "Block sources" },
   { id: "settings", label: "Settings" },
 ];
-
-// The sky is seeded, so every load paints the same night.
-const sky = starField();
 
 export default function App() {
   const [tab, setTab] = createSignal<Tab>("dashboard");
@@ -452,51 +432,32 @@ export default function App() {
 
   return (
     <>
-      <div class="sky" aria-hidden="true">
-        <div class="sky-layer far" style={{ "background-image": sky.far }} />
-        <div class="sky-layer near" style={{ "background-image": sky.near }} />
-      </div>
       <div class="app">
         <nav class="rail" aria-label="sections">
-          <div class="rail-mark" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M4 12.4 L8 7.2 L12.6 10 L13 3.6"
-                stroke="currentColor"
-                stroke-width="1.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                opacity="0.7"
-              />
-              <circle cx="4" cy="12.4" r="1.3" fill="currentColor" />
-              <circle cx="8" cy="7.2" r="1.5" fill="currentColor" />
-              <circle cx="12.6" cy="10" r="1.1" fill="currentColor" />
-              <circle cx="13" cy="3.6" r="1.7" fill="currentColor" />
-            </svg>
-          </div>
+          <div class="rail-mark">AEGIS</div>
           <For each={RAIL}>
-            {(item) => (
+            {(item, index) => (
               <button
                 type="button"
                 data-testid={`tab-${item.id}`}
                 class={tab() === item.id ? "rail-item active" : "rail-item"}
                 aria-current={tab() === item.id ? "page" : undefined}
-                title={item.label}
-                aria-label={item.label}
                 onClick={() => setTab(item.id)}
               >
-                {item.icon()}
+                <span class="rail-num">{String(index() + 1).padStart(2, "0")}</span>
+                <span class="rail-label">{item.label}</span>
               </button>
             )}
           </For>
+          <div class="rail-spacer" />
+          <div class="rail-foot">dns sinkhole</div>
         </nav>
 
         <header class="cmdbar">
           <span class="view-name">{VIEW_NAMES[tab()]}</span>
           <button type="button" class="palette-trigger" data-testid="palette-trigger" onClick={() => openPalette()}>
-            <IconSearch />
             <span>Jump to a view or run an action</span>
-            <kbd>⌘K</kbd>
+            <kbd>CTRL-K</kbd>
           </button>
           <div class="cmdbar-status">
             <span class={`live-chip${live() ? "" : " off"}`} data-testid="live-chip">
@@ -629,7 +590,6 @@ export default function App() {
                       aria-current={systemView() === view.id ? "page" : undefined}
                       onClick={() => setSystemView(view.id)}
                     >
-                      {view.id === "upstreams" ? <IconUpstream /> : view.id === "sources" ? <IconSources /> : <IconGear />}
                       {view.label}
                     </button>
                   )}

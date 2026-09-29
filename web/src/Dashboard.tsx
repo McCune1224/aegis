@@ -13,10 +13,10 @@ type Props = {
   onFilter: (filter: { client?: string; name?: string }) => void;
 };
 
-const ink = "#7d8ab0";
-const grid = "rgba(48, 51, 88, 0.6)";
-const accent = "#7dd3fc";
-const block = "#fb7185";
+const ink = "#5c5c58";
+const grid = "rgba(20, 20, 20, 0.08)";
+const accent = "#141414";
+const block = "#e32119";
 const axisFont = '11.5px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 const CHART_HEIGHT = 220;
@@ -267,14 +267,14 @@ function SeriesChart(props: { series: { t: number; total: number; blocked: numbe
         {
           label: "total",
           stroke: accent,
-          fill: "rgba(125, 211, 252, 0.08)",
+          fill: "rgba(20, 20, 20, 0.03)",
           width: 2,
           points: { show: false },
         },
         {
           label: "blocked",
           stroke: block,
-          fill: "rgba(251, 113, 133, 0.05)",
+          fill: "rgba(227, 33, 25, 0.05)",
           width: 2,
           points: { show: false },
         },

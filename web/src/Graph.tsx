@@ -50,22 +50,22 @@ type Gesture =
 const CLICK_TRAVEL = 6;
 
 // One table for a star kind, so its tint cannot drift between the sprite and
-// the selection ring.
+// the selection ring. Deeper stops than the chrome tints: the paper is light.
 const kindTint: Record<NodeKind, { css: string; hex: number }> = {
-  client: { css: "#7dd3fc", hex: 0x7dd3fc },
-  profile: { css: "#6ee7b7", hex: 0x6ee7b7 },
-  upstream: { css: "#c4b5fd", hex: 0xc4b5fd },
-  rule: { css: "#fcd34d", hex: 0xfcd34d },
+  client: { css: "#0369a1", hex: 0x0369a1 },
+  profile: { css: "#047857", hex: 0x047857 },
+  upstream: { css: "#6d28d9", hex: 0x6d28d9 },
+  rule: { css: "#b45309", hex: 0xb45309 },
 };
 
-const allowColor = 0x6ee7b7;
-const blockColor = 0xfb7185;
+const allowColor = 0x047857;
+const blockColor = 0xdc2626;
 // An edge is structure, so it is a desaturated slate rather than the client
 // tint. Threading the sky colour through the graph made a crossing edge count
 // as a client.
-const lineColor = 0x7f8db0;
-const labelColor = 0xeef2fa;
-const detailColor = 0x8b96b5;
+const lineColor = 0x9aa0ab;
+const labelColor = 0x141414;
+const detailColor = 0x5c5c58;
 
 const fontStack = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const labelFont = `600 15px ${fontStack}`;
@@ -425,9 +425,9 @@ export default function Graph(props: Props) {
     haloLayer.addChild(star);
 
     const anchorX = node.x + STAR_CELL / 2;
-    // A shadow on the text is what keeps a label legible where it crosses the
+    // A paper-colored halo keeps a label legible where it crosses the
     // atmosphere of its own star.
-    const shadow = { color: 0x04060b, alpha: 0.85, blur: 4, distance: 1, angle: Math.PI / 2 };
+    const shadow = { color: 0xf4f3ee, alpha: 0.9, blur: 4, distance: 1, angle: Math.PI / 2 };
     const label = new Text({
       text: node.label,
       style: {
