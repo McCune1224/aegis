@@ -830,7 +830,7 @@ export default function Graph(props: Props) {
         host = element as HTMLDivElement;
       }}
     >
-      <span class="hint">click a star · drag star to star to connect · scroll to zoom</span>
+      <span class="hint" aria-hidden="true">click a star · drag star to star to connect · scroll to zoom</span>
       <form
         class="graph-create"
         onSubmit={(event) => {
@@ -983,7 +983,7 @@ function ProfilePanel(props: { profile: Profile; onSave: (input: ProfileInput) =
       </Show>
       <button
         type="button"
-        class="btn-solid"
+        class="btn"
         data-testid="graph-panel-mode-save"
         disabled={busy() || untouched()}
         onClick={() => void save()}
@@ -1010,7 +1010,7 @@ function ClientPanel(props: { client: Client; profiles: Profile[]; onSave: (prof
       </label>
       <button
         type="button"
-        class="btn-solid"
+        class="btn"
         data-testid="graph-panel-save"
         disabled={busy() || profile() === props.client.profile}
         onClick={() => {

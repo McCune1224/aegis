@@ -164,6 +164,7 @@ export default function Schedules(props: Props) {
                 />
                 <button
                   type="button"
+                  class="btn-mini"
                   onClick={() => setWindows((current) => current.filter((_, position) => position !== index()))}
                 >
                   Remove
@@ -173,6 +174,7 @@ export default function Schedules(props: Props) {
           </For>
           <button
             type="button"
+            class="btn-ghost"
             data-testid="schedule-add-window"
             onClick={() => setWindows((current) => [...current, blankWindow()])}
           >
@@ -181,7 +183,7 @@ export default function Schedules(props: Props) {
         </div>
 
         <div class="row-actions">
-          <button type="submit" data-testid="schedule-save" disabled={busy()}>
+          <button type="submit" class="btn" data-testid="schedule-save" disabled={busy()}>
             Save
           </button>
         </div>

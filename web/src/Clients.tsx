@@ -104,6 +104,7 @@ export default function Clients(props: Props) {
           <div class="row-actions">
             <button
               type="button"
+              class="btn-ghost"
               data-testid="toggle-manual"
               onClick={() => {
                 setManual((current) => !current);
@@ -149,7 +150,7 @@ export default function Clients(props: Props) {
                   </span>
                 </div>
                 <div class="row-actions">
-                  <button type="button" data-testid="client-edit" onClick={() => edit(client)}>
+                  <button type="button" class="btn-ghost" data-testid="client-edit" onClick={() => edit(client)}>
                     Edit
                   </button>
                   <button type="button" class="btn-danger" onClick={() => void remove(client.name)}>
@@ -223,10 +224,10 @@ export default function Clients(props: Props) {
               />
             </label>
             <div class="row-actions">
-              <button type="submit" data-testid="client-save" disabled={busy()}>
+              <button type="submit" class="btn" data-testid="client-save" disabled={busy()}>
                 Save
               </button>
-              <button type="button" onClick={reset}>
+              <button type="button" class="btn-ghost" onClick={reset}>
                 Cancel
               </button>
             </div>

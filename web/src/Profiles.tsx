@@ -118,15 +118,15 @@ export default function Profiles(props: Props) {
               </div>
               <div class="row-actions">
                 {profile.name === props.defaultProfile ? (
-                  <span class="badge" data-testid="profile-default">
+                  <span class="badge allow" data-testid="profile-default">
                     default
                   </span>
                 ) : (
-                  <button type="button" onClick={() => void makeDefault(profile.name)}>
+                  <button type="button" class="btn-mini" onClick={() => void makeDefault(profile.name)}>
                     Make default
                   </button>
                 )}
-                <button type="button" onClick={() => edit(profile)}>
+                <button type="button" class="btn-ghost" onClick={() => edit(profile)}>
                   Edit
                 </button>
                 <button type="button" class="btn-danger" onClick={() => void remove(profile.name)}>
@@ -188,11 +188,11 @@ export default function Profiles(props: Props) {
           </label>
         </Show>
         <div class="row-actions">
-          <button type="submit" data-testid="profile-save" disabled={busy()}>
+          <button type="submit" class="btn" data-testid="profile-save" disabled={busy()}>
             Save
           </button>
           <Show when={editing()}>
-            <button type="button" onClick={reset}>
+            <button type="button" class="btn-ghost" onClick={reset}>
               Cancel
             </button>
           </Show>

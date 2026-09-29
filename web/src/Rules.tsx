@@ -202,7 +202,7 @@ export default function Rules(props: Props) {
           />
         </label>
         <div class="row-actions">
-          <button type="submit" data-testid="rule-save" disabled={busy()}>
+          <button type="submit" class="btn" data-testid="rule-save" disabled={busy()}>
             Save
           </button>
         </div>

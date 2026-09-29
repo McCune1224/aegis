@@ -13,11 +13,11 @@ type Props = {
   onFilter: (filter: { client?: string; name?: string }) => void;
 };
 
-const ink = "#6e7681";
-const grid = "rgba(255, 255, 255, 0.04)";
-const accent = "#58a6ff";
-const block = "#f85149";
-const axisFont = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif';
+const ink = "#7688ab";
+const grid = "rgba(32, 44, 74, 0.55)";
+const accent = "#7dd3fc";
+const block = "#fb7185";
+const axisFont = '11.5px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 const CHART_HEIGHT = 200;
 
@@ -57,22 +57,22 @@ export default function Dashboard(props: Props) {
           </ol>
         </section>
       </Show>
-      <div class="card-row">
+      <div class="stat-grid">
         <div class="panel stat">
-          <div class="value" data-testid="stat-total">{stats().total}</div>
-          <div class="label">queries</div>
+          <div class="stat-value" data-testid="stat-total">{stats().total}</div>
+          <div class="stat-label">queries</div>
         </div>
         <div class="panel stat blocked">
-          <div class="value" data-testid="stat-blocked">{stats().blocked}</div>
-          <div class="label">blocked</div>
+          <div class="stat-value" data-testid="stat-blocked">{stats().blocked}</div>
+          <div class="stat-label">blocked</div>
         </div>
         <div class="panel stat">
-          <div class="value">{rate()}</div>
-          <div class="label">block rate</div>
+          <div class="stat-value">{rate()}</div>
+          <div class="stat-label">block rate</div>
         </div>
         <div class="panel stat">
-          <div class="value">{stats().clients}</div>
-          <div class="label">clients seen</div>
+          <div class="stat-value">{stats().clients}</div>
+          <div class="stat-label">clients seen</div>
         </div>
       </div>
 
@@ -80,8 +80,8 @@ export default function Dashboard(props: Props) {
         <header>
           <h2>Queries, last {props.windowMinutes >= 1440 ? "24 hours" : "hour"}</h2>
           <div class="chart-meta">
-            <div class="chart-legend">
-              <span class="total">
+            <div class="legend">
+              <span>
                 <i />total
               </span>
               <span class="blocked">
@@ -106,7 +106,7 @@ export default function Dashboard(props: Props) {
             </div>
           </div>
         </header>
-        <div class="chart" data-testid="chart">
+        <div class="chart-frame" data-testid="chart">
           <SeriesChart series={stats().series} />
         </div>
       </section>
@@ -251,14 +251,14 @@ function SeriesChart(props: { series: { t: number; total: number; blocked: numbe
         {
           label: "total",
           stroke: accent,
-          fill: "rgba(88, 166, 255, 0.06)",
+          fill: "rgba(125, 211, 252, 0.08)",
           width: 2,
           points: { show: false },
         },
         {
           label: "blocked",
           stroke: block,
-          fill: "rgba(248, 81, 73, 0.04)",
+          fill: "rgba(251, 113, 133, 0.05)",
           width: 2,
           points: { show: false },
         },

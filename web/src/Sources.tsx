@@ -265,7 +265,7 @@ export default function Sources(props: Props) {
             />
           </label>
           <div class="row-actions">
-            <button type="submit" data-testid="source-save" disabled={busy()}>
+            <button type="submit" class="btn" data-testid="source-save" disabled={busy()}>
               Save
             </button>
           </div>

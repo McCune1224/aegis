@@ -91,7 +91,7 @@ export default function Rewrites(props: Props) {
           />
         </label>
         <div class="row-actions">
-          <button type="submit" data-testid="rewrite-save" disabled={busy()}>
+          <button type="submit" class="btn" data-testid="rewrite-save" disabled={busy()}>
             Save
           </button>
         </div>

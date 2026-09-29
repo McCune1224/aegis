@@ -297,10 +297,10 @@ export default function BlockedServices(props: Props) {
           onInput={(event) => setSearch(event.currentTarget.value)}
         />
         <div class="blocked-services-actions">
-          <button type="button" data-testid="services-block-all" disabled={busy()} onClick={() => blockAll(props.services.map((service) => service.id))}>
+          <button type="button" class="btn-ghost" data-testid="services-block-all" disabled={busy()} onClick={() => blockAll(props.services.map((service) => service.id))}>
             Block all
           </button>
-          <button type="button" data-testid="services-unblock-all" disabled={busy()} onClick={() => unblockAll(props.services.map((service) => service.id))}>
+          <button type="button" class="btn-ghost" data-testid="services-unblock-all" disabled={busy()} onClick={() => unblockAll(props.services.map((service) => service.id))}>
             Unblock all
           </button>
         </div>
@@ -320,10 +320,10 @@ export default function BlockedServices(props: Props) {
                 /
                 {group.services.length}
               </span>
-              <button type="button" class="link block-link" disabled={busy()} onClick={() => blockAll(group.services.map((service) => service.id))}>
+              <button type="button" class="btn-mini" disabled={busy()} onClick={() => blockAll(group.services.map((service) => service.id))}>
                 Block all
               </button>
-              <button type="button" class="link unblock-link" disabled={busy()} onClick={() => unblockAll(group.services.map((service) => service.id))}>
+              <button type="button" class="btn-mini" disabled={busy()} onClick={() => unblockAll(group.services.map((service) => service.id))}>
                 Unblock all
               </button>
             </div>
@@ -339,7 +339,7 @@ export default function BlockedServices(props: Props) {
                     </Show>
                     <span class="service-name">{service.name}</span>
                     <Show when={cardState(service).inherited}>
-                      <span class="badge profile-badge">profile</span>
+                      <span class="badge profile">profile</span>
                     </Show>
                     <input
                       type="checkbox"
@@ -376,7 +376,7 @@ export default function BlockedServices(props: Props) {
               <li data-testid="window-row">
                 <div>
                   <strong>{window.name}</strong>
-                  <span class={`badge ${window.action === "allow" ? "allow-badge" : "block-badge"}`} data-testid="window-action">
+                  <span class={`badge ${window.action === "allow" ? "allow" : "block"}`} data-testid="window-action">
                     {window.action}
                   </span>
                   <span class="muted">{describeSchedule(props.schedules.find((entry) => entry.name === window.schedule))}</span>
@@ -386,7 +386,7 @@ export default function BlockedServices(props: Props) {
                   </span>
                 </div>
                 <div class="row-actions">
-                  <button type="button" data-testid="window-edit" onClick={() => editWindow(window)}>
+                  <button type="button" class="btn-ghost" data-testid="window-edit" onClick={() => editWindow(window)}>
                     Edit
                   </button>
                   <button type="button" class="btn-danger" data-testid="window-delete" onClick={() => void removeWindow(window.name)}>
@@ -524,11 +524,11 @@ export default function BlockedServices(props: Props) {
           </fieldset>
 
           <div class="row-actions">
-            <button type="submit" data-testid="window-save" disabled={winBusy()}>
+            <button type="submit" class="btn" data-testid="window-save" disabled={winBusy()}>
               Save window
             </button>
             <Show when={winEditing()}>
-              <button type="button" onClick={resetWindow}>
+              <button type="button" class="btn-ghost" onClick={resetWindow}>
                 Cancel
               </button>
             </Show>
@@ -538,7 +538,7 @@ export default function BlockedServices(props: Props) {
       </div>
 
       <div class="row-actions">
-        <button type="button" data-testid="services-refresh" onClick={() => void refreshCatalog()}>
+        <button type="button" class="btn-ghost" data-testid="services-refresh" onClick={() => void refreshCatalog()}>
           Refresh catalog
         </button>
       </div>

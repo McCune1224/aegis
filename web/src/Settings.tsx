@@ -142,7 +142,7 @@ export default function Settings(props: Props) {
             />
           </label>
           <div class="row-actions">
-            <button type="submit" data-testid="access-allow-add" disabled={accessBusy()}>
+            <button type="submit" class="btn-ghost" data-testid="access-allow-add" disabled={accessBusy()}>
               Add
             </button>
           </div>
@@ -180,7 +180,7 @@ export default function Settings(props: Props) {
             />
           </label>
           <div class="row-actions">
-            <button type="submit" data-testid="access-deny-add" disabled={accessBusy()}>
+            <button type="submit" class="btn-ghost" data-testid="access-deny-add" disabled={accessBusy()}>
               Add
             </button>
           </div>

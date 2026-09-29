@@ -99,7 +99,7 @@ export default function QueryLog(props: Props) {
           </label>
           <button
             type="submit"
-            class="btn-solid"
+            class="btn"
             data-testid="filter-apply"
             disabled={busy()}
             onClick={() => {

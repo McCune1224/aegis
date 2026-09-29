@@ -74,6 +74,7 @@ export default function Discoveries(props: Props) {
             </label>
             <button
               type="button"
+              class="btn"
               data-testid="discovery-add"
               disabled={busy() === discovery.mac}
               onClick={() => void claim(discovery)}
@@ -82,6 +83,7 @@ export default function Discoveries(props: Props) {
             </button>
             <button
               type="button"
+              class="btn-ghost"
               data-testid="discovery-dismiss"
               disabled={busy() === discovery.mac}
               onClick={() => void dismiss(discovery)}

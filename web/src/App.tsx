@@ -69,10 +69,24 @@ import {
   type UpstreamInput,
   type AccessSettings,
 } from "./api";
-import { IconClients, IconClock, IconDashboard, IconGear, IconLog, IconRewrite, IconRules, IconServices, IconShield, IconSources, IconUpstream } from "./Icons";
+import {
+  IconClients,
+  IconClock,
+  IconConstellation,
+  IconDashboard,
+  IconGear,
+  IconLog,
+  IconRewrite,
+  IconRules,
+  IconServices,
+  IconShield,
+  IconSources,
+  IconUpstream,
+} from "./Icons";
 import BlockedServices, { type ServiceScope } from "./BlockedServices";
 import Clients from "./Clients";
 import Dashboard from "./Dashboard";
+import Graph from "./Graph";
 import QueryLog from "./QueryLog";
 import Settings from "./Settings";
 import { createQueryLog } from "./querylog";
@@ -82,27 +96,65 @@ import Rules from "./Rules";
 import Schedules from "./Schedules";
 import Sources from "./Sources";
 import Upstreams from "./Upstreams";
+import { starField } from "./sky";
 
-type Tab = "dashboard" | "log" | "clients" | "services" | "profiles" | "sources" | "rules" | "schedules" | "rewrites" | "upstreams" | "settings";
+type Tab =
+  | "dashboard"
+  | "constellation"
+  | "log"
+  | "clients"
+  | "services"
+  | "profiles"
+  | "rules"
+  | "schedules"
+  | "rewrites"
+  | "upstreams"
+  | "sources"
+  | "settings";
 
 type NavItem = { id: Tab; label: string; icon: () => JSX.Element };
 
-const NAV: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", icon: IconDashboard },
-  { id: "log", label: "Query Log", icon: IconLog },
-  { id: "clients", label: "Clients", icon: IconClients },
-  { id: "services", label: "Blocked Services", icon: IconServices },
-  { id: "profiles", label: "Profiles", icon: IconShield },
-  { id: "rules", label: "Rules", icon: IconRules },
-  { id: "schedules", label: "Schedules", icon: IconClock },
-  { id: "rewrites", label: "Rewrites", icon: IconRewrite },
-  { id: "sources", label: "Sources", icon: IconSources },
-  { id: "upstreams", label: "Upstreams", icon: IconUpstream },
-  { id: "settings", label: "Settings", icon: IconGear },
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  {
+    label: "Observe",
+    items: [
+      { id: "dashboard", label: "Overview", icon: IconDashboard },
+      { id: "constellation", label: "Constellation", icon: IconConstellation },
+      { id: "log", label: "Query Log", icon: IconLog },
+    ],
+  },
+  {
+    label: "Policy",
+    items: [
+      { id: "clients", label: "Clients", icon: IconClients },
+      { id: "profiles", label: "Profiles", icon: IconShield },
+      { id: "rules", label: "Rules", icon: IconRules },
+      { id: "schedules", label: "Schedules", icon: IconClock },
+    ],
+  },
+  {
+    label: "Controls",
+    items: [
+      { id: "services", label: "Blocked Services", icon: IconServices },
+      { id: "rewrites", label: "Rewrites", icon: IconRewrite },
+    ],
+  },
+  {
+    label: "Network",
+    items: [
+      { id: "upstreams", label: "Upstreams", icon: IconUpstream },
+      { id: "sources", label: "Sources", icon: IconSources },
+    ],
+  },
+  {
+    label: "System",
+    items: [{ id: "settings", label: "Settings", icon: IconGear }],
+  },
 ];
 
 const TITLES: Record<Tab, string> = {
-  dashboard: "Dashboard",
+  dashboard: "Overview",
+  constellation: "Constellation",
   log: "Query Log",
   clients: "Clients",
   services: "Blocked Services",
@@ -110,10 +162,13 @@ const TITLES: Record<Tab, string> = {
   rules: "Rules",
   schedules: "Schedules",
   rewrites: "Rewrites",
-  sources: "Sources",
   upstreams: "Upstreams",
+  sources: "Sources",
   settings: "Settings",
 };
+
+// The sky is seeded, so every load paints the same night.
+const sky = starField();
 
 export default function App() {
   const [tab, setTab] = createSignal<Tab>("dashboard");
@@ -336,45 +391,52 @@ export default function App() {
 
   return (
     <>
+      <div class="sky" aria-hidden="true">
+        <div class="sky-layer far" style={{ "background-image": sky.far }} />
+        <div class="sky-layer near" style={{ "background-image": sky.near }} />
+      </div>
       <div class="shell">
         <nav class="sidebar">
           <div class="brand">
-            <div class="brand-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="4" r="1.5" fill="white"/>
-                <circle cx="4" cy="12" r="1.5" fill="white"/>
-                <circle cx="20" cy="12" r="1.5" fill="white"/>
-                <circle cx="12" cy="20" r="1.5" fill="white"/>
-                <circle cx="8" cy="8" r="1" fill="white" opacity="0.6"/>
-                <circle cx="16" cy="8" r="1" fill="white" opacity="0.6"/>
-                <circle cx="8" cy="16" r="1" fill="white" opacity="0.6"/>
-                <circle cx="16" cy="16" r="1" fill="white" opacity="0.6"/>
-                <line x1="12" y1="4" x2="4" y2="12" stroke="white" stroke-width="1" opacity="0.5"/>
-                <line x1="12" y1="4" x2="20" y2="12" stroke="white" stroke-width="1" opacity="0.5"/>
-                <line x1="4" y1="12" x2="12" y2="20" stroke="white" stroke-width="1" opacity="0.5"/>
-                <line x1="20" y1="12" x2="12" y2="20" stroke="white" stroke-width="1" opacity="0.5"/>
-                <line x1="8" y1="8" x2="16" y2="8" stroke="white" stroke-width="0.5" opacity="0.3"/>
-                <line x1="8" y1="16" x2="16" y2="16" stroke="white" stroke-width="0.5" opacity="0.3"/>
-                <line x1="8" y1="8" x2="8" y2="16" stroke="white" stroke-width="0.5" opacity="0.3"/>
-                <line x1="16" y1="8" x2="16" y2="16" stroke="white" stroke-width="0.5" opacity="0.3"/>
+            <div class="brand-mark">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M4 12.4 L8 7.2 L12.6 10 L13 3.6"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  opacity="0.7"
+                />
+                <circle cx="4" cy="12.4" r="1.3" fill="currentColor" />
+                <circle cx="8" cy="7.2" r="1.5" fill="currentColor" />
+                <circle cx="12.6" cy="10" r="1.1" fill="currentColor" />
+                <circle cx="13" cy="3.6" r="1.7" fill="currentColor" />
               </svg>
             </div>
             <div class="brand-text">
-              <strong>AEGIS</strong>
-              <span>sinkhole</span>
+              <span class="brand-name">AEGIS</span>
+              <span class="brand-sub">sinkhole</span>
             </div>
           </div>
           <div class="nav">
-            {NAV.map((item) => (
-              <button
-                type="button"
-                data-testid={`tab-${item.id}`}
-                class={tab() === item.id ? "nav-item active" : "nav-item"}
-                onClick={() => setTab(item.id)}
-              >
-                {item.icon()}
-                {item.label}
-              </button>
+            {NAV_GROUPS.map((group) => (
+              <div class="nav-group">
+                <span class="nav-label">{group.label}</span>
+                {group.items.map((item) => (
+                  <button
+                    type="button"
+                    data-testid={`tab-${item.id}`}
+                    class={tab() === item.id ? "nav-item active" : "nav-item"}
+                    aria-current={tab() === item.id ? "page" : undefined}
+                    title={item.label}
+                    onClick={() => setTab(item.id)}
+                  >
+                    <span class="nav-icon">{item.icon()}</span>
+                    <span class="nav-text">{item.label}</span>
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
           <div class="foot">
@@ -384,17 +446,34 @@ export default function App() {
         <div class="content">
           <header class="topbar">
             <h1 class="page-title">{TITLES[tab()]}</h1>
-            <div class="pill" data-testid="status">
+            <div class="status-pill" data-testid="status">
               <span class="dot" />
-              {upstreams()[0] || "no upstream"}
-              {upstreams().length > 1 ? ` +${upstreams().length - 1}` : ""} · {ruleCount()} rules
+              <span class="status-text">
+                {upstreams()[0] || "no upstream"}
+                {upstreams().length > 1 ? ` +${upstreams().length - 1}` : ""} · {ruleCount()} rules
+              </span>
             </div>
           </header>
           <Show when={error()}>
             <p class="error-banner">Could not load the configuration: {error()}</p>
           </Show>
-          <main class="screen">
-            <Show when={tab() === "dashboard"}>
+          <Show when={tab() === "constellation"}>
+            <main class="screen-bleed" data-testid="screen-constellation">
+              <Graph
+                profiles={profiles()}
+                clients={clients()}
+                rules={rules()}
+                defaultProfile={defaultProfile()}
+                upstreams={upstreams()}
+                log={log}
+                onSaveClient={saveClient}
+                onSaveProfile={saveProfile}
+                onSetDefault={makeDefault}
+              />
+            </main>
+          </Show>
+          <Show when={tab() === "dashboard"}>
+            <main class="screen">
               <Dashboard
                 entries={log.entries()}
                 threats={threats()}
@@ -406,8 +485,10 @@ export default function App() {
                   setTab("log");
                 }}
               />
-            </Show>
-            <Show when={tab() === "log"}>
+            </main>
+          </Show>
+          <Show when={tab() === "log"}>
+            <main class="screen">
               <QueryLog
                 log={log}
                 filter={logFilter()}
@@ -415,8 +496,10 @@ export default function App() {
                   await refresh();
                 }}
               />
-            </Show>
-            <Show when={tab() === "clients"}>
+            </main>
+          </Show>
+          <Show when={tab() === "clients"}>
+            <main class="screen">
               <div class="screen-inner">
                 <Clients
                   clients={clients()}
@@ -431,8 +514,10 @@ export default function App() {
                   onDelete={deleteClient}
                 />
               </div>
-            </Show>
-            <Show when={tab() === "services"}>
+            </main>
+          </Show>
+          <Show when={tab() === "services"}>
+            <main class="screen">
               <div class="screen-inner">
                 <BlockedServices
                   services={services()}
@@ -448,8 +533,10 @@ export default function App() {
                   onDeleteWindow={deleteServiceWindow}
                 />
               </div>
-            </Show>
-            <Show when={tab() === "profiles"}>
+            </main>
+          </Show>
+          <Show when={tab() === "profiles"}>
+            <main class="screen">
               <div class="screen-inner">
                 <Profiles
                   profiles={profiles()}
@@ -461,8 +548,10 @@ export default function App() {
                   onSaveSafesearch={saveProfileSafesearch}
                 />
               </div>
-            </Show>
-            <Show when={tab() === "rules"}>
+            </main>
+          </Show>
+          <Show when={tab() === "rules"}>
+            <main class="screen">
               <div class="screen-inner">
                 <Rules
                   rules={rules()}
@@ -473,8 +562,10 @@ export default function App() {
                   onDelete={deleteRule}
                 />
               </div>
-            </Show>
-            <Show when={tab() === "schedules"}>
+            </main>
+          </Show>
+          <Show when={tab() === "schedules"}>
+            <main class="screen">
               <div class="screen-inner">
                 <Schedules
                   schedules={schedules()}
@@ -483,13 +574,17 @@ export default function App() {
                   onDelete={deleteSchedule}
                 />
               </div>
-            </Show>
-            <Show when={tab() === "rewrites"}>
+            </main>
+          </Show>
+          <Show when={tab() === "rewrites"}>
+            <main class="screen">
               <div class="screen-inner">
                 <Rewrites rewrites={rewrites()} onSave={saveRewrite} onDelete={deleteRewrite} />
               </div>
-            </Show>
-            <Show when={tab() === "sources"}>
+            </main>
+          </Show>
+          <Show when={tab() === "sources"}>
+            <main class="screen">
               <div class="screen-inner">
                 <Sources
                   sources={sources()}
@@ -499,8 +594,10 @@ export default function App() {
                   onReload={refresh}
                 />
               </div>
-            </Show>
-            <Show when={tab() === "upstreams"}>
+            </main>
+          </Show>
+          <Show when={tab() === "upstreams"}>
+            <main class="screen">
               <div class="screen-inner">
                 <Upstreams
                   upstreams={upstreamRows()}
@@ -512,8 +609,10 @@ export default function App() {
                   onDeleteRoute={deleteRoute}
                 />
               </div>
-            </Show>
-            <Show when={tab() === "settings"}>
+            </main>
+          </Show>
+          <Show when={tab() === "settings"}>
+            <main class="screen">
               <Settings
                 profiles={profiles()}
                 defaultProfile={defaultProfile()}
@@ -525,8 +624,8 @@ export default function App() {
                 live={live()}
                 onSetLive={setLive}
               />
-            </Show>
-          </main>
+            </main>
+          </Show>
         </div>
       </div>
     </>

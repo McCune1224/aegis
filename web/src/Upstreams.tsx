@@ -229,7 +229,7 @@ export default function Upstreams(props: Props) {
             <span>backup</span>
           </label>
           <div class="row-actions">
-            <button type="submit" data-testid="upstream-save" disabled={upstreamBusy()}>
+            <button type="submit" class="btn" data-testid="upstream-save" disabled={upstreamBusy()}>
               Save
             </button>
           </div>
@@ -309,7 +309,7 @@ export default function Upstreams(props: Props) {
             </select>
           </label>
           <div class="row-actions">
-            <button type="submit" data-testid="route-save" disabled={routeBusy()}>
+            <button type="submit" class="btn" data-testid="route-save" disabled={routeBusy()}>
               Save
             </button>
           </div>
