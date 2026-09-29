@@ -49,138 +49,136 @@ export default function QueryLog(props: Props) {
   }
 
   return (
-    <div class="screen-inner wide">
-      <section class="panel">
-        <header>
-          <h2>Filters</h2>
-          <label class="toggle">
-            <input
-              type="checkbox"
-              data-testid="log-live"
-              checked={props.log.live()}
-              onInput={(event) => props.log.setLive(event.currentTarget.checked)}
-            />
-            <span>live</span>
-          </label>
-        </header>
-        <form class="filters" onSubmit={(event) => event.preventDefault()}>
-          <label>
-            Client
-            <input
-              data-testid="filter-client"
-              placeholder="192.168.1.50"
-              value={client()}
-              onInput={(event) => setClient(event.currentTarget.value)}
-            />
-          </label>
-          <label>
-            Name
-            <input
-              data-testid="filter-name"
-              placeholder="example.com"
-              value={name()}
-              onInput={(event) => setName(event.currentTarget.value)}
-            />
-          </label>
-          <label>
-            Verdict
-            <select data-testid="filter-verdict" value={verdict()} onInput={(event) => setVerdict(event.currentTarget.value)}>
-              <option value="">all</option>
-              <option value="allow">allowed</option>
-              <option value="block">blocked</option>
-              <option value="rewrite">rewritten</option>
-            </select>
-          </label>
-          <label>
-            Limit
-            <select value={limit()} onInput={(event) => setLimit(Number(event.currentTarget.value))}>
-              <For each={limits}>{(value) => <option value={value}>{value}</option>}</For>
-            </select>
-          </label>
-          <button
-            type="submit"
-            class="btn"
-            data-testid="filter-apply"
-            disabled={busy()}
-            onClick={() => {
-              setBusy(true);
-              try {
-                load();
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Apply
-          </button>
-        </form>
-      </section>
+    <div class="view">
+      <div class="subbar">
+        <label>
+          client
+          <input
+            data-testid="filter-client"
+            placeholder="192.168.1.50"
+            value={client()}
+            onInput={(event) => setClient(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          name
+          <input
+            data-testid="filter-name"
+            placeholder="example.com"
+            value={name()}
+            onInput={(event) => setName(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          verdict
+          <select data-testid="filter-verdict" value={verdict()} onInput={(event) => setVerdict(event.currentTarget.value)}>
+            <option value="">all</option>
+            <option value="allow">allowed</option>
+            <option value="block">blocked</option>
+            <option value="rewrite">rewritten</option>
+          </select>
+        </label>
+        <label>
+          limit
+          <select value={limit()} onInput={(event) => setLimit(Number(event.currentTarget.value))}>
+            <For each={limits}>{(value) => <option value={value}>{value}</option>}</For>
+          </select>
+        </label>
+        <button
+          type="button"
+          class="btn"
+          data-testid="filter-apply"
+          disabled={busy()}
+          onClick={() => {
+            setBusy(true);
+            try {
+              load();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Apply
+        </button>
+        <span class="spacer" />
+        <label class="toggle">
+          <input
+            type="checkbox"
+            data-testid="log-live"
+            checked={props.log.live()}
+            onInput={(event) => props.log.setLive(event.currentTarget.checked)}
+          />
+          <span>live</span>
+        </label>
+      </div>
 
       <Show when={error()}>
-        <p class="error">{error()}</p>
+        <p class="alert-line error-line" role="alert">
+          {error()}
+        </p>
       </Show>
 
-      <section class="panel">
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Client</th>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Verdict</th>
-                <th>Rule</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody data-testid="log-rows">
-              <For each={props.log.entries().slice(0, limit())}>
-                {(entry) => (
-                  <tr data-testid="log-row">
-                    <td class="muted">{new Date(entry.time).toLocaleTimeString()}</td>
-                    <td class="name">{entry.client}</td>
-                    <td class="name">{entry.name}</td>
-                    <td class="muted">{entry.type}</td>
-                    <td>
-                      <span class={`badge ${entry.verdict === "block" ? "block" : entry.verdict === "rewrite" ? "rewrite" : "allow"}`}>{entry.verdict}</span>
-                    </td>
-                    <td class="selectors">
-                      {entry.rule ?? ""}
-                      <Show when={entry.threat}>
-                        <span class="badge block" data-testid="log-threat" title="named by a threat feed">
-                          {entry.threat}
-                        </span>
-                      </Show>
-                    </td>
-                    <td>
-                      <Show
-                        when={entry.verdict === "block"}
-                        fallback={
-                          <button type="button" class="btn-ghost" onClick={() => void decide(entry, "block")}>
-                            Block
-                          </button>
-                        }
-                      >
-                        <button type="button" class="btn-ghost" onClick={() => void decide(entry, "allow")}>
-                          Allow
+      <div class="tbl-wrap" style={{ flex: "1", "min-height": "0", overflow: "auto" }}>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Client</th>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Verdict</th>
+              <th>Rule</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody data-testid="log-rows">
+            <For each={props.log.entries().slice(0, limit())}>
+              {(entry) => (
+                <tr data-testid="log-row">
+                  <td class="mono muted">{new Date(entry.time).toLocaleTimeString()}</td>
+                  <td class="mono">{entry.client}</td>
+                  <td class="mono">{entry.name}</td>
+                  <td class="mono muted">{entry.type}</td>
+                  <td>
+                    <span class={`badge ${entry.verdict === "block" ? "block" : entry.verdict === "rewrite" ? "rewrite" : "allow"}`}>
+                      {entry.verdict}
+                    </span>
+                  </td>
+                  <td class="mono muted">
+                    {entry.rule ?? ""}
+                    <Show when={entry.threat}>
+                      <span class="badge block" data-testid="log-threat" title="named by a threat feed">
+                        {entry.threat}
+                      </span>
+                    </Show>
+                  </td>
+                  <td>
+                    <Show
+                      when={entry.verdict === "block"}
+                      fallback={
+                        <button type="button" class="btn-mini" onClick={() => void decide(entry, "block")}>
+                          Block
                         </button>
-                      </Show>
-                    </td>
-                  </tr>
-                )}
-              </For>
-              <Show when={props.log.entries().length === 0}>
-                <tr>
-                  <td colspan={7} class="empty">
-                    no queries recorded yet
+                      }
+                    >
+                      <button type="button" class="btn-mini" onClick={() => void decide(entry, "allow")}>
+                        Allow
+                      </button>
+                    </Show>
                   </td>
                 </tr>
-              </Show>
-            </tbody>
-          </table>
-        </div>
-      </section>
+              )}
+            </For>
+            <Show when={props.log.entries().length === 0}>
+              <tr>
+                <td colspan={7} class="empty">
+                  no queries recorded yet
+                </td>
+              </tr>
+            </Show>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

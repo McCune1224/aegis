@@ -2,6 +2,7 @@ import { createSignal, For, Show } from "solid-js";
 import type { Profile, ProfileInput, SafesearchEngine } from "./api";
 import { BLOCKING_MODES } from "./api";
 import { toggled } from "./services";
+import Drawer from "./Drawer";
 
 type Props = {
   profiles: Profile[];
@@ -19,6 +20,7 @@ export default function Profiles(props: Props) {
   const [mode, setMode] = createSignal("");
   const [custom, setCustom] = createSignal("");
   const [editing, setEditing] = createSignal<string>();
+  const [drawer, setDrawer] = createSignal(false);
   const [error, setError] = createSignal<string>();
   const [busy, setBusy] = createSignal(false);
 
@@ -30,6 +32,12 @@ export default function Profiles(props: Props) {
     setEditing(undefined);
   }
 
+  function openNew() {
+    reset();
+    setDrawer(true);
+    setError(undefined);
+  }
+
   function edit(profile: Profile) {
     setEditing(profile.name);
     setName(profile.name);
@@ -37,6 +45,7 @@ export default function Profiles(props: Props) {
     setMode(profile.mode ?? "");
     setCustom(profile.custom ?? "");
     setError(undefined);
+    setDrawer(true);
   }
 
   async function submit(event: SubmitEvent) {
@@ -50,6 +59,7 @@ export default function Profiles(props: Props) {
     try {
       await props.onSave(name(), { extends: parent(), mode: mode(), custom: custom() });
       reset();
+      setDrawer(false);
     } catch (cause) {
       setError(String(cause));
     } finally {
@@ -63,6 +73,7 @@ export default function Profiles(props: Props) {
       await props.onDelete(target);
       if (editing() === target) {
         reset();
+        setDrawer(false);
       }
     } catch (cause) {
       setError(String(cause));
@@ -103,121 +114,141 @@ export default function Profiles(props: Props) {
   }
 
   return (
-    <section class="panel">
-      <ul>
-        <For each={props.profiles}>
-          {(profile) => (
-            <li data-testid="profile-row">
-              <div>
-                <strong>{profile.name}</strong>
-                <span class="muted">
+    <>
+      <div class="workbench">
+        <div class="workbench-list">
+          <div class="subbar">
+            <h2 style={{ "font-size": "10.5px", "letter-spacing": "0.13em", "text-transform": "uppercase", color: "var(--text-2)", "font-weight": "650", "margin-right": "auto" }}>
+              Profiles
+            </h2>
+            <button type="button" class="btn-mini" onClick={() => openNew()}>
+              + New profile
+            </button>
+          </div>
+          <For each={props.profiles}>
+            {(profile) => (
+              <button
+                type="button"
+                class={editing() === profile.name ? "entry selected" : "entry"}
+                data-testid="profile-row"
+                onClick={() => edit(profile)}
+              >
+                <span class="entry-title">
+                  {profile.name}
+                  <Show when={profile.name === props.defaultProfile}>
+                    <span class="badge allow" data-testid="profile-default">
+                      default
+                    </span>
+                  </Show>
+                </span>
+                <span class="entry-sub">
                   {profile.mode ?? "inherited"}
                   {profile.extends ? ` from ${profile.extends}` : ""}
                   {profile.custom ? ` ${profile.custom}` : ""}
                 </span>
-              </div>
-              <div class="row-actions">
-                {profile.name === props.defaultProfile ? (
-                  <span class="badge allow" data-testid="profile-default">
-                    default
-                  </span>
-                ) : (
-                  <button type="button" class="btn-mini" onClick={() => void makeDefault(profile.name)}>
-                    Make default
-                  </button>
-                )}
-                <button type="button" class="btn-ghost" onClick={() => edit(profile)}>
-                  Edit
-                </button>
-                <button type="button" class="btn-danger" onClick={() => void remove(profile.name)}>
-                  Delete
-                </button>
-              </div>
-            </li>
-          )}
-        </For>
-      </ul>
+              </button>
+            )}
+          </For>
+        </div>
 
-      <form onSubmit={(event) => void submit(event)}>
-        <h2>{editing() ? `Edit ${editing()}` : "New profile"}</h2>
-        <label>
-          Name
-          <input
-            data-testid="profile-name"
-            value={name()}
-            disabled={editing() !== undefined}
-            onInput={(event) => setName(event.currentTarget.value)}
-          />
-        </label>
-        <label>
-          Parent
-          <select
-            data-testid="profile-extends"
-            value={parent()}
-            onInput={(event) => setParent(event.currentTarget.value)}
-          >
-            <option value="">none</option>
-            <For each={props.profiles}>
-              {(profile) => (
-                <Show when={profile.name !== editing()}>
-                  <option value={profile.name}>{profile.name}</option>
-                </Show>
-              )}
-            </For>
-          </select>
-        </label>
-        <label>
-          Mode
-          <select
-            data-testid="profile-mode"
-            value={mode()}
-            onInput={(event) => setMode(event.currentTarget.value)}
-          >
-            <option value="">inherit</option>
-            <For each={BLOCKING_MODES}>{(value) => <option value={value}>{value}</option>}</For>
-          </select>
-        </label>
-        <Show when={mode() === "custom-address"}>
+        <div class="workbench-main">
+          <div class="inspector-section" style={{ "max-width": "620px" }}>
+            <h3>How profiles work</h3>
+            <p class="muted">
+              A profile is one blocking policy: the mode a blocked name is answered with, optionally inherited from a
+              parent. Every unidentified client gets the default profile. Select a profile to edit it, change the
+              default, or create a new one.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <Drawer open={drawer()} title={editing() ? `Edit ${editing()}` : "New profile"} onClose={() => setDrawer(false)}>
+        <form onSubmit={(event) => void submit(event)} style={{ display: "contents" }}>
           <label>
-            Custom address
+            Name
             <input
-              data-testid="profile-custom"
-              value={custom()}
-              onInput={(event) => setCustom(event.currentTarget.value)}
+              data-testid="profile-name"
+              value={name()}
+              disabled={editing() !== undefined}
+              onInput={(event) => setName(event.currentTarget.value)}
             />
           </label>
-        </Show>
-        <div class="row-actions">
-          <button type="submit" class="btn" data-testid="profile-save" disabled={busy()}>
-            Save
-          </button>
-          <Show when={editing()}>
-            <button type="button" class="btn-ghost" onClick={reset}>
-              Cancel
-            </button>
+          <label>
+            Parent
+            <select
+              data-testid="profile-extends"
+              value={parent()}
+              onInput={(event) => setParent(event.currentTarget.value)}
+            >
+              <option value="">none</option>
+              <For each={props.profiles}>
+                {(profile) => (
+                  <Show when={profile.name !== editing()}>
+                    <option value={profile.name}>{profile.name}</option>
+                  </Show>
+                )}
+              </For>
+            </select>
+          </label>
+          <label>
+            Mode
+            <select
+              data-testid="profile-mode"
+              value={mode()}
+              onInput={(event) => setMode(event.currentTarget.value)}
+            >
+              <option value="">inherit</option>
+              <For each={BLOCKING_MODES}>{(value) => <option value={value}>{value}</option>}</For>
+            </select>
+          </label>
+          <Show when={mode() === "custom-address"}>
+            <label>
+              Custom address
+              <input
+                data-testid="profile-custom"
+                value={custom()}
+                onInput={(event) => setCustom(event.currentTarget.value)}
+              />
+            </label>
           </Show>
-        </div>
-        <Show when={editing()}>
-          <fieldset class="services" data-testid="profile-safesearch">
-            <legend>Safe search</legend>
-            <For each={props.safesearch}>
-              {(engine) => (
-                <label class="toggle">
-                  <input
-                    type="checkbox"
-                    data-testid={`safesearch-${engine.id}`}
-                    checked={enabledEngines().includes(engine.id)}
-                    disabled={busy()}
-                    onChange={() => void toggleEngine(engine.id)}
-                  />
-                  {engine.name}
-                </label>
-              )}
-            </For>
-          </fieldset>
-        </Show>
-        {error() ? <p class="error">{error()}</p> : null}
-      </form>
-    </section>
+          {error() ? <p class="error">{error()}</p> : null}
+          <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+            <Show when={editing() && editing() !== props.defaultProfile}>
+              <button type="button" class="btn-ghost" onClick={() => void makeDefault(editing()!)}>
+                Make default
+              </button>
+            </Show>
+            <Show when={editing()}>
+              <button type="button" class="btn-danger" onClick={() => void remove(editing()!)}>
+                Delete
+              </button>
+            </Show>
+            <button type="submit" class="btn" data-testid="profile-save" disabled={busy()}>
+              Save
+            </button>
+          </div>
+          <Show when={editing()}>
+            <fieldset class="services" data-testid="profile-safesearch">
+              <legend>Safe search</legend>
+              <For each={props.safesearch}>
+                {(engine) => (
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      data-testid={`safesearch-${engine.id}`}
+                      checked={enabledEngines().includes(engine.id)}
+                      disabled={busy()}
+                      onChange={() => void toggleEngine(engine.id)}
+                    />
+                    {engine.name}
+                  </label>
+                )}
+              </For>
+            </fieldset>
+          </Show>
+        </form>
+      </Drawer>
+    </>
   );
 }

@@ -13,13 +13,19 @@ type Props = {
   onFilter: (filter: { client?: string; name?: string }) => void;
 };
 
-const ink = "#7688ab";
-const grid = "rgba(32, 44, 74, 0.55)";
+const ink = "#7d8ab0";
+const grid = "rgba(48, 51, 88, 0.6)";
 const accent = "#7dd3fc";
 const block = "#fb7185";
 const axisFont = '11.5px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
-const CHART_HEIGHT = 200;
+const CHART_HEIGHT = 220;
+
+// clockTime is the wall clock a feed reader scans for.
+function clockTime(iso: string): string {
+  const parsed = new Date(iso);
+  return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
 
 export default function Dashboard(props: Props) {
   const stats = () => aggregate(props.entries, Date.now(), props.windowMinutes);
@@ -36,20 +42,34 @@ export default function Dashboard(props: Props) {
   };
 
   return (
-    <div class="screen-inner wide">
+    <div class="view">
+      <div class="telemetry">
+        <div class="tele">
+          <span class="tele-value" data-testid="stat-total">{stats().total}</span>
+          <span class="tele-label">queries</span>
+        </div>
+        <div class="tele blocked">
+          <span class="tele-value" data-testid="stat-blocked">{stats().blocked}</span>
+          <span class="tele-label">blocked</span>
+        </div>
+        <div class="tele">
+          <span class="tele-value">{rate()}</span>
+          <span class="tele-label">block rate</span>
+        </div>
+        <div class="tele">
+          <span class="tele-value">{stats().clients}</span>
+          <span class="tele-label">clients seen</span>
+        </div>
+      </div>
+
       <Show when={props.threats.length > 0}>
-        <section class="panel" data-testid="threat-panel">
-          <header>
-            <h2>Threat activity</h2>
-          </header>
-          <ol class="top-list" data-testid="threat-list">
+        <section data-testid="threat-panel" role="alert">
+          <ol class="empty-list" data-testid="threat-list" style={{ "list-style": "none" }}>
             <For each={props.threats}>
               {(finding) => (
-                <li>
-                  <div>
-                    <strong>{finding.client}</strong>
-                    <span class="muted">{finding.summary}</span>
-                  </div>
+                <li class="alert-line">
+                  <strong>{finding.client}</strong>
+                  <span class="muted">{finding.summary}</span>
                   <span class="badge block">{finding.kind}</span>
                 </li>
               )}
@@ -57,158 +77,154 @@ export default function Dashboard(props: Props) {
           </ol>
         </section>
       </Show>
-      <div class="stat-grid">
-        <div class="panel stat">
-          <div class="stat-value" data-testid="stat-total">{stats().total}</div>
-          <div class="stat-label">queries</div>
-        </div>
-        <div class="panel stat blocked">
-          <div class="stat-value" data-testid="stat-blocked">{stats().blocked}</div>
-          <div class="stat-label">blocked</div>
-        </div>
-        <div class="panel stat">
-          <div class="stat-value">{rate()}</div>
-          <div class="stat-label">block rate</div>
-        </div>
-        <div class="panel stat">
-          <div class="stat-value">{stats().clients}</div>
-          <div class="stat-label">clients seen</div>
-        </div>
-      </div>
 
-      <section class="panel">
-        <header>
-          <h2>Queries, last {props.windowMinutes >= 1440 ? "24 hours" : "hour"}</h2>
-          <div class="chart-meta">
-            <div class="legend">
-              <span>
-                <i />total
-              </span>
-              <span class="blocked">
-                <i />blocked
-              </span>
-            </div>
-            <div class="seg">
-              <button
-                type="button"
-                class={props.windowMinutes < 1440 ? "seg-btn active" : "seg-btn"}
-                onClick={() => props.onSetWindow(60)}
-              >
-                1h
-              </button>
-              <button
-                type="button"
-                class={props.windowMinutes >= 1440 ? "seg-btn active" : "seg-btn"}
-                onClick={() => props.onSetWindow(1440)}
-              >
-                24h
-              </button>
-            </div>
-          </div>
-        </header>
-        <div class="chart-frame" data-testid="chart">
-          <SeriesChart series={stats().series} />
-        </div>
-      </section>
-
-      <div class="two-col">
-        <section class="panel">
-          <header>
-            <h2>Top blocked</h2>
-          </header>
-          <ol class="top-list" data-testid="top-blocked">
-            <For each={stats().topBlocked}>
-              {(row) => (
-                <li>
-                  <button
-                    type="button"
-                    class="link"
-                    title="show this name in the query log"
-                    onClick={() => props.onFilter({ name: row.name })}
-                  >
-                    {row.name}
-                  </button>
-                  <span class="badge block">{row.count}</span>
-                </li>
-              )}
-            </For>
-            <Show when={stats().topBlocked.length === 0}>
-              <li class="empty">nothing blocked yet</li>
-            </Show>
-          </ol>
-        </section>
-        <section class="panel">
-          <header>
-            <h2>Top clients</h2>
-          </header>
-          <ol class="top-list" data-testid="top-clients">
-            <For each={stats().topClients}>
-              {(row) => (
-                <li>
-                  <button
-                    type="button"
-                    class="link"
-                    title="show this client in the query log"
-                    onClick={() => props.onFilter({ client: row.client })}
-                  >
-                    {row.client}
-                  </button>
-                  <span class="badge kind">{row.count}</span>
-                </li>
-              )}
-            </For>
-            <Show when={stats().topClients.length === 0}>
-              <li class="empty">no queries yet</li>
-            </Show>
-          </ol>
-        </section>
-      </div>
-
-      <div class="two-col">
-        <section class="panel">
-          <header>
-            <h2>Query types</h2>
-          </header>
-          <div class="bars">
-            <For each={types()}>
-              {(row) => (
-                <div class="bar-row">
-                  <span class="bar-label">{row.name}</span>
-                  <span class="bar-track">
-                    <span class="bar-fill" style={{ width: `${Math.max(4, row.share * 100)}%` }} />
+      <div class="overview-grid">
+        <div class="overview-main">
+          <section class="sheet">
+            <div class="sheet-head">
+              <h2>Queries, last {props.windowMinutes >= 1440 ? "24 hours" : "hour"}</h2>
+              <div class="chart-meta">
+                <div class="legend">
+                  <span>
+                    <i />total
                   </span>
-                  <span class="bar-count">{row.count}</span>
+                  <span class="blocked">
+                    <i />blocked
+                  </span>
                 </div>
-              )}
-            </For>
-            <Show when={types().length === 0}>
-              <p class="empty">no queries yet</p>
-            </Show>
-          </div>
-        </section>
-        <section class="panel">
-          <header>
-            <h2>Latest queries</h2>
-            <button type="button" class="btn-ghost" onClick={props.onOpenLog}>
-              Open the log
-            </button>
-          </header>
-          <table>
-            <tbody>
-              <For each={props.entries.slice(0, 8)}>
-                {(entry) => (
-                  <tr>
-                    <td class="name">{entry.name}</td>
-                    <td class="muted">{entry.client}</td>
-                    <td>
-                      <span class={`badge ${entry.verdict === "block" ? "block" : "allow"}`}>{entry.verdict}</span>
-                    </td>
-                  </tr>
-                )}
-              </For>
-            </tbody>
-          </table>
-        </section>
+                <div class="seg">
+                  <button
+                    type="button"
+                    class={props.windowMinutes < 1440 ? "seg-btn active" : "seg-btn"}
+                    onClick={() => props.onSetWindow(60)}
+                  >
+                    1h
+                  </button>
+                  <button
+                    type="button"
+                    class={props.windowMinutes >= 1440 ? "seg-btn active" : "seg-btn"}
+                    onClick={() => props.onSetWindow(1440)}
+                  >
+                    24h
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="chart-frame" data-testid="chart" style={{ padding: "10px 12px 4px" }}>
+              <SeriesChart series={stats().series} />
+            </div>
+          </section>
+
+          <section class="sheet">
+            <div class="sheet-head">
+              <h2>Query types</h2>
+            </div>
+            <div class="sheet-body">
+              <div class="bars">
+                <For each={types()}>
+                  {(row) => (
+                    <div class="bar-row">
+                      <span class="bar-label">{row.name}</span>
+                      <span class="bar-track">
+                        <span class="bar-fill" style={{ width: `${Math.max(4, row.share * 100)}%` }} />
+                      </span>
+                      <span class="bar-count">{row.count}</span>
+                    </div>
+                  )}
+                </For>
+                <Show when={types().length === 0}>
+                  <p class="empty">no queries yet</p>
+                </Show>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="overview-side">
+          <section class="sheet">
+            <div class="sheet-head">
+              <h2>Latest queries</h2>
+              <button type="button" class="btn-mini" onClick={props.onOpenLog}>
+                Open the log
+              </button>
+            </div>
+            <div class="sheet-body" style={{ padding: "8px 12px" }}>
+              <ul class="feed">
+                <For each={props.entries.slice(0, 14)}>
+                  {(entry) => (
+                    <li>
+                      <span class="f-time">{clockTime(entry.time)}</span>
+                      <span class="f-name">{entry.name}</span>
+                      <span class="f-client">{entry.client}</span>
+                      <span class={`badge ${entry.verdict === "block" ? "block" : entry.verdict === "rewrite" ? "rewrite" : "allow"}`}>
+                        {entry.verdict}
+                      </span>
+                    </li>
+                  )}
+                </For>
+                <Show when={props.entries.length === 0}>
+                  <li class="empty">no queries yet</li>
+                </Show>
+              </ul>
+            </div>
+          </section>
+
+          <section class="sheet">
+            <div class="sheet-head">
+              <h2>Top blocked</h2>
+            </div>
+            <div class="sheet-body" style={{ padding: "6px 12px" }}>
+              <ol class="rank-list" data-testid="top-blocked">
+                <For each={stats().topBlocked}>
+                  {(row) => (
+                    <li>
+                      <button
+                        type="button"
+                        class="link rank-name"
+                        title="show this name in the query log"
+                        onClick={() => props.onFilter({ name: row.name })}
+                      >
+                        {row.name}
+                      </button>
+                      <span class="badge block">{row.count}</span>
+                    </li>
+                  )}
+                </For>
+                <Show when={stats().topBlocked.length === 0}>
+                  <li class="empty">nothing blocked yet</li>
+                </Show>
+              </ol>
+            </div>
+          </section>
+
+          <section class="sheet">
+            <div class="sheet-head">
+              <h2>Top clients</h2>
+            </div>
+            <div class="sheet-body" style={{ padding: "6px 12px" }}>
+              <ol class="rank-list" data-testid="top-clients">
+                <For each={stats().topClients}>
+                  {(row) => (
+                    <li>
+                      <button
+                        type="button"
+                        class="link rank-name"
+                        title="show this client in the query log"
+                        onClick={() => props.onFilter({ client: row.client })}
+                      >
+                        {row.client}
+                      </button>
+                      <span class="badge kind">{row.count}</span>
+                    </li>
+                  )}
+                </For>
+                <Show when={stats().topClients.length === 0}>
+                  <li class="empty">no queries yet</li>
+                </Show>
+              </ol>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );

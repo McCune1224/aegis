@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import type { Client, ClientInput, Discovery, Profile } from "./api";
 import Discoveries from "./Discoveries";
+import Drawer from "./Drawer";
 import { effectiveMode } from "./resolve";
 
 type Props = {
@@ -28,7 +29,7 @@ export default function Clients(props: Props) {
   const [macs, setMACs] = createSignal("");
   const [prefixes, setPrefixes] = createSignal("");
   const [editing, setEditing] = createSignal<string>();
-  const [manual, setManual] = createSignal(false);
+  const [drawer, setDrawer] = createSignal(false);
   const [error, setError] = createSignal<string>();
   const [busy, setBusy] = createSignal(false);
 
@@ -40,12 +41,16 @@ export default function Clients(props: Props) {
     setMACs("");
     setPrefixes("");
     setEditing(undefined);
-    setManual(false);
+  }
+
+  function openNew() {
+    reset();
+    setDrawer(true);
+    setError(undefined);
   }
 
   function edit(client: Client) {
     setEditing(client.name);
-    setManual(true);
     setName(client.name);
     setProfile(client.profile);
     setNotes(client.notes);
@@ -53,6 +58,7 @@ export default function Clients(props: Props) {
     setMACs(client.macs.join("\n"));
     setPrefixes(client.prefixes.join("\n"));
     setError(undefined);
+    setDrawer(true);
   }
 
   async function submit(event: SubmitEvent) {
@@ -72,6 +78,7 @@ export default function Clients(props: Props) {
         prefixes: splitSelectors(prefixes()),
       });
       reset();
+      setDrawer(false);
     } catch (cause) {
       setError(String(cause));
     } finally {
@@ -85,6 +92,7 @@ export default function Clients(props: Props) {
       await props.onDelete(target);
       if (editing() === target) {
         reset();
+        setDrawer(false);
       }
     } catch (cause) {
       setError(String(cause));
@@ -93,148 +101,145 @@ export default function Clients(props: Props) {
 
   return (
     <>
-      <section class="panel">
-        <div class="clients-head">
-          <div>
-            <h2>Add a device</h2>
-            <p class="muted">
-              Claim a device this server has already seen talking, or type the selectors in by hand.
-            </p>
-          </div>
-          <div class="row-actions">
-            <button
-              type="button"
-              class="btn-ghost"
-              data-testid="toggle-manual"
-              onClick={() => {
-                setManual((current) => !current);
-                setEditing(undefined);
-              }}
-            >
-              {manual() ? "Hide manual entry" : "Add manually"}
+      <div class="workbench">
+        <div class="workbench-list">
+          <div class="subbar">
+            <h2 style={{ "font-size": "10.5px", "letter-spacing": "0.13em", "text-transform": "uppercase", color: "var(--text-2)", "font-weight": "650", "margin-right": "auto" }}>
+              Clients
+            </h2>
+            <button type="button" class="btn-mini" data-testid="toggle-manual" onClick={() => openNew()}>
+              + New client
             </button>
           </div>
-        </div>
-
-        <h3 data-testid="seen-title">Seen talking to this server</h3>
-        <Show
-          when={props.discoveries.length > 0}
-          fallback={<p class="muted" data-testid="seen-empty">Nothing new. Devices appear here when they ask for an address or send a query.</p>}
-        >
-          <div class="seen-devices">
-            <Discoveries
-              discoveries={props.discoveries}
-              onClaim={props.onClaimDiscovery}
-              onDismiss={props.onDismissDiscovery}
-            />
-          </div>
-        </Show>
-      </section>
-
-      <section class="panel">
-        <h2>Configured clients</h2>
-        <Show when={props.clients.length === 0}>
-          <p class="muted" data-testid="clients-empty">No clients yet. Claim a seen device above or add one manually.</p>
-        </Show>
-        <ul>
+          <Show when={props.clients.length === 0}>
+            <p class="empty" data-testid="clients-empty">No clients yet. Claim a seen device or add one manually.</p>
+          </Show>
           <For each={props.clients}>
             {(client) => (
-              <li data-testid="client-row">
-                <div>
-                  <strong>{client.name}</strong>
-                  <span class="muted">
-                    {client.profile} gives {effectiveMode(props.profiles, client.profile)}
-                  </span>
-                  <span class="selectors">
-                    {[...client.addresses, ...client.prefixes].join(", ") || "no selectors"}
-                  </span>
-                </div>
-                <div class="row-actions">
-                  <button type="button" class="btn-ghost" data-testid="client-edit" onClick={() => edit(client)}>
-                    Edit
-                  </button>
-                  <button type="button" class="btn-danger" onClick={() => void remove(client.name)}>
-                    Delete
-                  </button>
-                </div>
-              </li>
+              <button
+                type="button"
+                class={editing() === client.name ? "entry selected" : "entry"}
+                data-testid="client-row"
+                onClick={() => edit(client)}
+              >
+                <span class="entry-title" data-testid="client-edit">
+                  {client.name}
+                  <Show when={client.profile}>
+                    <span class="badge profile">{client.profile}</span>
+                  </Show>
+                </span>
+                <span class="entry-sub">
+                  {[...client.addresses, ...client.prefixes].join(", ") || "no selectors"}
+                </span>
+              </button>
             )}
           </For>
-        </ul>
-        {error() && !manual() ? <p class="error">{error()}</p> : null}
-      </section>
+        </div>
 
-      <Show when={manual()}>
-        <section class="panel">
-          <form onSubmit={(event) => void submit(event)}>
-            <h2>{editing() ? `Edit ${editing()}` : "New client"}</h2>
-            <label>
-              Name
-              <input
-                data-testid="client-name"
-                value={name()}
-                disabled={editing() !== undefined}
-                onInput={(event) => setName(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              Profile
-              <select
-                data-testid="client-profile"
-                value={profile()}
-                onInput={(event) => setProfile(event.currentTarget.value)}
-              >
-                <option value="">choose a profile</option>
-                <For each={props.profiles}>{(item) => <option value={item.name}>{item.name}</option>}</For>
-              </select>
-            </label>
-            <label>
-              Notes
-              <input
-                data-testid="client-notes"
-                value={notes()}
-                onInput={(event) => setNotes(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              Addresses
-              <textarea
-                data-testid="client-addresses"
-                value={addresses()}
-                placeholder="one per line, for example 10.9.9.2"
-                onInput={(event) => setAddresses(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              Hardware addresses
-              <textarea
-                data-testid="client-macs"
-                value={macs()}
-                placeholder="one per line, for example aa:bb:cc:dd:ee:01"
-                onInput={(event) => setMACs(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              Prefixes
-              <textarea
-                data-testid="client-prefixes"
-                value={prefixes()}
-                placeholder="one per line, for example 10.9.8.0/24"
-                onInput={(event) => setPrefixes(event.currentTarget.value)}
-              />
-            </label>
-            <div class="row-actions">
-              <button type="submit" class="btn" data-testid="client-save" disabled={busy()}>
-                Save
+        <div class="workbench-main">
+          <section data-testid="seen-title" style={{ "margin-bottom": "18px" }}>
+            <h2 style={{ "font-size": "10.5px", "font-weight": "700", "letter-spacing": "0.13em", "text-transform": "uppercase", color: "var(--text-2)", "margin-bottom": "10px" }}>
+              Seen talking to this server
+            </h2>
+            <Show
+              when={props.discoveries.length > 0}
+              fallback={
+                <p class="muted" data-testid="seen-empty">
+                  Nothing new. Devices appear here when they ask for an address or send a query.
+                </p>
+              }
+            >
+              <div style={{ display: "flex", "flex-direction": "column", gap: "10px", "max-width": "620px" }}>
+                <Discoveries
+                  discoveries={props.discoveries}
+                  onClaim={props.onClaimDiscovery}
+                  onDismiss={props.onDismissDiscovery}
+                />
+              </div>
+            </Show>
+          </section>
+
+          <div class="inspector-section" style={{ "max-width": "620px" }}>
+            <h3>How clients work</h3>
+            <p class="muted">
+              A client is one device or a group of devices, matched by address, hardware address, or prefix. Its
+              profile decides how blocked names are answered. Select a client on the left to edit it, or claim a
+              device the server has seen.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <Drawer open={drawer()} title={editing() ? `Edit ${editing()}` : "New client"} onClose={() => setDrawer(false)}>
+        <form onSubmit={(event) => void submit(event)} style={{ display: "contents" }}>
+          <label>
+            Name
+            <input
+              data-testid="client-name"
+              value={name()}
+              disabled={editing() !== undefined}
+              onInput={(event) => setName(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            Profile
+            <select
+              data-testid="client-profile"
+              value={profile()}
+              onInput={(event) => setProfile(event.currentTarget.value)}
+            >
+              <option value="">choose a profile</option>
+              <For each={props.profiles}>{(item) => <option value={item.name}>{item.name}</option>}</For>
+            </select>
+          </label>
+          <label>
+            Notes
+            <input
+              data-testid="client-notes"
+              value={notes()}
+              onInput={(event) => setNotes(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            Addresses
+            <textarea
+              data-testid="client-addresses"
+              value={addresses()}
+              placeholder="one per line, for example 10.9.9.2"
+              onInput={(event) => setAddresses(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            Hardware addresses
+            <textarea
+              data-testid="client-macs"
+              value={macs()}
+              placeholder="one per line, for example aa:bb:cc:dd:ee:01"
+              onInput={(event) => setMACs(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            Prefixes
+            <textarea
+              data-testid="client-prefixes"
+              value={prefixes()}
+              placeholder="one per line, for example 10.9.8.0/24"
+              onInput={(event) => setPrefixes(event.currentTarget.value)}
+            />
+          </label>
+          {error() ? <p class="error">{error()}</p> : null}
+          <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+            <Show when={editing()}>
+              <button type="button" class="btn-danger" onClick={() => void remove(editing()!)}>
+                Delete
               </button>
-              <button type="button" class="btn-ghost" onClick={reset}>
-                Cancel
-              </button>
-            </div>
-            {error() ? <p class="error">{error()}</p> : null}
-          </form>
-        </section>
-      </Show>
+            </Show>
+            <button type="submit" class="btn" data-testid="client-save" disabled={busy()}>
+              Save
+            </button>
+          </div>
+        </form>
+      </Drawer>
     </>
   );
 }

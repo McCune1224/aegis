@@ -1,5 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import type { Route, RouteInput, Upstream, UpstreamInput } from "./api";
+import DataTable, { type Column } from "./DataTable";
+import Drawer from "./Drawer";
 
 type Props = {
   upstreams: Upstream[];
@@ -42,19 +44,23 @@ export default function Upstreams(props: Props) {
   const [editing, setEditing] = createSignal<string>();
   const [upstreamError, setUpstreamError] = createSignal<string>();
   const [upstreamBusy, setUpstreamBusy] = createSignal(false);
+  const [upstreamDrawer, setUpstreamDrawer] = createSignal(false);
   const [domain, setDomain] = createSignal("");
   const [client, setClient] = createSignal("");
   const [upstreamName, setUpstreamName] = createSignal("");
   const [routeEditing, setRouteEditing] = createSignal<number>();
   const [routeError, setRouteError] = createSignal<string>();
   const [routeBusy, setRouteBusy] = createSignal(false);
+  const [routeDrawer, setRouteDrawer] = createSignal(false);
 
-  function resetUpstream() {
+  function openUpstreamDrawer() {
     setName("");
     setUrl("");
     setEnabled(true);
     setBackup(false);
     setEditing(undefined);
+    setUpstreamError(undefined);
+    setUpstreamDrawer(true);
   }
 
   function editUpstream(row: Upstream) {
@@ -64,6 +70,7 @@ export default function Upstreams(props: Props) {
     setBackup(row.backup);
     setEditing(row.name);
     setUpstreamError(undefined);
+    setUpstreamDrawer(true);
   }
 
   async function submitUpstream(event: SubmitEvent) {
@@ -76,7 +83,7 @@ export default function Upstreams(props: Props) {
     setUpstreamError(undefined);
     try {
       await props.onSaveUpstream(name().trim(), { url: url().trim(), enabled: enabled(), backup: backup() });
-      resetUpstream();
+      setUpstreamDrawer(false);
     } catch (cause) {
       setUpstreamError(String(cause));
     } finally {
@@ -93,11 +100,13 @@ export default function Upstreams(props: Props) {
     }
   }
 
-  function resetRoute() {
+  function openRouteDrawer() {
     setDomain("");
     setClient("");
     setUpstreamName("");
     setRouteEditing(undefined);
+    setRouteError(undefined);
+    setRouteDrawer(true);
   }
 
   function editRoute(route: Route) {
@@ -106,6 +115,7 @@ export default function Upstreams(props: Props) {
     setUpstreamName(route.upstream);
     setRouteEditing(route.id);
     setRouteError(undefined);
+    setRouteDrawer(true);
   }
 
   async function submitRoute(event: SubmitEvent) {
@@ -124,7 +134,7 @@ export default function Upstreams(props: Props) {
       } else {
         await props.onUpdateRoute(id, input);
       }
-      resetRoute();
+      setRouteDrawer(false);
     } catch (cause) {
       setRouteError(String(cause));
     } finally {
@@ -141,56 +151,158 @@ export default function Upstreams(props: Props) {
     }
   }
 
+  const upstreamColumns: Column<Upstream>[] = [
+    {
+      key: "name",
+      label: "Upstream",
+      sortable: true,
+      value: (row) => row.name,
+      render: (row) => (
+        <div style={{ display: "flex", "flex-direction": "column", gap: "2px" }}>
+          <span class="mono">{row.name}</span>
+          <span class="selectors">{row.url}</span>
+        </div>
+      ),
+    },
+    {
+      key: "latency",
+      label: "Latency",
+      sortable: true,
+      value: (row) => row.latency_ms,
+      render: (row) => (
+        <span class="muted" style={{ "font-size": "11.5px" }}>
+          {formatLatency(row.latency_ms)}
+          {row.failures > 0 ? ` · ${row.failures} failures` : ""}
+          {row.backup ? " · backup" : ""}
+        </span>
+      ),
+    },
+    {
+      key: "health",
+      label: "Health",
+      value: (row) => health(row).label,
+      render: (row) => (
+        <span class={`badge ${health(row).kind}`} data-testid="upstream-health">
+          {health(row).label}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      label: "",
+      value: () => "",
+      render: (row) => (
+        <div class="row-actions">
+          <button type="button" class="btn-mini" data-testid="upstream-edit" onClick={() => editUpstream(row)}>
+            Edit
+          </button>
+          <button type="button" class="btn-mini" data-testid="upstream-delete" onClick={() => void removeUpstream(row.name)}>
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  const routeColumns: Column<Route>[] = [
+    {
+      key: "domain",
+      label: "Domain",
+      sortable: true,
+      value: (route) => route.domain,
+      render: (route) => <span class="mono">{route.domain || "any domain"}</span>,
+    },
+    {
+      key: "client",
+      label: "Client",
+      sortable: true,
+      value: (route) => route.client,
+      render: (route) => <span class="mono muted">{route.client || "any"}</span>,
+    },
+    {
+      key: "upstream",
+      label: "Answers via",
+      sortable: true,
+      value: (route) => route.upstream,
+      render: (route) => <span class="badge info">{route.upstream}</span>,
+    },
+    {
+      key: "actions",
+      label: "",
+      value: () => "",
+      render: (route) => (
+        <div class="row-actions">
+          <button type="button" class="btn-mini" data-testid="route-edit" onClick={() => editRoute(route)}>
+            Edit
+          </button>
+          <button type="button" class="btn-mini" data-testid="route-delete" onClick={() => void removeRoute(route.id)}>
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <>
-      <section class="panel">
-        <header>
-          <h2>Upstreams</h2>
-        </header>
-        <ul>
-          <For each={props.upstreams}>
-            {(row) => (
-              <li data-testid="upstream-row">
-                <div>
-                  <strong>{row.name}</strong>
-                  <span class="selectors">{row.url}</span>
-                  <span class="muted">
-                    {formatLatency(row.latency_ms)}
-                    {row.failures > 0 ? ` · ${row.failures} failures` : ""}
-                    {row.backup ? " · backup" : ""}
-                  </span>
-                </div>
-                <div class="row-actions">
-                  <span class={`badge ${health(row).kind}`} data-testid="upstream-health">
-                    {health(row).label}
-                  </span>
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    data-testid="upstream-edit"
-                    onClick={() => editUpstream(row)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    class="btn-danger"
-                    data-testid="upstream-delete"
-                    onClick={() => void removeUpstream(row.name)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            )}
-          </For>
-          <Show when={props.upstreams.length === 0}>
-            <li class="empty">no upstreams stored</li>
-          </Show>
-        </ul>
+      <div class="view-scroll" style={{ padding: "18px clamp(14px, 2.5vw, 30px) 44px" }}>
+        <div class="view-inner">
+          <section class="sheet">
+            <div class="sheet-head">
+              <h2>Upstreams</h2>
+              <button type="button" class="btn-mini" data-testid="upstream-new" onClick={() => openUpstreamDrawer()}>
+                + New upstream
+              </button>
+            </div>
+            <Show when={upstreamError()}>
+              <p class="error" style={{ margin: "10px 14px" }}>
+                {upstreamError()}
+              </p>
+            </Show>
+            <DataTable
+              columns={upstreamColumns}
+              rows={props.upstreams}
+              rowKey={(row) => row.name}
+              testid="upstream-rows"
+              rowTestid={() => "upstream-row"}
+              empty="no upstreams stored"
+            />
+          </section>
 
-        <form onSubmit={(event) => void submitUpstream(event)}>
-          <h2>{editing() ? `Edit ${editing()}` : "New upstream"}</h2>
+          <section class="sheet">
+            <div class="sheet-head">
+              <h2>Routes</h2>
+              <button type="button" class="btn-mini" data-testid="route-new" onClick={() => openRouteDrawer()}>
+                + New route
+              </button>
+            </div>
+            <Show when={routeError()}>
+              <p class="error" style={{ margin: "10px 14px" }}>
+                {routeError()}
+              </p>
+            </Show>
+            <DataTable
+              columns={routeColumns}
+              rows={props.routes}
+              rowKey={(route) => route.id}
+              testid="route-rows"
+              rowTestid={() => "route-row"}
+              empty="no routes yet — every query goes to the first enabled upstream"
+            />
+            <p class="muted" style={{ padding: "0 16px 14px", "font-size": "11.5px" }}>
+              A blank domain matches every name and a blank client matches every client, so the router fills the gaps a
+              rule leaves open.
+            </p>
+          </section>
+        </div>
+      </div>
+
+      <Drawer
+        open={upstreamDrawer()}
+        title={editing() ? `Edit ${editing()}` : "New upstream"}
+        onClose={() => setUpstreamDrawer(false)}
+      >
+        <form onSubmit={(event) => void submitUpstream(event)} style={{ display: "contents" }}>
           <label>
             Name
             <input
@@ -228,57 +340,21 @@ export default function Upstreams(props: Props) {
             />
             <span>backup</span>
           </label>
-          <div class="row-actions">
+          {upstreamError() ? <p class="error">{upstreamError()}</p> : null}
+          <div class="row-actions" style={{ "justify-content": "flex-end" }}>
             <button type="submit" class="btn" data-testid="upstream-save" disabled={upstreamBusy()}>
               Save
             </button>
           </div>
-          {upstreamError() ? <p class="error">{upstreamError()}</p> : null}
         </form>
-      </section>
+      </Drawer>
 
-      <section class="panel">
-        <header>
-          <h2>Routes</h2>
-        </header>
-        <ul>
-          <For each={props.routes}>
-            {(route) => (
-              <li data-testid="route-row">
-                <div>
-                  <strong>{route.domain || "any domain"}</strong>
-                  <span class="muted">
-                    client {route.client || "any"} to {route.upstream}
-                  </span>
-                </div>
-                <div class="row-actions">
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    data-testid="route-edit"
-                    onClick={() => editRoute(route)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    class="btn-danger"
-                    data-testid="route-delete"
-                    onClick={() => void removeRoute(route.id)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            )}
-          </For>
-          <Show when={props.routes.length === 0}>
-            <li class="empty">no routes yet</li>
-          </Show>
-        </ul>
-
-        <form onSubmit={(event) => void submitRoute(event)}>
-          <h2>{routeEditing() !== undefined ? "Edit route" : "New route"}</h2>
+      <Drawer
+        open={routeDrawer()}
+        title={routeEditing() !== undefined ? "Edit route" : "New route"}
+        onClose={() => setRouteDrawer(false)}
+      >
+        <form onSubmit={(event) => void submitRoute(event)} style={{ display: "contents" }}>
           <label>
             Domain
             <input
@@ -308,14 +384,14 @@ export default function Upstreams(props: Props) {
               <For each={props.upstreams}>{(row) => <option value={row.name}>{row.name}</option>}</For>
             </select>
           </label>
-          <div class="row-actions">
+          {routeError() ? <p class="error">{routeError()}</p> : null}
+          <div class="row-actions" style={{ "justify-content": "flex-end" }}>
             <button type="submit" class="btn" data-testid="route-save" disabled={routeBusy()}>
               Save
             </button>
           </div>
-          {routeError() ? <p class="error">{routeError()}</p> : null}
         </form>
-      </section>
+      </Drawer>
     </>
   );
 }

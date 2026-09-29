@@ -1,5 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import type { Rule, RuleInput } from "./api";
+import DataTable, { type Column } from "./DataTable";
+import Drawer from "./Drawer";
 
 const kinds = ["exact", "subdomains", "wildcard", "regex", "cidr"];
 const actions = ["block", "allow"];
@@ -56,15 +58,8 @@ export default function Rules(props: Props) {
   const [notes, setNotes] = createSignal("");
   const [error, setError] = createSignal<string>();
   const [busy, setBusy] = createSignal(false);
-
-  function reset() {
-    setDomain("");
-    setKind("exact");
-    setAction("block");
-    setSchedule("");
-    setClient("");
-    setNotes("");
-  }
+  const [drawer, setDrawer] = createSignal(false);
+  const [rowError, setRowError] = createSignal<string>();
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -83,7 +78,13 @@ export default function Rules(props: Props) {
         input.client = client();
       }
       await props.onCreate(input);
-      reset();
+      setDomain("");
+      setKind("exact");
+      setAction("block");
+      setSchedule("");
+      setClient("");
+      setNotes("");
+      setDrawer(false);
     } catch (cause) {
       setError(String(cause));
     } finally {
@@ -92,122 +93,190 @@ export default function Rules(props: Props) {
   }
 
   async function changeAction(rule: Rule, next: string) {
-    setError(undefined);
+    setRowError(undefined);
     try {
       await props.onUpdate(rule.id, { action: next });
     } catch (cause) {
-      setError(String(cause));
+      setRowError(String(cause));
     }
   }
 
   async function remove(id: number) {
-    setError(undefined);
+    setRowError(undefined);
     try {
       await props.onDelete(id);
     } catch (cause) {
-      setError(String(cause));
+      setRowError(String(cause));
     }
   }
 
-  return (
-    <section class="panel">
-      <ul>
-        <For each={props.rules}>
-          {(rule) => (
-            <li data-testid="rule-row">
-              <div>
-                <strong>{rule.domain}</strong>
-                <span class="muted">{summary(rule)}</span>
-                <Show when={rule.notes}>
-                  <span class="note">{rule.notes}</span>
-                </Show>
-              </div>
-              <div class="row-actions">
-                <select
-                  data-testid="rule-action"
-                  value={rule.action}
-                  onChange={(event) => void changeAction(rule, event.currentTarget.value)}
-                >
-                  <For each={actions}>{(value) => <option value={value}>{value}</option>}</For>
-                </select>
-                <button type="button" class="btn-danger" data-testid="rule-delete" onClick={() => void remove(rule.id)}>
-                  Delete
-                </button>
-              </div>
-            </li>
-          )}
-        </For>
-      </ul>
+  const columns: Column<Rule>[] = [
+    {
+      key: "domain",
+      label: "Domain or pattern",
+      sortable: true,
+      value: (rule) => rule.domain,
+      render: (rule) => (
+        <div style={{ display: "flex", "flex-direction": "column", gap: "2px" }}>
+          <span class="mono">{rule.domain}</span>
+          <Show when={rule.notes}>
+            <span class="note">{rule.notes}</span>
+          </Show>
+        </div>
+      ),
+    },
+    {
+      key: "kind",
+      label: "Match",
+      sortable: true,
+      value: (rule) => rule.kind,
+      render: (rule) => <span class="badge kind">{rule.kind}</span>,
+    },
+    {
+      key: "action",
+      label: "Action",
+      sortable: true,
+      value: (rule) => rule.action,
+      render: (rule) => (
+        <select
+          data-testid="rule-action"
+          class="mono"
+          style={{ width: "auto", padding: "3px 26px 3px 10px", "border-radius": "999px", "font-size": "11px" }}
+          value={rule.action}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => void changeAction(rule, event.currentTarget.value)}
+        >
+          <For each={actions}>{(value) => <option value={value}>{value}</option>}</For>
+        </select>
+      ),
+    },
+    {
+      key: "scope",
+      label: "Scope",
+      value: (rule) => summary(rule),
+      render: (rule) => <span class="muted" style={{ "font-size": "11.5px" }}>{summary(rule)}</span>,
+    },
+    {
+      key: "actions",
+      label: "",
+      value: () => "",
+      render: (rule) => (
+        <button
+          type="button"
+          class="btn-mini"
+          data-testid="rule-delete"
+          onClick={(event) => {
+            event.stopPropagation();
+            void remove(rule.id);
+          }}
+        >
+          Delete
+        </button>
+      ),
+    },
+  ];
 
-      <form onSubmit={(event) => void submit(event)}>
-        <h2>New rule</h2>
-        <label>
-          Domain or pattern
-          <input
-            data-testid="rule-domain"
-            value={domain()}
-            placeholder={placeholderFor(kind())}
-            onInput={(event) => setDomain(event.currentTarget.value)}
-          />
-        </label>
-        <label>
-          Match
-          <select
-            data-testid="rule-kind"
-            value={kind()}
-            onInput={(event) => setKind(event.currentTarget.value)}
-          >
-            <For each={kinds}>{(value) => <option value={value}>{value}</option>}</For>
-          </select>
-        </label>
-        <label>
-          Action
-          <select
-            data-testid="rule-new-action"
-            value={action()}
-            onInput={(event) => setAction(event.currentTarget.value)}
-          >
-            <For each={actions}>{(value) => <option value={value}>{value}</option>}</For>
-          </select>
-        </label>
-        <label>
-          Schedule
-          <select
-            data-testid="rule-schedule"
-            value={schedule()}
-            onInput={(event) => setSchedule(event.currentTarget.value)}
-          >
-            <option value="">always</option>
-            <For each={props.schedules}>{(name) => <option value={name}>{name}</option>}</For>
-          </select>
-        </label>
-        <label>
-          Client
-          <select
-            data-testid="rule-client"
-            value={client()}
-            onInput={(event) => setClient(event.currentTarget.value)}
-          >
-            <option value="">all clients</option>
-            <For each={props.clients}>{(name) => <option value={name}>{name}</option>}</For>
-          </select>
-        </label>
-        <label>
-          Notes
-          <input
-            data-testid="rule-notes"
-            value={notes()}
-            placeholder="why this rule exists"
-            onInput={(event) => setNotes(event.currentTarget.value)}
-          />
-        </label>
-        <div class="row-actions">
-          <button type="submit" class="btn" data-testid="rule-save" disabled={busy()}>
-            Save
+  return (
+    <>
+      <div class="view">
+        <div class="subbar">
+          <h2 style={{ "font-size": "10.5px", "letter-spacing": "0.13em", "text-transform": "uppercase", color: "var(--text-2)", "font-weight": "650", "margin-right": "auto" }}>
+            {props.rules.length} rules
+          </h2>
+          <Show when={props.schedules.length === 0}>
+            <span class="muted" style={{ "font-size": "11.5px" }}>no schedules yet — a rule can still scope to one client</span>
+          </Show>
+          <button type="button" class="btn" data-testid="rules-new" onClick={() => setDrawer(true)}>
+            + New rule
           </button>
         </div>
-        {error() ? <p class="error">{error()}</p> : null}
-      </form>
-    </section>
+        <Show when={rowError()}>
+          <p class="alert-line error-line" role="alert">
+            {rowError()}
+          </p>
+        </Show>
+        <div style={{ flex: "1", "min-height": "0", overflow: "auto" }}>
+          <DataTable
+            columns={columns}
+            rows={props.rules}
+            rowKey={(rule) => rule.id}
+            testid="rule-rows"
+            rowTestid={() => "rule-row"}
+            empty="no rules yet — block or allow the first name"
+          />
+        </div>
+      </div>
+
+      <Drawer open={drawer()} title="New rule" onClose={() => setDrawer(false)}>
+        <form onSubmit={(event) => void submit(event)} style={{ display: "contents" }}>
+          <label>
+            Domain or pattern
+            <input
+              data-testid="rule-domain"
+              value={domain()}
+              placeholder={placeholderFor(kind())}
+              onInput={(event) => setDomain(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            Match
+            <select
+              data-testid="rule-kind"
+              value={kind()}
+              onInput={(event) => setKind(event.currentTarget.value)}
+            >
+              <For each={kinds}>{(value) => <option value={value}>{value}</option>}</For>
+            </select>
+          </label>
+          <label>
+            Action
+            <select
+              data-testid="rule-new-action"
+              value={action()}
+              onInput={(event) => setAction(event.currentTarget.value)}
+            >
+              <For each={actions}>{(value) => <option value={value}>{value}</option>}</For>
+            </select>
+          </label>
+          <label>
+            Schedule
+            <select
+              data-testid="rule-schedule"
+              value={schedule()}
+              onInput={(event) => setSchedule(event.currentTarget.value)}
+            >
+              <option value="">always</option>
+              <For each={props.schedules}>{(name) => <option value={name}>{name}</option>}</For>
+            </select>
+          </label>
+          <label>
+            Client
+            <select
+              data-testid="rule-client"
+              value={client()}
+              onInput={(event) => setClient(event.currentTarget.value)}
+            >
+              <option value="">all clients</option>
+              <For each={props.clients}>{(name) => <option value={name}>{name}</option>}</For>
+            </select>
+          </label>
+          <label>
+            Notes
+            <input
+              data-testid="rule-notes"
+              value={notes()}
+              placeholder="why this rule exists"
+              onInput={(event) => setNotes(event.currentTarget.value)}
+            />
+          </label>
+          {error() ? <p class="error">{error()}</p> : null}
+          <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+            <button type="submit" class="btn" data-testid="rule-save" disabled={busy()}>
+              Save
+            </button>
+          </div>
+        </form>
+      </Drawer>
+    </>
   );
 }

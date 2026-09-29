@@ -113,6 +113,23 @@ export const IconSources = () =>
     </>,
   );
 
+export const IconSystem = () =>
+  base(
+    <>
+      <path d="M8 1.8 L14 4.8 8 7.8 2 4.8 Z" />
+      <path d="M2 8 L8 11 14 8" />
+      <path d="M2 11.2 L8 14.2 14 11.2" />
+    </>,
+  );
+
+export const IconSearch = () =>
+  base(
+    <>
+      <circle cx="7" cy="7" r="4.4" />
+      <path d="M10.4 10.4 L13.6 13.6" />
+    </>,
+  );
+
 export const IconGear = () =>
   base(
     <>
