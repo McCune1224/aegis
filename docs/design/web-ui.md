@@ -37,10 +37,12 @@ period.
 
 - **Decoration.** No gradients, glows, blur, or illustration. The previous
   dark themes (industrial, clay) carried mood; Swiss carries structure. The
-  starfield was removed with the dark themes. The Constellation tab remains
-  the one figurative surface: its star tints deepened for paper (client blue,
-  profile green, upstream violet, rule amber) and its labels switched to dark
-  ink with a paper halo.
+  starfield was removed with the dark themes. The Constellation tab is the one
+  figurative surface, redrawn as a plain node graph: hairline edges, ink
+  markers by shape (circle client, square profile, solid diamond upstream,
+  red square rule), caps labels, a red square for selection, and live query
+  pulses as small red and green squares travelling the edges. The Pixi WebGL
+  sprite renderer and its dependency were deleted with the glow.
 - **Webfonts.** The console must render on a LAN with no internet (the Pi
   deployment). Helvetica-class system sans for chrome, system mono for data.
 - **Dark mode.** Swiss type contrast is designed for paper. `color-scheme:

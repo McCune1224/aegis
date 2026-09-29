@@ -1,5 +1,4 @@
 import ELK from "elkjs/lib/elk.bundled.js";
-import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import type { Client, Profile, ProfileInput, Rule } from "./api";
 import { BLOCKING_MODES } from "./api";
@@ -29,15 +28,15 @@ type Placed = {
   kind: NodeKind;
   label: string;
   detail: string;
-  // x and y are the star's centre. The cell is the whole layout box, star and
-  // label together, and it is what a fit frames so no label is cropped.
+  // x and y are the node's centre. The cell is the whole layout box, marker
+  // and label together, and it is what a fit frames so no label is cropped.
   x: number;
   y: number;
   cell: Box;
   phase: number;
 };
 
-// Gesture is what one pointer sequence is doing. A press on a star becomes a
+// Gesture is what one pointer sequence is doing. A press on a node becomes a
 // link once it travels; a press on empty space becomes a pan; anything under
 // the travel threshold is a click.
 type Gesture =
@@ -49,48 +48,33 @@ type Gesture =
 
 const CLICK_TRAVEL = 6;
 
-// One table for a star kind, so its tint cannot drift between the sprite and
-// the selection ring. Deeper stops than the chrome tints: the paper is light.
-const kindTint: Record<NodeKind, { css: string; hex: number }> = {
-  client: { css: "#0369a1", hex: 0x0369a1 },
-  profile: { css: "#047857", hex: 0x047857 },
-  upstream: { css: "#6d28d9", hex: 0x6d28d9 },
-  rule: { css: "#b45309", hex: 0xb45309 },
+const INK = "#141414";
+const INK_SOFT = "#8b8a83";
+const RED = "#e32119";
+const GREEN = "#157a3b";
+const PAPER = "#f4f3ee";
+const allowColor = 0x157a3b;
+const blockColor = 0xe32119;
+
+// Marker geometry by kind, in world units. The shape carries the kind, the
+// label carries the name, red carries only selection and blocking.
+const MARKER: Record<NodeKind, number> = {
+  client: 18,
+  profile: 20,
+  upstream: 26,
+  rule: 12,
 };
 
-const allowColor = 0x047857;
-const blockColor = 0xdc2626;
-// An edge is structure, so it is a desaturated slate rather than the client
-// tint. Threading the sky colour through the graph made a crossing edge count
-// as a client.
-const lineColor = 0x9aa0ab;
-const labelColor = 0x141414;
-const detailColor = 0x5c5c58;
-
 const fontStack = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-const labelFont = `600 15px ${fontStack}`;
-const detailFont = `400 12.5px ${fontStack}`;
 
-// margin is the room a fit leaves around the constellation. The cells already
-// hold their own labels, so this is breathing room rather than a label gutter.
+// margin is the room a fit leaves around the graph. The cells already hold
+// their own labels, so this is breathing room rather than a label gutter.
 const FIT_MARGIN = 40;
 
 // margin is how close to the edge a revealed node may land.
 const REVEAL_MARGIN = 60;
 
-// The sprite is baked this large once. The biggest star is 150 world px, which
-// the camera may draw at three times the scale on a 2x display, so a source
-// below this point would be visibly magnified; above it, more pixels buy
-// nothing on a soft glow.
-const STAR_TEXTURE_SIZE = 512;
-
 const elk = new ELK();
-
-// displayResolution is the density the canvas renders at. It is clamped at 2
-// because the fourth pixel of a 3x panel is not worth the fill rate.
-function displayResolution(): number {
-  return Math.min(window.devicePixelRatio || 1, 2);
-}
 
 // One offscreen context measures label widths, so the layout box can hold the
 // text the graph will actually print instead of a guess at it.
@@ -107,108 +91,28 @@ function measureText(text: string, font: string): number {
 
 const measureWith = (font: string): Measure => (text: string) => measureText(text, font);
 
-// makeStarTexture bakes one star: an atmosphere that reaches the tile edge, a
-// chromosphere, a four-point flare, and a hot core. Every stop is rgba so the
-// alpha and the tint stay independent.
-function makeStarTexture(tint: string, flare: number): Texture {
-  const size = STAR_TEXTURE_SIZE;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return Texture.WHITE;
+const hex = (color: number): string => `#${color.toString(16).padStart(6, "0")}`;
+
+// The SVG namespace, for the imperative layers. Layout, edges, nodes, and
+// effects are rebuilt per draw rather than diffed: the graph owns its geometry.
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function el(name: string, attributes: Record<string, string | number>): SVGElement {
+  const element = document.createElementNS(SVG_NS, name);
+  for (const [key, value] of Object.entries(attributes)) {
+    element.setAttribute(key, String(value));
   }
-  const center = size / 2;
-  const channels = [1, 3, 5].map((index) => parseInt(tint.slice(index, index + 2), 16));
-  const rgba = (alpha: number) => `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${alpha})`;
-
-  // The atmosphere. A falloff tuned so the tile edge is already clear, which
-  // is what stops a star reading as a grey smudge.
-  const atmosphere = context.createRadialGradient(center, center, 0, center, center, center);
-  atmosphere.addColorStop(0, rgba(0.17));
-  atmosphere.addColorStop(0.14, rgba(0.1));
-  atmosphere.addColorStop(0.4, rgba(0.03));
-  atmosphere.addColorStop(1, rgba(0));
-  context.fillStyle = atmosphere;
-  context.fillRect(0, 0, size, size);
-
-  const chromosphere = context.createRadialGradient(center, center, 0, center, center, size * 0.15);
-  chromosphere.addColorStop(0, rgba(0.9));
-  chromosphere.addColorStop(0.28, rgba(0.52));
-  chromosphere.addColorStop(0.62, rgba(0.14));
-  chromosphere.addColorStop(1, rgba(0));
-  context.fillStyle = chromosphere;
-  context.fillRect(0, 0, size, size);
-
-  // A tapered ray reads as a diffraction spike; a constant-width stroke reads
-  // as a stick. Two long and two short is the cross flare.
-  const ray = (angle: number, length: number, halfWidth: number, alpha: number) => {
-    const dx = Math.cos(angle);
-    const dy = Math.sin(angle);
-    const nx = -dy;
-    const ny = dx;
-    const gradient = context.createLinearGradient(center, center, center + dx * length, center + dy * length);
-    gradient.addColorStop(0, rgba(alpha));
-    gradient.addColorStop(0.22, rgba(alpha * 0.4));
-    gradient.addColorStop(0.6, rgba(alpha * 0.1));
-    gradient.addColorStop(1, rgba(0));
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.moveTo(center + nx * halfWidth, center + ny * halfWidth);
-    context.lineTo(center + dx * length, center + dy * length);
-    context.lineTo(center - nx * halfWidth, center - ny * halfWidth);
-    context.closePath();
-    context.fill();
-  };
-
-  const long = size * flare;
-  const short = long * 0.5;
-  // The base half-width is what makes a ray visible. At a twentieth of a pixel
-  // after the sprite is scaled down, a hairline is not a flare, it is noise.
-  const base = size * 0.017;
-  for (let index = 0; index < 4; index++) {
-    const angle = (index * Math.PI) / 2;
-    ray(angle, index % 2 === 0 ? long : short, base, 0.9);
-  }
-  for (let index = 0; index < 4; index++) {
-    const angle = (index * Math.PI) / 2 + Math.PI / 4;
-    ray(angle, short * 0.46, base * 0.55, 0.32);
-  }
-
-  const core = context.createRadialGradient(center, center, 0, center, center, size * 0.062);
-  core.addColorStop(0, "rgba(255, 255, 255, 1)");
-  core.addColorStop(0.32, "rgba(255, 255, 255, 0.94)");
-  core.addColorStop(0.62, rgba(0.62));
-  core.addColorStop(1, rgba(0));
-  context.fillStyle = core;
-  context.beginPath();
-  context.arc(center, center, size * 0.062, 0, Math.PI * 2);
-  context.fill();
-
-  return Texture.from(canvas);
+  return element;
 }
-
-// The flare length as a fraction of the sprite, by kind. A rule is a small
-// point of interest, an upstream is the brightest thing in the sky.
-const kindFlare: Record<NodeKind, number> = {
-  client: 0.3,
-  profile: 0.34,
-  upstream: 0.4,
-  rule: 0.26,
-};
-
-// The sprite's drawn width, in world units, by kind.
-const kindSize: Record<NodeKind, number> = {
-  client: 124,
-  profile: 140,
-  upstream: 168,
-  rule: 96,
-};
 
 export default function Graph(props: Props) {
   let host: HTMLDivElement | undefined;
-  let app: Application | undefined;
+  let svg: SVGSVGElement | undefined;
+  let world: SVGGElement | undefined;
+  let edgeLayer: SVGGElement | undefined;
+  let nodeLayer: SVGGElement | undefined;
+  let fxLayer: SVGGElement | undefined;
+  let linkRingBox: SVGRectElement | undefined;
 
   const [selected, setSelected] = createSignal<string>();
   const [graphError, setGraphError] = createSignal<string>();
@@ -217,19 +121,11 @@ export default function Graph(props: Props) {
   const placed = new Map<string, Placed>();
   const flow: Flow = emptyFlow();
 
-  let world: Container | undefined;
-  let haloLayer: Container | undefined;
-  let edgeLayer: Graphics | undefined;
-  let nodeLayer: Container | undefined;
-  let fxLayer: Graphics | undefined;
-  let selection: Graphics | undefined;
-  let linkRing: Graphics | undefined;
   let camera: Camera = { x: 0, y: 0, scale: 1 };
   // framed is whether the view has been placed once. A later redraw keeps the
   // camera, so adding a client does not throw away where the operator was
   // looking; the fit control is how they ask for it back.
   let framed = false;
-  let starTextures: Map<NodeKind, Texture>;
   // reveal is the node a create should land on once the layout has placed it.
   let reveal: string | undefined;
   let draft: { from: string; x: number; y: number; target?: string; legal: boolean } | undefined;
@@ -253,6 +149,7 @@ export default function Graph(props: Props) {
         return;
       }
       const observer = new ResizeObserver(() => {
+        sizeSvg();
         if (!framed) {
           fitToView();
         }
@@ -262,74 +159,55 @@ export default function Graph(props: Props) {
     },
   );
 
-  onCleanup(() => {
-    for (const texture of starTextures?.values() ?? []) {
-      texture.destroy(true);
-    }
-    starTextures = new Map<NodeKind, Texture>();
-    app?.destroy(true);
-    app = undefined;
-  });
+  onCleanup(() => cancelAnimationFrame(frame_));
 
-  async function ensureApp(): Promise<Application> {
-    if (app) {
-      return app;
+  function sizeSvg() {
+    if (!host || !svg) {
+      return;
     }
-    const instance = new Application();
-    await instance.init({
-      backgroundAlpha: 0,
-      resizeTo: host,
-      antialias: true,
-      preserveDrawingBuffer: true,
-      // Pixi renders at a resolution of 1 by default and then stretches the
-      // canvas over its CSS box, so on a 2x display the stars, the labels, and
-      // the flow were all drawn at half density and upscaled. autoDensity keeps
-      // the CSS size while the backing store follows the display.
-      resolution: displayResolution(),
-      autoDensity: true,
+    svg.setAttribute("width", String(host.clientWidth));
+    svg.setAttribute("height", String(host.clientHeight));
+  }
+
+  // One marker per kind: circle for a client, square for a profile, solid
+  // diamond for the upstream, small red square for a rule. The shape carries
+  // the kind so colour never has to.
+  function markerFor(kind: NodeKind, x: number, y: number): SVGElement {
+    const size = MARKER[kind];
+    const half = size / 2;
+    const stroke = INK;
+    if (kind === "client" || kind === "upstream") {
+      const fill = kind === "upstream" ? INK : "#ffffff";
+      return el("circle", { cx: x, cy: y, r: half, fill, stroke, "stroke-width": 2 });
+    }
+    if (kind === "rule") {
+      return el("rect", {
+        x: x - half,
+        y: y - half,
+        width: size,
+        height: size,
+        fill: RED,
+        stroke,
+        "stroke-width": 1.5,
+      });
+    }
+    return el("rect", {
+      x: x - half,
+      y: y - half,
+      width: size,
+      height: size,
+      fill: "#ffffff",
+      stroke,
+      "stroke-width": 2,
     });
-    host?.appendChild(instance.canvas);
-
-    starTextures = new Map<NodeKind, Texture>(
-      (Object.keys(kindTint) as NodeKind[]).map((kind) => [
-        kind,
-        makeStarTexture(kindTint[kind].css, kindFlare[kind]),
-      ]),
-    );
-    world = new Container();
-    haloLayer = new Container();
-    edgeLayer = new Graphics();
-    nodeLayer = new Container();
-    fxLayer = new Graphics();
-    selection = new Graphics();
-    for (let index = 0; index < 4; index++) {
-      selection.arc(0, 0, 17, (index * Math.PI) / 2 + 0.28, ((index + 1) * Math.PI) / 2 - 0.28);
-      selection.stroke({ width: 1.4, color: 0xffffff, alpha: 0.85 });
-    }
-    linkRing = new Graphics();
-    for (let index = 0; index < 4; index++) {
-      linkRing.arc(0, 0, 20, (index * Math.PI) / 2 + 0.4, ((index + 1) * Math.PI) / 2 - 0.4);
-      linkRing.stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
-    }
-    linkRing.visible = false;
-    world.addChild(edgeLayer, haloLayer, nodeLayer, fxLayer, selection, linkRing);
-    instance.stage.addChild(world);
-    instance.stage.eventMode = "static";
-    instance.stage.hitArea = instance.screen;
-    attachControls(instance);
-    instance.ticker.add(() => {
-      tick(instance.ticker.deltaMS / 1000);
-    });
-
-    app = instance;
-    return instance;
   }
 
   async function draw(topology: Topology) {
-    const instance = await ensureApp();
-
-    const measureLabel = measureWith(labelFont);
-    const measureDetail = measureWith(detailFont);
+    if (!host || !svg) {
+      return;
+    }
+    const measureLabel = measureWith(`600 12px ${fontStack}`);
+    const measureDetail = measureWith(`400 10.5px ${fontStack}`);
     const cells = topology.nodes.map((node) => {
       const label = fitLabel(node.label, measureLabel, LABEL_MAX);
       const detail = fitLabel(node.detail, measureDetail, LABEL_MAX);
@@ -373,25 +251,61 @@ export default function Graph(props: Props) {
       });
     }
 
-    edgeLayer?.clear();
-    for (const edge of topology.edges) {
-      const from = placed.get(edge.from);
-      const to = placed.get(edge.to);
-      if (!from || !to || !edgeLayer) {
-        continue;
-      }
-      edgeLayer
-        .moveTo(from.x, from.y)
-        .lineTo(to.x, to.y)
-        .stroke({ width: 1, color: lineColor, alpha: 0.26 });
+    if (edgeLayer) {
+      edgeLayer.replaceChildren(
+        ...topology.edges.flatMap((edge) => {
+          const from = placed.get(edge.from);
+          const to = placed.get(edge.to);
+          if (!from || !to) {
+            return [];
+          }
+          return [
+            el("line", {
+              x1: from.x,
+              y1: from.y,
+              x2: to.x,
+              y2: to.y,
+              stroke: INK_SOFT,
+              "stroke-width": 1,
+              "vector-effect": "non-scaling-stroke",
+            }),
+          ];
+        }),
+      );
     }
 
-    haloLayer?.removeChildren();
-    nodeLayer?.removeChildren();
-    for (const node of placed.values()) {
-      drawStar(node);
+    if (nodeLayer) {
+      nodeLayer.replaceChildren(
+        ...[...placed.values()].flatMap((node) => {
+          const labelX = node.x + STAR_CELL / 2;
+          const group = el("g", { "data-id": node.id });
+          group.appendChild(markerFor(node.kind, node.x, node.y));
+          const label = el("text", {
+            x: labelX,
+            y: node.y - 2,
+            fill: INK,
+            "font-family": fontStack,
+            "font-size": 12,
+            "font-weight": 650,
+            "letter-spacing": "0.06em",
+          });
+          label.textContent = node.label.toUpperCase();
+          group.appendChild(label);
+          const detail = el("text", {
+            x: labelX,
+            y: node.y + 13,
+            fill: "#5c5c58",
+            "font-family": fontStack,
+            "font-size": 10.5,
+          });
+          detail.textContent = node.detail;
+          group.appendChild(detail);
+          return [group];
+        }),
+      );
     }
-    drawSelection();
+
+    sizeSvg();
     if (!framed) {
       fitToView();
     }
@@ -404,56 +318,14 @@ export default function Graph(props: Props) {
       const node = placed.get(id);
       if (node && host) {
         setSelected(node.id);
-        drawSelection();
         camera = ensureVisible(camera, node, host.clientWidth, host.clientHeight, REVEAL_MARGIN);
         applyCamera();
       }
     }
   }
 
-  function drawStar(node: Placed) {
-    if (!haloLayer || !nodeLayer) {
-      return;
-    }
-    const size = kindSize[node.kind];
-    const star = new Sprite(starTextures.get(node.kind) ?? Texture.WHITE);
-    star.anchor.set(0.5);
-    star.x = node.x;
-    star.y = node.y;
-    star.width = size;
-    star.height = size;
-    haloLayer.addChild(star);
-
-    const anchorX = node.x + STAR_CELL / 2;
-    // A paper-colored halo keeps a label legible where it crosses the
-    // atmosphere of its own star.
-    const shadow = { color: 0xf4f3ee, alpha: 0.9, blur: 4, distance: 1, angle: Math.PI / 2 };
-    const label = new Text({
-      text: node.label,
-      style: {
-        fill: labelColor,
-        fontFamily: fontStack,
-        fontSize: 15,
-        fontWeight: "600",
-        letterSpacing: 0.2,
-        dropShadow: shadow,
-      },
-    });
-    label.x = anchorX;
-    label.y = node.y - 17;
-    nodeLayer.addChild(label);
-
-    const detail = new Text({
-      text: node.detail,
-      style: { fill: detailColor, fontFamily: fontStack, fontSize: 12.5, dropShadow: shadow },
-    });
-    detail.x = anchorX;
-    detail.y = node.y + 2;
-    nodeLayer.addChild(detail);
-  }
-
-  // fitToView frames the whole constellation, which is where a fresh page
-  // lands and what the fit control asks for.
+  // fitToView frames the whole graph, which is where a fresh page lands and
+  // what the fit control asks for.
   function fitToView() {
     if (!host || placed.size === 0) {
       return;
@@ -472,20 +344,21 @@ export default function Graph(props: Props) {
     applyCamera();
   }
 
-  function drawSelection() {
-    if (!selection) {
+  function drawLinkRing() {
+    const node = draft?.target ? placed.get(draft.target) : undefined;
+    if (!linkRingBox) {
       return;
     }
-    const node = selected() ? placed.get(selected() ?? "") : undefined;
-    if (!selection) {
-      return;
-    }
-    selection.visible = node !== undefined;
+    linkRingBox.style.display = node ? "" : "none";
     if (!node) {
       return;
     }
-    selection.position.set(node.x, node.y);
-    selection.tint = kindTint[node.kind].hex;
+    const half = MARKER[node.kind] / 2 + 12;
+    linkRingBox.setAttribute("x", String(node.x - half));
+    linkRingBox.setAttribute("y", String(node.y - half));
+    linkRingBox.setAttribute("width", String(half * 2));
+    linkRingBox.setAttribute("height", String(half * 2));
+    linkRingBox.setAttribute("stroke", draft?.legal ? GREEN : RED);
   }
 
   // ── Live flow ─────────────────────────────────────────────────────────
@@ -518,62 +391,68 @@ export default function Graph(props: Props) {
     }
   }
 
-  function tick(deltaSeconds: number) {
-    if (!fxLayer || !nodeLayer) {
+  // The effects layer is rebuilt per frame as one SVG string. A query burst is
+  // capped at 120 particles (see flow.ts), so the churn stays small.
+  let lastTick = performance.now();
+  let frame_ = requestAnimationFrame(function tick_(now: number) {
+    const deltaSeconds = Math.min((now - lastTick) / 1000, 0.1);
+    lastTick = now;
+    if (fxLayer) {
+      const parts: string[] = [];
+      if (advance(flow, deltaSeconds) || draft) {
+        for (const particle of flow.particles) {
+          const ends = trail(particle);
+          const color = hex(particle.color);
+          parts.push(
+            `<line x1="${ends.from.x}" y1="${ends.from.y}" x2="${ends.to.x}" y2="${ends.to.y}" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>`,
+          );
+          parts.push(`<rect x="${ends.to.x - 2.5}" y="${ends.to.y - 2.5}" width="5" height="5" fill="${color}"/>`);
+        }
+        for (const pulse of flow.pulses) {
+          const ratio = pulse.age / PULSE_LIFE_SECONDS;
+          const half = 10 + ratio * 22;
+          parts.push(
+            `<rect x="${pulse.x - half}" y="${pulse.y - half}" width="${half * 2}" height="${half * 2}" fill="none" stroke="${hex(pulse.color)}" stroke-width="1.5" opacity="${(1 - ratio).toFixed(2)}"/>`,
+          );
+        }
+        if (draft) {
+          const origin = placed.get(draft.from);
+          if (origin) {
+            const color = draft.legal ? GREEN : RED;
+            parts.push(
+              `<line x1="${origin.x}" y1="${origin.y}" x2="${draft.x}" y2="${draft.y}" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`,
+            );
+            parts.push(`<rect x="${draft.x - 3}" y="${draft.y - 3}" width="6" height="6" fill="${color}"/>`);
+          }
+        }
+      }
+      fxLayer.replaceChildren();
+      if (parts.length > 0) {
+        fxLayer.innerHTML = parts.join("");
+      }
+    }
+    frame_ = requestAnimationFrame(tick_);
+  });
+
+  function applyCamera() {
+    if (!world) {
       return;
     }
-    fxLayer.clear();
-
-    advance(flow, deltaSeconds);
-
-    for (const particle of flow.particles) {
-      const ends = trail(particle);
-      fxLayer
-        .moveTo(ends.from.x, ends.from.y)
-        .lineTo(ends.to.x, ends.to.y)
-        .stroke({ width: 2, color: particle.color, alpha: 0.35, cap: "round" });
-      fxLayer.circle(ends.to.x, ends.to.y, 2.4).fill(particle.color);
-    }
-
-    for (const pulse of flow.pulses) {
-      const ratio = pulse.age / PULSE_LIFE_SECONDS;
-      fxLayer
-        .circle(pulse.x, pulse.y, 10 + ratio * 26)
-        .stroke({ width: 1.6 * (1 - ratio), color: pulse.color, alpha: 1 - ratio });
-    }
-
-    if (draft) {
-      const origin = placed.get(draft.from);
-      if (origin) {
-        fxLayer
-          .moveTo(origin.x, origin.y)
-          .lineTo(draft.x, draft.y)
-          .stroke({ width: 1.6, color: draft.legal ? allowColor : blockColor, alpha: 0.8, cap: "round" });
-        fxLayer.circle(draft.x, draft.y, 3).fill({ color: draft.legal ? allowColor : blockColor, alpha: 0.9 });
-      }
-    }
-
-    const time = performance.now() / 1000;
-    const nodes = [...placed.values()];
-    haloLayer?.children.forEach((child, index) => {
-      const node = nodes[index];
-      if (node) {
-        // A shallow pulse. The old swing took a star down to a third of its
-        // brightness, which read as flicker rather than as a sky.
-        child.alpha = 0.66 + Math.sin(time * 0.9 + node.phase) * 0.08;
-      }
-    });
-    if (selection) {
-      selection.alpha = 0.55 + Math.sin(time * 2.4) * 0.35;
-      selection.rotation += deltaSeconds * 0.7;
-    }
+    world.setAttribute("transform", `translate(${camera.x} ${camera.y}) scale(${camera.scale})`);
   }
 
-  function attachControls(instance: Application) {
+  // ── Pointer controls ──────────────────────────────────────────────────
+
+  function attachControls() {
     let gesture: Gesture = { kind: "idle" };
     let moved = 0;
     let last = { x: 0, y: 0 };
     const pointers = new Map<number, { x: number; y: number }>();
+
+    const at = (event: PointerEvent | WheelEvent) => {
+      const rect = svg!.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    };
 
     const pinchState = (startScale: number) => {
       const points = [...pointers.values()];
@@ -589,27 +468,28 @@ export default function Graph(props: Props) {
       };
     };
 
-    instance.stage.on("pointerdown", (event) => {
-      pointers.set(event.pointerId, { x: event.global.x, y: event.global.y });
+    svg!.addEventListener("pointerdown", (event) => {
+      const point = at(event);
+      pointers.set(event.pointerId, point);
       moved = 0;
-      last = { x: event.global.x, y: event.global.y };
+      last = point;
       if (pointers.size === 2) {
         const start = pinchState(camera.scale);
         if (start) {
           gesture = { kind: "pinch", ...start };
         }
         draft = undefined;
-        drawDraft();
         return;
       }
-      gesture = { kind: "press", node: pick(event.global.x, event.global.y) };
+      gesture = { kind: "press", node: pick(point.x, point.y) };
     });
 
-    instance.stage.on("pointermove", (event) => {
+    svg!.addEventListener("pointermove", (event) => {
       if (!pointers.has(event.pointerId)) {
         return;
       }
-      pointers.set(event.pointerId, { x: event.global.x, y: event.global.y });
+      const point = at(event);
+      pointers.set(event.pointerId, point);
       if (gesture.kind === "pinch") {
         const current = pinchState(gesture.startScale);
         if (!current || current.startDistance === 0) {
@@ -624,10 +504,10 @@ export default function Graph(props: Props) {
         applyCamera();
         return;
       }
-      const dx = event.global.x - last.x;
-      const dy = event.global.y - last.y;
+      const dx = point.x - last.x;
+      const dy = point.y - last.y;
       moved += Math.abs(dx) + Math.abs(dy);
-      last = { x: event.global.x, y: event.global.y };
+      last = point;
       if (gesture.kind === "press") {
         if (moved < CLICK_TRAVEL) {
           return;
@@ -640,28 +520,28 @@ export default function Graph(props: Props) {
         return;
       }
       if (gesture.kind === "link") {
-        updateDraft(gesture.from, event.global.x, event.global.y);
+        updateDraft(gesture.from, point.x, point.y);
       }
     });
 
-    const release = (event: { pointerId: number; global: { x: number; y: number } }) => {
+    const release = (event: PointerEvent) => {
+      const point = pointers.get(event.pointerId) ?? at(event);
       pointers.delete(event.pointerId);
       if (gesture.kind === "pinch" && pointers.size < 2) {
         gesture = { kind: "pan" };
       }
       if (gesture.kind === "press") {
         if (moved < CLICK_TRAVEL) {
-          setSelected(pick(event.global.x, event.global.y));
-          drawSelection();
+          setSelected(pick(point.x, point.y));
         }
         gesture = { kind: "idle" };
       } else if (gesture.kind === "link") {
-        const target = pick(event.global.x, event.global.y);
+        const target = pick(point.x, point.y);
         if (target && target !== gesture.from) {
           void applyLink(gesture.from, target);
         }
         draft = undefined;
-        drawDraft();
+        drawLinkRing();
         gesture = { kind: "idle" };
       }
       if (pointers.size === 0 && gesture.kind === "pan") {
@@ -669,17 +549,34 @@ export default function Graph(props: Props) {
       }
     };
 
-    instance.stage.on("pointerup", release);
-    instance.stage.on("pointerupoutside", release);
+    svg!.addEventListener("pointerup", release);
+    svg!.addEventListener("pointerupoutside", release as unknown as EventListener);
+    svg!.addEventListener("pointerleave", (event) => release(event));
 
-    const canvas = instance.canvas;
-    canvas.addEventListener("wheel", (event) => {
-      event.preventDefault();
-      const factor = Math.pow(1.0015, -event.deltaY);
-      camera = zoomAt(camera, factor, event.offsetX, event.offsetY);
-      applyCamera();
-    });
+    svg!.addEventListener(
+      "wheel",
+      (event) => {
+        event.preventDefault();
+        const point = at(event);
+        const factor = Math.pow(1.0015, -event.deltaY);
+        camera = zoomAt(camera, factor, point.x, point.y);
+        applyCamera();
+      },
+      { passive: false },
+    );
   }
+
+  createEffect(
+    () => undefined,
+    () => {
+      if (!host || !svg) {
+        return;
+      }
+      sizeSvg();
+      attachControls();
+      return () => undefined;
+    },
+  );
 
   function pick(screenX: number, screenY: number): string | undefined {
     const { x: worldX, y: worldY } = toWorld(camera, screenX, screenY);
@@ -693,14 +590,6 @@ export default function Graph(props: Props) {
     return best?.id;
   }
 
-  function applyCamera() {
-    if (!world) {
-      return;
-    }
-    world.position.set(camera.x, camera.y);
-    world.scale.set(camera.scale);
-  }
-
   function updateDraft(from: string, screenX: number, screenY: number) {
     const origin = placed.get(from);
     if (!origin) {
@@ -711,19 +600,7 @@ export default function Graph(props: Props) {
     const legal =
       target !== undefined && target !== from && linkIntent([...placed.values()], from, target) !== undefined;
     draft = { from, x: cursor.x, y: cursor.y, target: target === from ? undefined : target, legal };
-    drawDraft();
-  }
-
-  function drawDraft() {
-    if (!linkRing) {
-      return;
-    }
-    const node = draft?.target ? placed.get(draft.target) : undefined;
-    linkRing.visible = node !== undefined;
-    if (node) {
-      linkRing.position.set(node.x, node.y);
-      linkRing.tint = draft?.legal ? allowColor : blockColor;
-    }
+    drawLinkRing();
   }
 
   // applyLink writes one drag through the endpoint that owns the record, so
@@ -761,7 +638,7 @@ export default function Graph(props: Props) {
         });
       }
       setSelected(to);
-      drawSelection();
+      void draw(buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams, props.rules));
     } catch (cause) {
       setGraphError(String(cause));
     }
@@ -830,7 +707,58 @@ export default function Graph(props: Props) {
         host = element as HTMLDivElement;
       }}
     >
-      <span class="hint" aria-hidden="true">click a star · drag star to star to connect · scroll to zoom</span>
+      <svg
+        ref={(element) => {
+          svg = element as unknown as SVGSVGElement;
+        }}
+      >
+        <g
+          ref={(element) => {
+            world = element as unknown as SVGGElement;
+          }}
+        >
+          <g
+            ref={(element) => {
+              edgeLayer = element as unknown as SVGGElement;
+            }}
+          />
+          <g
+            ref={(element) => {
+              fxLayer = element as unknown as SVGGElement;
+            }}
+          />
+          <g
+            ref={(element) => {
+              nodeLayer = element as unknown as SVGGElement;
+            }}
+          />
+          <Show when={selectedNode()}>
+            {(node) => {
+              const half = MARKER[node().kind] / 2 + 8;
+              return (
+                <rect
+                  x={node().x - half}
+                  y={node().y - half}
+                  width={half * 2}
+                  height={half * 2}
+                  fill="none"
+                  stroke={RED}
+                  stroke-width="2"
+                />
+              );
+            }}
+          </Show>
+          <rect
+            ref={(element) => {
+              linkRingBox = element as unknown as SVGRectElement;
+            }}
+            fill="none"
+            stroke-width="2"
+            style={{ display: "none" }}
+          />
+        </g>
+      </svg>
+      <span class="hint" aria-hidden="true">click a node · drag node to node to connect · scroll to zoom</span>
       <form
         class="graph-create"
         onSubmit={(event) => {
@@ -861,7 +789,7 @@ export default function Graph(props: Props) {
           <div class="graph-panel" data-testid="graph-panel">
             <header>
               <h2>{client().name}</h2>
-              <button type="button" class="btn-ghost" onClick={() => setSelected(undefined)}>
+              <button type="button" class="icon-btn" aria-label="close" onClick={() => setSelected(undefined)}>
                 ×
               </button>
             </header>
@@ -887,7 +815,7 @@ export default function Graph(props: Props) {
           <div class="graph-panel" data-testid="graph-panel">
             <header>
               <h2>{profile().name}</h2>
-              <button type="button" class="btn-ghost" onClick={() => setSelected(undefined)}>
+              <button type="button" class="icon-btn" aria-label="close" onClick={() => setSelected(undefined)}>
                 ×
               </button>
             </header>
@@ -916,7 +844,7 @@ export default function Graph(props: Props) {
           <div class="graph-panel" data-testid="graph-panel">
             <header>
               <h2>{rule().domain}</h2>
-              <button type="button" class="btn-ghost" onClick={() => setSelected(undefined)}>
+              <button type="button" class="icon-btn" aria-label="close" onClick={() => setSelected(undefined)}>
                 ×
               </button>
             </header>

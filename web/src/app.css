@@ -1616,7 +1616,7 @@ tbody tr.selected {
   touch-action: none;
 }
 
-.graph canvas {
+.graph svg {
   display: block;
 }
 
