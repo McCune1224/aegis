@@ -59,19 +59,29 @@ func TestRoutesRoundTripThroughTheStore(t *testing.T) {
 	require.Equal(t, []store.Route{{ID: 2, Domain: "other.example", Upstream: "backup"}}, rows)
 }
 
-func TestDeletingAnUpstreamRemovesItsRoutes(t *testing.T) {
+func TestDeletingAnUpstreamWithRoutesIsRefused(t *testing.T) {
 	s := open(t)
 	seedRoutes(t, s)
 	ctx := t.Context()
 
-	_, err := s.SaveRoute(ctx, store.Route{Domain: "target.example", Upstream: "backup"})
+	saved, err := s.SaveRoute(ctx, store.Route{Domain: "target.example", Upstream: "backup"})
 	require.NoError(t, err)
 
-	require.NoError(t, s.DeleteUpstream(ctx, "backup"))
+	err = s.DeleteUpstream(ctx, "backup")
+	require.ErrorIs(t, err, store.ErrStillRouted, "the upstream survives while a route still names it")
 
 	rows, err := s.Routes(ctx)
 	require.NoError(t, err)
-	require.Empty(t, rows, "the foreign key carries the route away with the upstream")
+	require.Equal(t, []store.Route{{ID: saved.ID, Domain: "target.example", Upstream: "backup"}}, rows)
+
+	upstreams, err := s.Upstreams(ctx)
+	require.NoError(t, err)
+	require.Len(t, upstreams, 2, "the refused delete changed nothing")
+
+	deleted, err := s.DeleteRoute(ctx, saved.ID)
+	require.NoError(t, err)
+	require.True(t, deleted)
+	require.NoError(t, s.DeleteUpstream(ctx, "backup"), "once no route names it, the delete goes through")
 }
 
 func TestValidateRejectsARouteWithNowhereToGo(t *testing.T) {

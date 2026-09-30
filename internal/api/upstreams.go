@@ -130,17 +130,6 @@ func (s *Server) deleteUpstream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, badRequest{errors.New("at least one enabled upstream must remain")})
 		return
 	}
-	routes, err := s.store.Routes(ctx)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	for _, route := range routes {
-		if route.Upstream == name {
-			writeError(w, conflict{fmt.Errorf("route %d still sends its queries to upstream %q", route.ID, name)})
-			return
-		}
-	}
 	if err := s.store.DeleteUpstream(ctx, name); err != nil {
 		writeError(w, err)
 		return
