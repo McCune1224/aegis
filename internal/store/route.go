@@ -20,7 +20,11 @@ type Route struct {
 
 // Routes returns every stored route.
 func (s *Store) Routes(ctx context.Context) ([]Route, error) {
-	rows, err := s.queries.ListRoutes(ctx)
+	return listRoutes(ctx, s.queries)
+}
+
+func listRoutes(ctx context.Context, q *storedb.Queries) ([]Route, error) {
+	rows, err := q.ListRoutes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: routes: %w", err)
 	}
@@ -36,11 +40,15 @@ func (s *Store) Routes(ctx context.Context) ([]Route, error) {
 // are not keyed in the schema, so a caller validates them against the rest of
 // the configuration before saving.
 func (s *Store) SaveRoute(ctx context.Context, route Route) (Route, error) {
+	return saveRoute(ctx, s.queries, route)
+}
+
+func saveRoute(ctx context.Context, q *storedb.Queries, route Route) (Route, error) {
 	stored, err := normalizeRoute(route)
 	if err != nil {
 		return Route{}, err
 	}
-	id, err := s.queries.InsertRoute(ctx, storedb.InsertRouteParams{
+	id, err := q.InsertRoute(ctx, storedb.InsertRouteParams{
 		Domain:   stored.Domain,
 		Client:   stored.Client,
 		Upstream: stored.Upstream,

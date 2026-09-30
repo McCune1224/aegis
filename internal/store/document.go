@@ -16,6 +16,7 @@ import (
 	"aegis/internal/rewrite"
 	"aegis/internal/safesearch"
 	"aegis/internal/services"
+	"aegis/internal/store/storedb"
 )
 
 // docVersion is the export format this build writes and the only version
@@ -334,218 +335,221 @@ func (s *Store) ReadDocument(ctx context.Context) (Document, error) {
 
 // ApplyDocument upserts every section of the document into the store. Rows the
 // document does not name are left as they are, so an import moves a
-// configuration without deleting anything the target already had. The result
-// is compiled the way a reload would, so an import that could not serve fails
-// here with the reason named.
+// configuration without deleting anything the target already had. The whole
+// import is one transaction, and the result is compiled the way a reload
+// would, before that transaction commits. An import that could not serve
+// therefore fails here with the reason named and changes nothing.
 func (s *Store) ApplyDocument(ctx context.Context, document Document) error {
-	for _, profile := range document.Profiles {
-		spec, err := profile.spec()
-		if err != nil {
-			return err
-		}
-		spec.Extends = ""
-		if err := s.SaveProfile(ctx, spec); err != nil {
-			return err
-		}
-	}
-	// A profile may extend one the document lists after it, so the references
-	// go back once every profile row exists.
-	for _, profile := range document.Profiles {
-		spec, err := profile.spec()
-		if err != nil {
-			return err
-		}
-		if err := s.SaveProfile(ctx, spec); err != nil {
-			return err
-		}
-	}
-	if document.DefaultProfile != "" {
-		if err := s.SetDefaultProfile(ctx, filter.ProfileID(document.DefaultProfile)); err != nil {
-			return err
-		}
-	}
-
-	for _, client := range document.Clients {
-		record, err := client.record()
-		if err != nil {
-			return err
-		}
-		if err := s.SaveClient(ctx, record); err != nil {
-			return err
-		}
-	}
-
-	for _, schedule := range document.Schedules {
-		spec, err := schedule.spec()
-		if err != nil {
-			return err
-		}
-		if err := s.SaveSchedule(ctx, spec); err != nil {
-			return err
-		}
-	}
-
-	knownRules, err := s.ruleIDs(ctx)
-	if err != nil {
-		return err
-	}
-	for _, rule := range document.Rules {
-		parsed, err := rule.rule()
-		if err != nil {
-			return err
-		}
-		if !knownRules[parsed.ID] {
-			parsed.ID = 0
-		}
-		if _, err := s.SaveRule(ctx, parsed); err != nil {
-			return err
-		}
-	}
-
-	for _, record := range document.Rewrites {
-		parsed, err := rewrite.Parse(record.Pattern, record.Target)
-		if err != nil {
-			return fmt.Errorf("store: %w", err)
-		}
-		if err := s.SaveRewrite(ctx, parsed); err != nil {
-			return err
-		}
-	}
-
-	for _, row := range document.Upstreams {
-		stored := Upstream(row)
-		if err := s.SaveUpstream(ctx, stored); err != nil {
-			return err
-		}
-	}
-
-	knownRoutes, err := s.Routes(ctx)
-	if err != nil {
-		return err
-	}
-	known := make(map[Route]bool, len(knownRoutes))
-	for _, route := range knownRoutes {
-		known[Route{Domain: route.Domain, Client: route.Client, Upstream: route.Upstream}] = true
-	}
-	for _, route := range document.Routes {
-		stored := Route{Domain: route.Domain, Client: route.Client, Upstream: route.Upstream}
-		if known[stored] {
-			continue
-		}
-		if _, err := s.SaveRoute(ctx, stored); err != nil {
-			return err
-		}
-	}
-
-	if document.Access.Allowed != nil || document.Access.Disallowed != nil {
-		allowed, err := parsePrefixSet("allowed", document.Access.Allowed)
-		if err != nil {
-			return err
-		}
-		disallowed, err := parsePrefixSet("disallowed", document.Access.Disallowed)
-		if err != nil {
-			return err
-		}
-		if err := s.SetAccess(ctx, allowed, disallowed); err != nil {
-			return err
-		}
-	}
-
-	for _, source := range document.Sources {
-		format, err := blocklist.ParseFormat(source.Format)
-		if err != nil {
-			return fmt.Errorf("store: source %q: %w", source.Name, err)
-		}
-		stored := Source{Name: source.Name, URL: source.URL, Format: format, Enabled: source.Enabled}
-		if err := s.SaveSource(ctx, stored); err != nil {
-			return err
-		}
-	}
-
-	// Materialize the catalog rows the document references, but only the ones
-	// this store does not hold: a repeat import never regresses a fresher copy,
-	// and an offline import can still satisfy the enablements that follow.
-	if len(document.Services) > 0 {
-		existing, err := s.Services(ctx)
-		if err != nil {
-			return err
-		}
-		known := make(map[string]bool, len(existing))
-		for _, row := range existing {
-			known[row.ID] = true
-		}
-		missing := make([]services.Service, 0, len(document.Services))
-		for _, row := range document.Services {
-			if !known[row.ID] {
-				missing = append(missing, services.Service{
-					ID:      row.ID,
-					Name:    row.Name,
-					Group:   row.Group,
-					Rules:   row.Rules,
-					IconSVG: row.IconSVG,
-				})
+	return s.inTx(ctx, func(q *storedb.Queries) error {
+		for _, profile := range document.Profiles {
+			spec, err := profile.spec()
+			if err != nil {
+				return err
 			}
-		}
-		if len(missing) > 0 {
-			if err := s.SaveCatalog(ctx, time.Now().UTC(), missing); err != nil {
+			spec.Extends = ""
+			if err := saveProfile(ctx, q, spec); err != nil {
 				return err
 			}
 		}
-	}
+		// A profile may extend one the document lists after it, so the references
+		// go back once every profile row exists.
+		for _, profile := range document.Profiles {
+			spec, err := profile.spec()
+			if err != nil {
+				return err
+			}
+			if err := saveProfile(ctx, q, spec); err != nil {
+				return err
+			}
+		}
+		if document.DefaultProfile != "" {
+			if err := setDefaultProfile(ctx, q, filter.ProfileID(document.DefaultProfile)); err != nil {
+				return err
+			}
+		}
 
-	if document.ProfileServices != nil {
-		for _, group := range document.ProfileServices {
-			if err := s.SetProfileServices(ctx, filter.ProfileID(group.Profile), group.Services); err != nil {
+		for _, client := range document.Clients {
+			record, err := client.record()
+			if err != nil {
+				return err
+			}
+			if err := saveClient(ctx, q, record); err != nil {
 				return err
 			}
 		}
-	}
-	if document.ClientServices != nil {
-		for _, group := range document.ClientServices {
-			if err := s.SetClientServices(ctx, filter.ClientKey(group.Client), group.Services); err != nil {
+
+		for _, schedule := range document.Schedules {
+			spec, err := schedule.spec()
+			if err != nil {
+				return err
+			}
+			if err := saveSchedule(ctx, q, spec); err != nil {
 				return err
 			}
 		}
-	}
-	if document.Safesearch != nil {
-		for _, group := range document.Safesearch {
-			engines := make([]safesearch.EngineID, 0, len(group.Engines))
-			for _, id := range group.Engines {
-				engines = append(engines, safesearch.EngineID(id))
-			}
-			if err := s.SetProfileSafesearch(ctx, filter.ProfileID(group.Profile), engines); err != nil {
-				return err
-			}
-		}
-	}
-	for _, window := range document.Windows {
-		action, err := filter.ParseAction(window.Action)
+
+		knownRules, err := ruleIDs(ctx, q)
 		if err != nil {
-			return fmt.Errorf("store: window %q: %w", window.Name, err)
-		}
-		clients := make([]filter.ClientKey, 0, len(window.Clients))
-		for _, client := range window.Clients {
-			clients = append(clients, filter.ClientKey(client))
-		}
-		if err := s.SaveServiceWindow(ctx, ServiceWindow{
-			Name:     window.Name,
-			Schedule: window.Schedule,
-			Action:   action,
-			Clients:  clients,
-			Services: window.Services,
-		}); err != nil {
 			return err
 		}
-	}
+		for _, rule := range document.Rules {
+			parsed, err := rule.rule()
+			if err != nil {
+				return err
+			}
+			if !knownRules[parsed.ID] {
+				parsed.ID = 0
+			}
+			if _, err := saveRule(ctx, q, parsed); err != nil {
+				return err
+			}
+		}
 
-	cfg, err := s.Load(ctx)
-	if err != nil {
-		return err
-	}
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("store: imported configuration: %w", err)
-	}
-	return nil
+		for _, record := range document.Rewrites {
+			parsed, err := rewrite.Parse(record.Pattern, record.Target)
+			if err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+			if err := saveRewrite(ctx, q, parsed); err != nil {
+				return err
+			}
+		}
+
+		for _, row := range document.Upstreams {
+			stored := Upstream(row)
+			if err := saveUpstream(ctx, q, stored); err != nil {
+				return err
+			}
+		}
+
+		knownRoutes, err := listRoutes(ctx, q)
+		if err != nil {
+			return err
+		}
+		known := make(map[Route]bool, len(knownRoutes))
+		for _, route := range knownRoutes {
+			known[Route{Domain: route.Domain, Client: route.Client, Upstream: route.Upstream}] = true
+		}
+		for _, route := range document.Routes {
+			stored := Route{Domain: route.Domain, Client: route.Client, Upstream: route.Upstream}
+			if known[stored] {
+				continue
+			}
+			if _, err := saveRoute(ctx, q, stored); err != nil {
+				return err
+			}
+		}
+
+		if document.Access.Allowed != nil || document.Access.Disallowed != nil {
+			allowed, err := parsePrefixSet("allowed", document.Access.Allowed)
+			if err != nil {
+				return err
+			}
+			disallowed, err := parsePrefixSet("disallowed", document.Access.Disallowed)
+			if err != nil {
+				return err
+			}
+			if err := setAccess(ctx, q, allowed, disallowed); err != nil {
+				return err
+			}
+		}
+
+		for _, source := range document.Sources {
+			format, err := blocklist.ParseFormat(source.Format)
+			if err != nil {
+				return fmt.Errorf("store: source %q: %w", source.Name, err)
+			}
+			stored := Source{Name: source.Name, URL: source.URL, Format: format, Enabled: source.Enabled}
+			if err := saveSource(ctx, q, stored); err != nil {
+				return err
+			}
+		}
+
+		// Materialize the catalog rows the document references, but only the ones
+		// this store does not hold: a repeat import never regresses a fresher copy,
+		// and an offline import can still satisfy the enablements that follow.
+		if len(document.Services) > 0 {
+			existing, err := listServices(ctx, q)
+			if err != nil {
+				return err
+			}
+			known := make(map[string]bool, len(existing))
+			for _, row := range existing {
+				known[row.ID] = true
+			}
+			missing := make([]services.Service, 0, len(document.Services))
+			for _, row := range document.Services {
+				if !known[row.ID] {
+					missing = append(missing, services.Service{
+						ID:      row.ID,
+						Name:    row.Name,
+						Group:   row.Group,
+						Rules:   row.Rules,
+						IconSVG: row.IconSVG,
+					})
+				}
+			}
+			if len(missing) > 0 {
+				if err := saveCatalog(ctx, q, time.Now().UTC(), missing); err != nil {
+					return err
+				}
+			}
+		}
+
+		if document.ProfileServices != nil {
+			for _, group := range document.ProfileServices {
+				if err := setProfileServices(ctx, q, filter.ProfileID(group.Profile), group.Services); err != nil {
+					return err
+				}
+			}
+		}
+		if document.ClientServices != nil {
+			for _, group := range document.ClientServices {
+				if err := setClientServices(ctx, q, filter.ClientKey(group.Client), group.Services); err != nil {
+					return err
+				}
+			}
+		}
+		if document.Safesearch != nil {
+			for _, group := range document.Safesearch {
+				engines := make([]safesearch.EngineID, 0, len(group.Engines))
+				for _, id := range group.Engines {
+					engines = append(engines, safesearch.EngineID(id))
+				}
+				if err := setProfileSafesearch(ctx, q, filter.ProfileID(group.Profile), engines); err != nil {
+					return err
+				}
+			}
+		}
+		for _, window := range document.Windows {
+			action, err := filter.ParseAction(window.Action)
+			if err != nil {
+				return fmt.Errorf("store: window %q: %w", window.Name, err)
+			}
+			clients := make([]filter.ClientKey, 0, len(window.Clients))
+			for _, client := range window.Clients {
+				clients = append(clients, filter.ClientKey(client))
+			}
+			if err := saveServiceWindow(ctx, q, ServiceWindow{
+				Name:     window.Name,
+				Schedule: window.Schedule,
+				Action:   action,
+				Clients:  clients,
+				Services: window.Services,
+			}); err != nil {
+				return err
+			}
+		}
+
+		cfg, err := loadConfig(ctx, q)
+		if err != nil {
+			return err
+		}
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("store: imported configuration: %w", err)
+		}
+		return nil
+	})
 }
 
 func (p profileDoc) spec() (filter.ProfileSpec, error) {
@@ -636,8 +640,8 @@ func (r ruleDoc) rule() (Rule, error) {
 	return rule, nil
 }
 
-func (s *Store) ruleIDs(ctx context.Context) (map[int64]bool, error) {
-	rules, err := s.Rules(ctx)
+func ruleIDs(ctx context.Context, q *storedb.Queries) (map[int64]bool, error) {
+	rules, err := loadRules(ctx, q)
 	if err != nil {
 		return nil, err
 	}

@@ -243,3 +243,36 @@ func TestParseDocumentRefusesAMissingOrUnknownVersion(t *testing.T) {
 	_, err = store.ParseDocument([]byte(`{"version": 2}`))
 	require.ErrorContains(t, err, "unsupported document version 2")
 }
+
+func TestAFailedImportLeavesTheStoreUnchanged(t *testing.T) {
+	scenarios := map[string]store.Document{}
+	document, err := store.ParseDocument([]byte(
+		`{"version":1,"rules":[{"domain":"later.example","kind":"exact","action":"rewrite"}]}`,
+	))
+	require.NoError(t, err)
+	scenarios["a rule action the compiler refuses"] = document
+	document, err = store.ParseDocument([]byte(`{"version":1,"default_profile":"ghost"}`))
+	require.NoError(t, err)
+	scenarios["a default profile nothing defines"] = document
+
+	for name, document := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			a := open(t)
+			populateForDocument(t, a)
+			before, err := a.ReadDocument(ctx)
+			require.NoError(t, err)
+
+			err = a.ApplyDocument(ctx, document)
+			require.Error(t, err, "the import must fail")
+
+			after, err := a.ReadDocument(ctx)
+			require.NoError(t, err)
+			require.Equal(t, before, after, "a failed import changed the stored configuration")
+
+			cfg, err := a.Load(ctx)
+			require.NoError(t, err)
+			require.NoError(t, cfg.Validate(), "the store no longer compiles after the failed import")
+		})
+	}
+}

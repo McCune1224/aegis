@@ -215,22 +215,26 @@ func (s *Store) Close() error {
 // the layers above take. Nothing above this point sees a string where it should
 // see a blocking mode or an address.
 func (s *Store) Load(ctx context.Context) (Config, error) {
-	defaultProfile, err := s.queries.GetSetting(ctx, "default_profile")
+	return loadConfig(ctx, s.queries)
+}
+
+func loadConfig(ctx context.Context, q *storedb.Queries) (Config, error) {
+	defaultProfile, err := q.GetSetting(ctx, "default_profile")
 	if err != nil {
 		return Config{}, fmt.Errorf("store: default profile: %w", err)
 	}
 
-	profiles, err := s.loadProfiles(ctx)
+	profiles, err := loadProfiles(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	clients, err := s.loadClients(ctx)
+	clients, err := loadClients(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	rules, err := s.loadRules(ctx)
+	rules, err := loadRules(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
@@ -240,52 +244,52 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 		specs = append(specs, rule.Spec())
 	}
 
-	schedules, err := s.Schedules(ctx)
+	schedules, err := listSchedules(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	windows, err := s.ServiceWindows(ctx)
+	windows, err := listServiceWindows(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	rewrites, err := s.Rewrites(ctx)
+	rewrites, err := listRewrites(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	upstreams, err := s.Upstreams(ctx)
+	upstreams, err := listUpstreams(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	routes, err := s.Routes(ctx)
+	routes, err := listRoutes(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	allowed, disallowed, err := loadAccess(ctx, s.queries)
+	allowed, disallowed, err := loadAccess(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	catalog, err := s.Services(ctx)
+	catalog, err := listServices(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	enables, err := s.ProfileServices(ctx)
+	enables, err := listProfileServices(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	clientEnables, err := s.ClientServices(ctx)
+	clientEnables, err := listClientServices(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
 
-	safeEnables, err := s.ProfileSafesearch(ctx)
+	safeEnables, err := listProfileSafesearch(ctx, q)
 	if err != nil {
 		return Config{}, err
 	}
@@ -309,20 +313,20 @@ func (s *Store) Load(ctx context.Context) (Config, error) {
 	}, nil
 }
 
-func (s *Store) loadClients(ctx context.Context) ([]Client, error) {
-	rows, err := s.queries.ListClients(ctx)
+func loadClients(ctx context.Context, q *storedb.Queries) ([]Client, error) {
+	rows, err := q.ListClients(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: clients: %w", err)
 	}
-	addresses, err := s.loadAddresses(ctx)
+	addresses, err := loadAddresses(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	prefixes, err := s.loadPrefixes(ctx)
+	prefixes, err := loadPrefixes(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	hardware, err := s.loadMACs(ctx)
+	hardware, err := loadMACs(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -342,8 +346,8 @@ func (s *Store) loadClients(ctx context.Context) ([]Client, error) {
 	return clients, nil
 }
 
-func (s *Store) loadMACs(ctx context.Context) (map[filter.ClientKey][]net.HardwareAddr, error) {
-	rows, err := s.queries.ListClientMACs(ctx)
+func loadMACs(ctx context.Context, q *storedb.Queries) (map[filter.ClientKey][]net.HardwareAddr, error) {
+	rows, err := q.ListClientMACs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: client hardware addresses: %w", err)
 	}
@@ -360,8 +364,8 @@ func (s *Store) loadMACs(ctx context.Context) (map[filter.ClientKey][]net.Hardwa
 	return byClient, nil
 }
 
-func (s *Store) loadProfiles(ctx context.Context) ([]filter.ProfileSpec, error) {
-	rows, err := s.queries.ListProfiles(ctx)
+func loadProfiles(ctx context.Context, q *storedb.Queries) ([]filter.ProfileSpec, error) {
+	rows, err := q.ListProfiles(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: profiles: %w", err)
 	}
@@ -391,8 +395,8 @@ func (s *Store) loadProfiles(ctx context.Context) ([]filter.ProfileSpec, error) 
 	return profiles, nil
 }
 
-func (s *Store) loadAddresses(ctx context.Context) (map[filter.ClientKey][]netip.Addr, error) {
-	rows, err := s.queries.ListClientAddresses(ctx)
+func loadAddresses(ctx context.Context, q *storedb.Queries) (map[filter.ClientKey][]netip.Addr, error) {
+	rows, err := q.ListClientAddresses(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: client addresses: %w", err)
 	}
@@ -409,8 +413,8 @@ func (s *Store) loadAddresses(ctx context.Context) (map[filter.ClientKey][]netip
 	return byClient, nil
 }
 
-func (s *Store) loadPrefixes(ctx context.Context) (map[filter.ClientKey][]netip.Prefix, error) {
-	rows, err := s.queries.ListClientPrefixes(ctx)
+func loadPrefixes(ctx context.Context, q *storedb.Queries) (map[filter.ClientKey][]netip.Prefix, error) {
+	rows, err := q.ListClientPrefixes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: client prefixes: %w", err)
 	}
@@ -452,6 +456,10 @@ func (s *Store) MarkSeeded(ctx context.Context) error {
 
 // SaveProfile inserts or replaces one profile.
 func (s *Store) SaveProfile(ctx context.Context, spec filter.ProfileSpec) error {
+	return saveProfile(ctx, s.queries, spec)
+}
+
+func saveProfile(ctx context.Context, q *storedb.Queries, spec filter.ProfileSpec) error {
 	params := storedb.UpsertProfileParams{Name: string(spec.ID)}
 	if spec.Extends != "" {
 		extends := string(spec.Extends)
@@ -465,7 +473,7 @@ func (s *Store) SaveProfile(ctx context.Context, spec filter.ProfileSpec) error 
 		custom := spec.Custom.String()
 		params.Custom = &custom
 	}
-	if err := s.queries.UpsertProfile(ctx, params); err != nil {
+	if err := q.UpsertProfile(ctx, params); err != nil {
 		return fmt.Errorf("store: save profile %q: %w", spec.ID, err)
 	}
 	return nil
@@ -475,62 +483,70 @@ func (s *Store) SaveProfile(ctx context.Context, spec filter.ProfileSpec) error 
 // stored selectors always match the record that was written.
 func (s *Store) SaveClient(ctx context.Context, record Client) error {
 	return s.inTx(ctx, func(q *storedb.Queries) error {
-		params := storedb.UpsertClientParams{
-			Name:    string(record.Key),
-			Profile: string(record.Profile),
-			Notes:   record.Notes,
-		}
-		if err := q.UpsertClient(ctx, params); err != nil {
-			return fmt.Errorf("store: save client %q: %w", record.Key, err)
-		}
-
-		name := string(record.Key)
-		if err := q.DeleteClientAddressesForClient(ctx, name); err != nil {
-			return fmt.Errorf("store: save client %q: %w", record.Key, err)
-		}
-		for _, address := range record.Addresses {
-			if err := q.UpsertClientAddress(ctx, storedb.UpsertClientAddressParams{
-				Address: address.Unmap().String(),
-				Client:  name,
-			}); err != nil {
-				return fmt.Errorf("store: save client %q: %w", record.Key, err)
-			}
-		}
-
-		if err := q.DeleteClientPrefixesForClient(ctx, name); err != nil {
-			return fmt.Errorf("store: save client %q: %w", record.Key, err)
-		}
-		for _, prefix := range record.Prefixes {
-			if err := q.UpsertClientPrefix(ctx, storedb.UpsertClientPrefixParams{
-				Prefix: prefix.Masked().String(),
-				Client: name,
-			}); err != nil {
-				return fmt.Errorf("store: save client %q: %w", record.Key, err)
-			}
-		}
-
-		if err := q.DeleteClientMACsForClient(ctx, name); err != nil {
-			return fmt.Errorf("store: save client %q: %w", record.Key, err)
-		}
-		for _, hardware := range record.MACs {
-			normalized := client.NormalizeMAC(hardware)
-			if normalized == "" {
-				return fmt.Errorf("store: save client %q: %s is not a hardware address", record.Key, hardware)
-			}
-			if err := q.UpsertClientMAC(ctx, storedb.UpsertClientMACParams{
-				Mac:    normalized,
-				Client: name,
-			}); err != nil {
-				return fmt.Errorf("store: save client %q: %w", record.Key, err)
-			}
-		}
-		return nil
+		return saveClient(ctx, q, record)
 	})
+}
+
+func saveClient(ctx context.Context, q *storedb.Queries, record Client) error {
+	params := storedb.UpsertClientParams{
+		Name:    string(record.Key),
+		Profile: string(record.Profile),
+		Notes:   record.Notes,
+	}
+	if err := q.UpsertClient(ctx, params); err != nil {
+		return fmt.Errorf("store: save client %q: %w", record.Key, err)
+	}
+
+	name := string(record.Key)
+	if err := q.DeleteClientAddressesForClient(ctx, name); err != nil {
+		return fmt.Errorf("store: save client %q: %w", record.Key, err)
+	}
+	for _, address := range record.Addresses {
+		if err := q.UpsertClientAddress(ctx, storedb.UpsertClientAddressParams{
+			Address: address.Unmap().String(),
+			Client:  name,
+		}); err != nil {
+			return fmt.Errorf("store: save client %q: %w", record.Key, err)
+		}
+	}
+
+	if err := q.DeleteClientPrefixesForClient(ctx, name); err != nil {
+		return fmt.Errorf("store: save client %q: %w", record.Key, err)
+	}
+	for _, prefix := range record.Prefixes {
+		if err := q.UpsertClientPrefix(ctx, storedb.UpsertClientPrefixParams{
+			Prefix: prefix.Masked().String(),
+			Client: name,
+		}); err != nil {
+			return fmt.Errorf("store: save client %q: %w", record.Key, err)
+		}
+	}
+
+	if err := q.DeleteClientMACsForClient(ctx, name); err != nil {
+		return fmt.Errorf("store: save client %q: %w", record.Key, err)
+	}
+	for _, hardware := range record.MACs {
+		normalized := client.NormalizeMAC(hardware)
+		if normalized == "" {
+			return fmt.Errorf("store: save client %q: %s is not a hardware address", record.Key, hardware)
+		}
+		if err := q.UpsertClientMAC(ctx, storedb.UpsertClientMACParams{
+			Mac:    normalized,
+			Client: name,
+		}); err != nil {
+			return fmt.Errorf("store: save client %q: %w", record.Key, err)
+		}
+	}
+	return nil
 }
 
 // SetDefaultProfile names the profile an unidentified client gets.
 func (s *Store) SetDefaultProfile(ctx context.Context, profile filter.ProfileID) error {
-	if err := s.queries.SetSetting(ctx, storedb.SetSettingParams{Key: "default_profile", Value: string(profile)}); err != nil {
+	return setDefaultProfile(ctx, s.queries, profile)
+}
+
+func setDefaultProfile(ctx context.Context, q *storedb.Queries, profile filter.ProfileID) error {
+	if err := q.SetSetting(ctx, storedb.SetSettingParams{Key: "default_profile", Value: string(profile)}); err != nil {
 		return fmt.Errorf("store: default profile: %w", err)
 	}
 	return nil

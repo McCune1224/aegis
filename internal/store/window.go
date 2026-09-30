@@ -25,7 +25,11 @@ type ServiceWindow struct {
 
 // ServiceWindows returns every window, ordered by name.
 func (s *Store) ServiceWindows(ctx context.Context) ([]ServiceWindow, error) {
-	rows, err := s.queries.ListServiceWindows(ctx)
+	return listServiceWindows(ctx, s.queries)
+}
+
+func listServiceWindows(ctx context.Context, q *storedb.Queries) ([]ServiceWindow, error) {
+	rows, err := q.ListServiceWindows(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: service windows: %w", err)
 	}
@@ -42,6 +46,10 @@ func (s *Store) ServiceWindows(ctx context.Context) ([]ServiceWindow, error) {
 
 // SaveServiceWindow inserts one window, replacing what its name held.
 func (s *Store) SaveServiceWindow(ctx context.Context, window ServiceWindow) error {
+	return saveServiceWindow(ctx, s.queries, window)
+}
+
+func saveServiceWindow(ctx context.Context, q *storedb.Queries, window ServiceWindow) error {
 	clients, err := json.Marshal(window.Clients)
 	if err != nil {
 		return fmt.Errorf("store: window %q: %w", window.Name, err)
@@ -50,7 +58,7 @@ func (s *Store) SaveServiceWindow(ctx context.Context, window ServiceWindow) err
 	if err != nil {
 		return fmt.Errorf("store: window %q: %w", window.Name, err)
 	}
-	if _, err := s.queries.SaveServiceWindow(ctx, storedb.SaveServiceWindowParams{
+	if _, err := q.SaveServiceWindow(ctx, storedb.SaveServiceWindowParams{
 		Name:     window.Name,
 		Schedule: window.Schedule,
 		Action:   window.Action.String(),

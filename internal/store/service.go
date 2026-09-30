@@ -38,7 +38,11 @@ type ClientService struct {
 
 // Services returns the stored catalog.
 func (s *Store) Services(ctx context.Context) ([]BlockedService, error) {
-	rows, err := s.queries.ListServices(ctx)
+	return listServices(ctx, s.queries)
+}
+
+func listServices(ctx context.Context, q *storedb.Queries) ([]BlockedService, error) {
+	rows, err := q.ListServices(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: services: %w", err)
 	}
@@ -67,30 +71,38 @@ func (s *Store) Services(ctx context.Context) ([]BlockedService, error) {
 // unblocking; the same rule a failed blocklist fetch follows.
 func (s *Store) SaveCatalog(ctx context.Context, fetched time.Time, catalog []services.Service) error {
 	return s.inTx(ctx, func(q *storedb.Queries) error {
-		for _, service := range catalog {
-			rules, err := json.Marshal(service.Rules)
-			if err != nil {
-				return fmt.Errorf("store: service %q: %w", service.ID, err)
-			}
-			if err := q.UpsertService(ctx, storedb.UpsertServiceParams{
-				ID:        service.ID,
-				Name:      service.Name,
-				GroupName: service.Group,
-				Rules:     string(rules),
-				IconSvg:   service.IconSVG,
-				FetchedAt: fetched.Unix(),
-			}); err != nil {
-				return fmt.Errorf("store: service %q: %w", service.ID, err)
-			}
-		}
-		return nil
+		return saveCatalog(ctx, q, fetched, catalog)
 	})
+}
+
+func saveCatalog(ctx context.Context, q *storedb.Queries, fetched time.Time, catalog []services.Service) error {
+	for _, service := range catalog {
+		rules, err := json.Marshal(service.Rules)
+		if err != nil {
+			return fmt.Errorf("store: service %q: %w", service.ID, err)
+		}
+		if err := q.UpsertService(ctx, storedb.UpsertServiceParams{
+			ID:        service.ID,
+			Name:      service.Name,
+			GroupName: service.Group,
+			Rules:     string(rules),
+			IconSvg:   service.IconSVG,
+			FetchedAt: fetched.Unix(),
+		}); err != nil {
+			return fmt.Errorf("store: service %q: %w", service.ID, err)
+		}
+	}
+	return nil
 }
 
 // ProfileServices returns every enablement, so a reload can rebuild the rules
 // each profile blocks.
 func (s *Store) ProfileServices(ctx context.Context) ([]ProfileService, error) {
-	rows, err := s.queries.ListProfileServices(ctx)
+	return listProfileServices(ctx, s.queries)
+}
+
+func listProfileServices(ctx context.Context, q *storedb.Queries) ([]ProfileService, error) {
+	rows, err := q.ListProfileServices(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: profile services: %w", err)
 	}
@@ -105,25 +117,33 @@ func (s *Store) ProfileServices(ctx context.Context) ([]ProfileService, error) {
 // stored set is always the whole answer to what that profile blocks.
 func (s *Store) SetProfileServices(ctx context.Context, profile filter.ProfileID, serviceIDs []string) error {
 	return s.inTx(ctx, func(q *storedb.Queries) error {
-		if err := q.DeleteProfileServices(ctx, string(profile)); err != nil {
-			return fmt.Errorf("store: profile %q services: %w", profile, err)
-		}
-		for _, id := range serviceIDs {
-			if err := q.InsertProfileService(ctx, storedb.InsertProfileServiceParams{
-				Profile: string(profile),
-				Service: id,
-			}); err != nil {
-				return fmt.Errorf("store: profile %q service %q: %w", profile, id, err)
-			}
-		}
-		return nil
+		return setProfileServices(ctx, q, profile, serviceIDs)
 	})
+}
+
+func setProfileServices(ctx context.Context, q *storedb.Queries, profile filter.ProfileID, serviceIDs []string) error {
+	if err := q.DeleteProfileServices(ctx, string(profile)); err != nil {
+		return fmt.Errorf("store: profile %q services: %w", profile, err)
+	}
+	for _, id := range serviceIDs {
+		if err := q.InsertProfileService(ctx, storedb.InsertProfileServiceParams{
+			Profile: string(profile),
+			Service: id,
+		}); err != nil {
+			return fmt.Errorf("store: profile %q service %q: %w", profile, id, err)
+		}
+	}
+	return nil
 }
 
 // ClientServices returns every client enablement, so a reload can rebuild the
 // rules each client blocks for itself.
 func (s *Store) ClientServices(ctx context.Context) ([]ClientService, error) {
-	rows, err := s.queries.ListClientServices(ctx)
+	return listClientServices(ctx, s.queries)
+}
+
+func listClientServices(ctx context.Context, q *storedb.Queries) ([]ClientService, error) {
+	rows, err := q.ListClientServices(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: client services: %w", err)
 	}
@@ -138,19 +158,23 @@ func (s *Store) ClientServices(ctx context.Context) ([]ClientService, error) {
 // stored set is always the whole answer to what that client blocks.
 func (s *Store) SetClientServices(ctx context.Context, key filter.ClientKey, serviceIDs []string) error {
 	return s.inTx(ctx, func(q *storedb.Queries) error {
-		if err := q.DeleteClientServices(ctx, string(key)); err != nil {
-			return fmt.Errorf("store: client %q services: %w", key, err)
-		}
-		for _, id := range serviceIDs {
-			if err := q.InsertClientService(ctx, storedb.InsertClientServiceParams{
-				Client:  string(key),
-				Service: id,
-			}); err != nil {
-				return fmt.Errorf("store: client %q service %q: %w", key, id, err)
-			}
-		}
-		return nil
+		return setClientServices(ctx, q, key, serviceIDs)
 	})
+}
+
+func setClientServices(ctx context.Context, q *storedb.Queries, key filter.ClientKey, serviceIDs []string) error {
+	if err := q.DeleteClientServices(ctx, string(key)); err != nil {
+		return fmt.Errorf("store: client %q services: %w", key, err)
+	}
+	for _, id := range serviceIDs {
+		if err := q.InsertClientService(ctx, storedb.InsertClientServiceParams{
+			Client:  string(key),
+			Service: id,
+		}); err != nil {
+			return fmt.Errorf("store: client %q service %q: %w", key, id, err)
+		}
+	}
+	return nil
 }
 
 // validateProfileServices refuses an enablement that names a profile or a

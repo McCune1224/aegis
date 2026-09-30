@@ -11,11 +11,15 @@ import (
 
 // SaveSchedule inserts one named set of windows, replacing what the name held.
 func (s *Store) SaveSchedule(ctx context.Context, schedule filter.ScheduleSpec) error {
+	return saveSchedule(ctx, s.queries, schedule)
+}
+
+func saveSchedule(ctx context.Context, q *storedb.Queries, schedule filter.ScheduleSpec) error {
 	windows, err := json.Marshal(schedule.Windows)
 	if err != nil {
 		return fmt.Errorf("store: schedule %s: %w", schedule.Name, err)
 	}
-	if _, err := s.queries.SaveSchedule(ctx, storedb.SaveScheduleParams{
+	if _, err := q.SaveSchedule(ctx, storedb.SaveScheduleParams{
 		Name:     schedule.Name,
 		Priority: int64(schedule.Priority),
 		Windows:  string(windows),
@@ -27,7 +31,11 @@ func (s *Store) SaveSchedule(ctx context.Context, schedule filter.ScheduleSpec) 
 
 // Schedules returns every named schedule, ordered by name.
 func (s *Store) Schedules(ctx context.Context) ([]filter.ScheduleSpec, error) {
-	rows, err := s.queries.ListSchedules(ctx)
+	return listSchedules(ctx, s.queries)
+}
+
+func listSchedules(ctx context.Context, q *storedb.Queries) ([]filter.ScheduleSpec, error) {
+	rows, err := q.ListSchedules(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: schedules: %w", err)
 	}

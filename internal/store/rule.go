@@ -90,7 +90,7 @@ func (r Rule) Spec() filter.RuleSpec {
 
 // Rules returns every user-created rule.
 func (s *Store) Rules(ctx context.Context) ([]Rule, error) {
-	return s.loadRules(ctx)
+	return loadRules(ctx, s.queries)
 }
 
 // RuleByID returns one user-created rule, and reports whether the store holds it.
@@ -109,8 +109,8 @@ func (s *Store) RuleByID(ctx context.Context, id int64) (Rule, bool, error) {
 	return rule, true, nil
 }
 
-func (s *Store) loadRules(ctx context.Context) ([]Rule, error) {
-	rows, err := s.queries.ListRules(ctx)
+func loadRules(ctx context.Context, q *storedb.Queries) ([]Rule, error) {
+	rows, err := q.ListRules(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: rules: %w", err)
 	}
@@ -151,6 +151,10 @@ func parseRule(row storedb.Rule) (Rule, error) {
 // SaveRule inserts a rule and returns its ID, or replaces the row when the rule
 // carries an ID.
 func (s *Store) SaveRule(ctx context.Context, rule Rule) (int64, error) {
+	return saveRule(ctx, s.queries, rule)
+}
+
+func saveRule(ctx context.Context, q *storedb.Queries, rule Rule) (int64, error) {
 	params := storedb.InsertRuleParams{
 		Domain:   rule.Value(),
 		Kind:     rule.Kind.String(),
@@ -163,13 +167,13 @@ func (s *Store) SaveRule(ctx context.Context, rule Rule) (int64, error) {
 		params.Created = rule.Created.Unix()
 	}
 	if rule.ID == 0 {
-		id, err := s.queries.InsertRule(ctx, params)
+		id, err := q.InsertRule(ctx, params)
 		if err != nil {
 			return 0, fmt.Errorf("store: save rule: %w", err)
 		}
 		return id, nil
 	}
-	if err := s.queries.UpdateRule(ctx, storedb.UpdateRuleParams{
+	if err := q.UpdateRule(ctx, storedb.UpdateRuleParams{
 		Domain:   params.Domain,
 		Kind:     params.Kind,
 		Action:   params.Action,

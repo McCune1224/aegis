@@ -19,7 +19,11 @@ type ProfileSafesearch struct {
 // ProfileSafesearch returns every enablement, so a reload can rebuild the safe
 // hosts each profile answers with.
 func (s *Store) ProfileSafesearch(ctx context.Context) ([]ProfileSafesearch, error) {
-	rows, err := s.queries.ListProfileSafesearch(ctx)
+	return listProfileSafesearch(ctx, s.queries)
+}
+
+func listProfileSafesearch(ctx context.Context, q *storedb.Queries) ([]ProfileSafesearch, error) {
+	rows, err := q.ListProfileSafesearch(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: profile safesearch: %w", err)
 	}
@@ -34,19 +38,23 @@ func (s *Store) ProfileSafesearch(ctx context.Context) ([]ProfileSafesearch, err
 // the stored set is always the whole answer to what that profile rewrites.
 func (s *Store) SetProfileSafesearch(ctx context.Context, profile filter.ProfileID, engines []safesearch.EngineID) error {
 	return s.inTx(ctx, func(q *storedb.Queries) error {
-		if err := q.DeleteProfileSafesearch(ctx, string(profile)); err != nil {
-			return fmt.Errorf("store: profile %q safesearch: %w", profile, err)
-		}
-		for _, engine := range engines {
-			if err := q.InsertProfileSafesearch(ctx, storedb.InsertProfileSafesearchParams{
-				Profile: string(profile),
-				Engine:  string(engine),
-			}); err != nil {
-				return fmt.Errorf("store: profile %q engine %q: %w", profile, engine, err)
-			}
-		}
-		return nil
+		return setProfileSafesearch(ctx, q, profile, engines)
 	})
+}
+
+func setProfileSafesearch(ctx context.Context, q *storedb.Queries, profile filter.ProfileID, engines []safesearch.EngineID) error {
+	if err := q.DeleteProfileSafesearch(ctx, string(profile)); err != nil {
+		return fmt.Errorf("store: profile %q safesearch: %w", profile, err)
+	}
+	for _, engine := range engines {
+		if err := q.InsertProfileSafesearch(ctx, storedb.InsertProfileSafesearchParams{
+			Profile: string(profile),
+			Engine:  string(engine),
+		}); err != nil {
+			return fmt.Errorf("store: profile %q engine %q: %w", profile, engine, err)
+		}
+	}
+	return nil
 }
 
 // validateProfileSafesearch refuses an enablement that names a profile or an
