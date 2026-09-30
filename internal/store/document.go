@@ -368,6 +368,19 @@ func (s *Store) ApplyDocument(ctx context.Context, document Document) error {
 			}
 		}
 
+		// A document may move a selector from one client it names to another,
+		// so every client row exists with no selectors before the selectors
+		// go on: the claim check reads the state this import is building.
+		for _, client := range document.Clients {
+			record, err := client.record()
+			if err != nil {
+				return err
+			}
+			record.Addresses, record.MACs, record.Prefixes = nil, nil, nil
+			if err := saveClient(ctx, q, record); err != nil {
+				return err
+			}
+		}
 		for _, client := range document.Clients {
 			record, err := client.record()
 			if err != nil {

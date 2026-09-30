@@ -487,7 +487,38 @@ func (s *Store) SaveClient(ctx context.Context, record Client) error {
 	})
 }
 
+// saveClient refuses a selector another client already holds, because a write
+// that moved it would silently drop the old holder's devices onto the default
+// profile: exactly the fight over one device an operator cannot debug from the
+// outside. A client re-saving its own selectors is not a conflict.
 func saveClient(ctx context.Context, q *storedb.Queries, record Client) error {
+	claims, err := selectorClaims(ctx, q)
+	if err != nil {
+		return err
+	}
+	for _, address := range record.Addresses {
+		if holder, taken := claims.addresses[address.Unmap().String()]; taken && holder != record.Key {
+			return fmt.Errorf("store: save client %q: address %s is claimed by both %q and %q",
+				record.Key, address.Unmap(), holder, record.Key)
+		}
+	}
+	for _, hardware := range record.MACs {
+		normalized := client.NormalizeMAC(hardware)
+		if normalized == "" {
+			return fmt.Errorf("store: save client %q: %s is not a hardware address", record.Key, hardware)
+		}
+		if holder, taken := claims.macs[normalized]; taken && holder != record.Key {
+			return fmt.Errorf("store: save client %q: hardware address %s is claimed by both %q and %q",
+				record.Key, normalized, holder, record.Key)
+		}
+	}
+	for _, prefix := range record.Prefixes {
+		if holder, taken := claims.prefixes[prefix.Masked().String()]; taken && holder != record.Key {
+			return fmt.Errorf("store: save client %q: prefix %s is claimed by both %q and %q",
+				record.Key, prefix.Masked(), holder, record.Key)
+		}
+	}
+
 	params := storedb.UpsertClientParams{
 		Name:    string(record.Key),
 		Profile: string(record.Profile),
@@ -538,6 +569,45 @@ func saveClient(ctx context.Context, q *storedb.Queries, record Client) error {
 		}
 	}
 	return nil
+}
+
+// selectorClaims maps every stored selector to the client key that holds it.
+func selectorClaims(ctx context.Context, q *storedb.Queries) (claims, error) {
+	var out claims
+	out.addresses = make(map[string]filter.ClientKey)
+	out.macs = make(map[string]filter.ClientKey)
+	out.prefixes = make(map[string]filter.ClientKey)
+
+	addresses, err := q.ListClientAddresses(ctx)
+	if err != nil {
+		return out, fmt.Errorf("store: client addresses: %w", err)
+	}
+	for _, row := range addresses {
+		out.addresses[row.Address] = filter.ClientKey(row.Client)
+	}
+
+	macs, err := q.ListClientMACs(ctx)
+	if err != nil {
+		return out, fmt.Errorf("store: client hardware addresses: %w", err)
+	}
+	for _, row := range macs {
+		out.macs[row.Mac] = filter.ClientKey(row.Client)
+	}
+
+	prefixes, err := q.ListClientPrefixes(ctx)
+	if err != nil {
+		return out, fmt.Errorf("store: client prefixes: %w", err)
+	}
+	for _, row := range prefixes {
+		out.prefixes[row.Prefix] = filter.ClientKey(row.Client)
+	}
+	return out, nil
+}
+
+type claims struct {
+	addresses map[string]filter.ClientKey
+	macs      map[string]filter.ClientKey
+	prefixes  map[string]filter.ClientKey
 }
 
 // SetDefaultProfile names the profile an unidentified client gets.
