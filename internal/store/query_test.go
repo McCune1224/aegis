@@ -66,6 +66,31 @@ func TestRecordedQueriesComeBackThroughTheFilters(t *testing.T) {
 	require.Len(t, limitOne, 1)
 }
 
+func TestANameFilterMatchesTheNameAndItsSubdomainsOnly(t *testing.T) {
+	s := open(t)
+	ctx := t.Context()
+
+	base := time.Now().Truncate(time.Millisecond)
+	names := []string{"_dmarc.example.com", "xdmarc.example.com", "sub._dmarc.example.com", "sub.xdmarc.example.com", "other.example.com"}
+	batch := make([]store.QueryEntry, 0, len(names))
+	for i, name := range names {
+		batch = append(batch, store.QueryEntry{
+			Time:    base.Add(time.Duration(i) * time.Second),
+			Client:  netip.MustParseAddr("10.9.9.2"),
+			Name:    mustDomain(t, name),
+			Type:    "A",
+			Verdict: filter.ActionBlock,
+		})
+	}
+	require.NoError(t, s.RecordQueries(ctx, batch))
+
+	got, err := s.Queries(ctx, store.QueryFilter{Name: "_dmarc.example.com", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, got, 2, "the underscore in the filter matched a lookalike name")
+	require.Equal(t, mustDomain(t, "sub._dmarc.example.com"), got[0].Name)
+	require.Equal(t, mustDomain(t, "_dmarc.example.com"), got[1].Name)
+}
+
 func TestQueriesTrimToTheRetentionBound(t *testing.T) {
 	s := open(t)
 	ctx := t.Context()
