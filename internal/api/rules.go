@@ -98,6 +98,12 @@ func (s *Server) postRule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if rule.Client != "" {
+		if err := s.clientExists(ctx, rule.Client); err != nil {
+			writeError(w, badRequest{err})
+			return
+		}
+	}
 
 	id, err := s.store.SaveRule(ctx, rule)
 	if err != nil {
@@ -172,6 +178,10 @@ func (s *Server) putRule(w http.ResponseWriter, r *http.Request) {
 				writeError(w, badRequest{err})
 				return
 			}
+			if rule.Action != filter.ActionBlock && rule.Action != filter.ActionAllow {
+				writeError(w, badRequest{fmt.Errorf("a rule action is block or allow, not %q", *request.Action)})
+				return
+			}
 		}
 	}
 	if request.Schedule != nil {
@@ -182,6 +192,12 @@ func (s *Server) putRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if rule.Schedule != "" {
 		if err := s.scheduleExists(ctx, rule.Schedule); err != nil {
+			writeError(w, badRequest{err})
+			return
+		}
+	}
+	if rule.Client != "" {
+		if err := s.clientExists(ctx, rule.Client); err != nil {
 			writeError(w, badRequest{err})
 			return
 		}
@@ -258,6 +274,9 @@ func parseRuleFields(request ruleRequest) (store.Rule, error) {
 	if err != nil {
 		return store.Rule{}, err
 	}
+	if action != filter.ActionBlock && action != filter.ActionAllow {
+		return store.Rule{}, fmt.Errorf("a rule action is block or allow, not %q", *request.Action)
+	}
 	rule := store.Rule{Kind: kind, Action: action}
 	if err := rule.SetValue(kind, *request.Domain); err != nil {
 		return store.Rule{}, err
@@ -282,6 +301,21 @@ func (s *Server) scheduleExists(ctx context.Context, name string) error {
 		return fmt.Errorf("schedule %q does not exist", name)
 	}
 	return nil
+}
+
+// clientExists refuses a rule scoped to a client the store does not hold, for
+// the same reason scheduleExists refuses an unknown schedule.
+func (s *Server) clientExists(ctx context.Context, key filter.ClientKey) error {
+	cfg, err := s.store.Load(ctx)
+	if err != nil {
+		return err
+	}
+	for _, record := range cfg.Clients {
+		if record.Key == key {
+			return nil
+		}
+	}
+	return fmt.Errorf("client %q does not exist", key)
 }
 
 func parseRuleID(r *http.Request) (int64, error) {

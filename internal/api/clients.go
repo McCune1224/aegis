@@ -159,6 +159,11 @@ func (s *Server) deleteClient(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 					}
+					for _, rule := range cfg.Rules {
+						if rule.Client == key {
+							return conflict{fmt.Errorf("rule %q still changes answers for client %q", rule.ID, key)}
+						}
+					}
 					cfg.Clients = append(cfg.Clients[:i], cfg.Clients[i+1:]...)
 					// The database cascades the enablements away; dropping them
 					// here keeps the config the delete validates against
