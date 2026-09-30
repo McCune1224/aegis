@@ -99,3 +99,12 @@ func TestOnePrefixCannotCarryTwoIdentities(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "claimed by both")
 }
+
+func TestAPrefixNoQueryCanCarryIsRefused(t *testing.T) {
+	_, err := client.New([]client.Spec{
+		{Key: "guest", Prefixes: []netip.Prefix{netip.MustParsePrefix("::ffff:10.9.9.0/120")}},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "::ffff:10.9.9.0/120")
+}
