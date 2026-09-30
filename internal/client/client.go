@@ -78,6 +78,12 @@ func New(specs []Spec) (*Resolver, error) {
 		}
 		for _, prefix := range spec.Prefixes {
 			masked := prefix.Masked()
+			// Lookups unmap the query address first, so a 4-in-6 prefix can
+			// never contain one; carrying it would be a rule that matches
+			// nothing, which is the mistake an operator cannot see.
+			if masked.Addr().Is4In6() {
+				return nil, fmt.Errorf("client: prefix %s is a 4-in-6 address; write the IPv4 prefix it maps", masked)
+			}
 			if existing, taken := byPrefix[masked]; taken {
 				return nil, fmt.Errorf("client: prefix %s is claimed by both %q and %q", masked, existing, spec.Key)
 			}
