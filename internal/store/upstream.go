@@ -22,7 +22,11 @@ type Upstream struct {
 // store holds what was saved, and the runtime owns the typed specs, so a row
 // whose text no longer parses is named by the reload that reads it.
 func (s *Store) Upstreams(ctx context.Context) ([]Upstream, error) {
-	rows, err := s.queries.ListUpstreams(ctx)
+	return listUpstreams(ctx, s.queries)
+}
+
+func listUpstreams(ctx context.Context, q *storedb.Queries) ([]Upstream, error) {
+	rows, err := q.ListUpstreams(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: upstreams: %w", err)
 	}
@@ -40,6 +44,10 @@ func (s *Store) Upstreams(ctx context.Context) ([]Upstream, error) {
 
 // SaveUpstream validates the URL and stores its canonical form.
 func (s *Store) SaveUpstream(ctx context.Context, row Upstream) error {
+	return saveUpstream(ctx, s.queries, row)
+}
+
+func saveUpstream(ctx context.Context, q *storedb.Queries, row Upstream) error {
 	spec, err := upstream.Parse(row.URL)
 	if err != nil {
 		return fmt.Errorf("store: upstream %q: %w", row.Name, err)
@@ -51,7 +59,7 @@ func (s *Store) SaveUpstream(ctx context.Context, row Upstream) error {
 	if row.Backup {
 		backup = 1
 	}
-	if err := s.queries.UpsertUpstream(ctx, storedb.UpsertUpstreamParams{
+	if err := q.UpsertUpstream(ctx, storedb.UpsertUpstreamParams{
 		Name:    row.Name,
 		Url:     spec.URL.String(),
 		Enabled: enabled,

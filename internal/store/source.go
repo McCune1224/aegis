@@ -125,11 +125,15 @@ func unixSeconds(seconds int64) time.Time {
 // because a config change should not discard the ETag that makes the next
 // refresh conditional.
 func (s *Store) SaveSource(ctx context.Context, source Source) error {
+	return saveSource(ctx, s.queries, source)
+}
+
+func saveSource(ctx context.Context, q *storedb.Queries, source Source) error {
 	enabled := int64(0)
 	if source.Enabled {
 		enabled = 1
 	}
-	if err := s.queries.UpsertSource(ctx, storedb.UpsertSourceParams{
+	if err := q.UpsertSource(ctx, storedb.UpsertSourceParams{
 		Name:           source.Name,
 		Url:            source.URL,
 		Format:         source.Format.String(),

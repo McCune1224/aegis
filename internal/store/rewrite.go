@@ -10,7 +10,11 @@ import (
 
 // SaveRewrite inserts one rewrite, replacing what the pattern held.
 func (s *Store) SaveRewrite(ctx context.Context, record rewrite.Record) error {
-	if _, err := s.queries.SaveRewrite(ctx, storedb.SaveRewriteParams{
+	return saveRewrite(ctx, s.queries, record)
+}
+
+func saveRewrite(ctx context.Context, q *storedb.Queries, record rewrite.Record) error {
+	if _, err := q.SaveRewrite(ctx, storedb.SaveRewriteParams{
 		Domain: record.Pattern,
 		Target: rewrite.TargetText(record),
 	}); err != nil {
@@ -23,7 +27,11 @@ func (s *Store) SaveRewrite(ctx context.Context, record rewrite.Record) error {
 // the handler take. A stored value that no longer parses fails the load,
 // the same way a malformed profile does.
 func (s *Store) Rewrites(ctx context.Context) ([]rewrite.Record, error) {
-	rows, err := s.queries.ListRewrites(ctx)
+	return listRewrites(ctx, s.queries)
+}
+
+func listRewrites(ctx context.Context, q *storedb.Queries) ([]rewrite.Record, error) {
+	rows, err := q.ListRewrites(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: rewrites: %w", err)
 	}

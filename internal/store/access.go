@@ -12,21 +12,25 @@ import (
 // never reads the new allowed list beside the old disallowed one.
 func (s *Store) SetAccess(ctx context.Context, allowed, disallowed []netip.Prefix) error {
 	return s.inTx(ctx, func(q *storedb.Queries) error {
-		if err := q.DeleteAccess(ctx); err != nil {
+		return setAccess(ctx, q, allowed, disallowed)
+	})
+}
+
+func setAccess(ctx context.Context, q *storedb.Queries, allowed, disallowed []netip.Prefix) error {
+	if err := q.DeleteAccess(ctx); err != nil {
+		return fmt.Errorf("store: save access: %w", err)
+	}
+	for _, prefix := range allowed {
+		if err := q.InsertAccess(ctx, storedb.InsertAccessParams{Kind: "allow", Cidr: prefix.Masked().String()}); err != nil {
 			return fmt.Errorf("store: save access: %w", err)
 		}
-		for _, prefix := range allowed {
-			if err := q.InsertAccess(ctx, storedb.InsertAccessParams{Kind: "allow", Cidr: prefix.Masked().String()}); err != nil {
-				return fmt.Errorf("store: save access: %w", err)
-			}
+	}
+	for _, prefix := range disallowed {
+		if err := q.InsertAccess(ctx, storedb.InsertAccessParams{Kind: "deny", Cidr: prefix.Masked().String()}); err != nil {
+			return fmt.Errorf("store: save access: %w", err)
 		}
-		for _, prefix := range disallowed {
-			if err := q.InsertAccess(ctx, storedb.InsertAccessParams{Kind: "deny", Cidr: prefix.Masked().String()}); err != nil {
-				return fmt.Errorf("store: save access: %w", err)
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // Access returns the two stored client sets as the listener gate matches them.
