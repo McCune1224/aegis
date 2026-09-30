@@ -283,6 +283,12 @@ func TestPrefetchKeepsTheOldEntryWhenTheRefreshFails(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.1", answeredAddress(t, near))
 	stub.waitArrived(t)
+	// The refresh failed. Wait until the resolver has processed the failure,
+	// because that is what clears the entry's refreshing mark; an ask that
+	// races ahead of it would not re-arm.
+	require.Eventually(t, func() bool {
+		return resolver.Stats().RefreshFailures == 1
+	}, 2*time.Second, time.Millisecond)
 
 	// The failed refresh leaves the stored entry alone until its own expiry.
 	// The next ask inside the window rearms the refresh: one try per ask.
@@ -292,6 +298,9 @@ func TestPrefetchKeepsTheOldEntryWhenTheRefreshFails(t *testing.T) {
 	require.Equal(t, "203.0.113.1", answeredAddress(t, still))
 	stub.waitArrived(t)
 	require.Equal(t, uint64(2), resolver.Stats().Prefetches)
+	require.Eventually(t, func() bool {
+		return resolver.Stats().RefreshFailures == 2
+	}, 2*time.Second, time.Millisecond)
 
 	// Past that expiry the query goes upstream again and meets the failure:
 	// the client's own ask, plus the two background refreshes.
