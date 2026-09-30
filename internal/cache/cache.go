@@ -86,6 +86,10 @@ type Stats struct {
 	Misses     uint64
 	Evictions  uint64
 	Prefetches uint64
+
+	// RefreshFailures counts background refreshes whose exchange failed.
+	// The stored entry outlives each one until its own expiry.
+	RefreshFailures uint64
 }
 
 // Cache is an LRU of upstream answers bounded by MaxEntries. One mutex covers
@@ -107,6 +111,11 @@ type Cache struct {
 	misses     uint64
 	evictions  uint64
 	prefetches uint64
+
+	// refreshFailures counts background refreshes whose exchange failed. It
+	// is the observable that the failed exchange was fully processed, which
+	// is the state the next ask reads when it decides to re-arm.
+	refreshFailures uint64
 }
 
 // New checks the config and returns a Cache.
@@ -215,6 +224,7 @@ func (c *Cache) refresh(k key) {
 		el.Value.(*entry).refreshing = false
 	}
 	if err != nil {
+		c.refreshFailures++
 		return
 	}
 	if e := storable(resp, k, c.minTTL, c.maxTTL, c.now()); e != nil {
@@ -226,7 +236,7 @@ func (c *Cache) refresh(k key) {
 func (c *Cache) Stats() Stats {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return Stats{Hits: c.hits, Misses: c.misses, Evictions: c.evictions, Prefetches: c.prefetches}
+	return Stats{Hits: c.hits, Misses: c.misses, Evictions: c.evictions, Prefetches: c.prefetches, RefreshFailures: c.refreshFailures}
 }
 
 // replace inserts the entry at the front of the LRU and evicts from the back
