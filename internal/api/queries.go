@@ -27,7 +27,12 @@ type queryRow struct {
 func (s *Server) listQueries(w http.ResponseWriter, r *http.Request) {
 	readFilter := store.QueryFilter{Client: r.URL.Query().Get("client")}
 	if name := r.URL.Query().Get("name"); name != "" {
-		readFilter.Name = name
+		domain, err := filter.ParseDomain(name)
+		if err != nil {
+			writeError(w, badRequest{fmt.Errorf("api: name %q: %w", name, err)})
+			return
+		}
+		readFilter.Name = domain.String()
 	}
 	if verdict := r.URL.Query().Get("verdict"); verdict != "" {
 		action, err := filter.ParseAction(verdict)

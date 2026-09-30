@@ -42,17 +42,17 @@ SELECT id, time, client, name, type, verdict, rule, threat
 FROM queries
 WHERE (?1 = '' OR client = ?1)
   AND (?2 = '' OR verdict = ?2)
-  AND (?3 = '' OR name = ?3 OR name LIKE ?4)
+  AND (?3 = '' OR name = ?3 OR name GLOB ?4)
 ORDER BY id DESC
 LIMIT ?5
 `
 
 type ListQueriesParams struct {
-	Client     interface{}
-	Verdict    interface{}
-	ExactName  interface{}
-	SuffixName string
-	Limit      int64
+	Client    interface{}
+	Verdict   interface{}
+	ExactName interface{}
+	GlobName  string
+	Limit     int64
 }
 
 func (q *Queries) ListQueries(ctx context.Context, arg ListQueriesParams) ([]Query, error) {
@@ -60,7 +60,7 @@ func (q *Queries) ListQueries(ctx context.Context, arg ListQueriesParams) ([]Que
 		arg.Client,
 		arg.Verdict,
 		arg.ExactName,
-		arg.SuffixName,
+		arg.GlobName,
 		arg.Limit,
 	)
 	if err != nil {

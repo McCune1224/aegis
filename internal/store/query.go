@@ -59,20 +59,31 @@ func (s *Store) RecordQueries(ctx context.Context, entries []QueryEntry) error {
 }
 
 // Queries reads the log newest first, narrowed by the filter.
-func (s *Store) Queries(ctx context.Context, filter QueryFilter) ([]QueryEntry, error) {
-	limit := filter.Limit
+func (s *Store) Queries(ctx context.Context, read QueryFilter) ([]QueryEntry, error) {
+	limit := read.Limit
 	if limit <= 0 {
 		limit = 500
 	}
-	params := storedb.ListQueriesParams{
-		Client:     filter.Client,
-		Verdict:    "",
-		ExactName:  filter.Name,
-		SuffixName: suffixPattern(filter.Name),
-		Limit:      int64(limit),
+	exactName, globName := "", ""
+	if read.Name != "" {
+		domain, err := filter.ParseDomain(read.Name)
+		if err != nil {
+			return nil, fmt.Errorf("store: query log name %q: %w", read.Name, err)
+		}
+		exactName = domain.String()
+		// GLOB's metacharacters (*?[]) are names no parsed domain can carry,
+		// so the pattern needs no escaping: the dot anchors the label.
+		globName = "*." + domain.String()
 	}
-	if filter.Verdict != nil {
-		params.Verdict = filter.Verdict.String()
+	params := storedb.ListQueriesParams{
+		Client:    read.Client,
+		Verdict:   "",
+		ExactName: exactName,
+		GlobName:  globName,
+		Limit:     int64(limit),
+	}
+	if read.Verdict != nil {
+		params.Verdict = read.Verdict.String()
 	}
 
 	rows, err := s.logQuer.ListQueries(ctx, params)
@@ -99,15 +110,6 @@ func (s *Store) TrimQueries(ctx context.Context, keep int) error {
 		return fmt.Errorf("store: trim queries: %w", err)
 	}
 	return nil
-}
-
-// suffixPattern widens a name filter to the name's subdomains, the same match
-// the rule engine makes for a list rule.
-func suffixPattern(name string) string {
-	if name == "" {
-		return ""
-	}
-	return "%." + name
 }
 
 func parseQueryRow(millis int64, client, name, typ, verdict, rule string) (QueryEntry, error) {
