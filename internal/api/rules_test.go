@@ -92,6 +92,8 @@ func TestRuleInputIsRejectedWithFourHundred(t *testing.T) {
 	}{
 		{"unknown kind", `{"domain":"example.com","kind":"suffix","action":"block"}`, "kind"},
 		{"unknown action", `{"domain":"example.com","kind":"exact","action":"drop"}`, "action"},
+		{"rewrite action", `{"domain":"example.com","kind":"exact","action":"rewrite"}`, "action"},
+		{"unknown client", `{"domain":"example.com","kind":"exact","action":"block","client":"ghost"}`, "client"},
 		{"malformed domain", `{"domain":"example.com/path","kind":"exact","action":"block"}`, "domain"},
 		{"missing domain", `{"kind":"exact","action":"block"}`, "domain"},
 		{"missing kind", `{"domain":"example.com","action":"block"}`, "kind"},
@@ -154,6 +156,38 @@ func TestPatchingTheKindReparsesTheStoredValue(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, body)
 	require.Contains(t, body, `"kind":"exact"`)
 	require.Contains(t, body, `"domain":"games.example.com"`)
+}
+
+func TestAPatchToARewriteActionIsRefused(t *testing.T) {
+	h := startHarness(t)
+
+	status, _ := h.do(t, http.MethodPost, "/api/v1/rules",
+		`{"domain":"games.example.com","kind":"exact","action":"block"}`)
+	require.Equal(t, http.StatusCreated, status)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/rules/1", `{"action":"rewrite"}`)
+	require.Equal(t, http.StatusBadRequest, status, body)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/rules", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"action":"block"`, "the refused patch changed the stored rule")
+}
+
+func TestDeletingAClientRulesStillNameIsRefused(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/clients/tablet", `{"profile":"default"}`)
+	require.Equal(t, http.StatusOK, status, body)
+	status, body = h.do(t, http.MethodPost, "/api/v1/rules",
+		`{"domain":"games.example.com","kind":"exact","action":"block","client":"tablet"}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = h.do(t, http.MethodDelete, "/api/v1/clients/tablet", "")
+	require.Equal(t, http.StatusConflict, status, body)
+
+	status, body = h.do(t, http.MethodGet, "/api/v1/rules", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"client":"tablet"`, "the refused delete removed the client's rule")
 }
 
 func TestPatchingTheKindReplacesTheStoredPayload(t *testing.T) {
