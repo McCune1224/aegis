@@ -235,18 +235,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	server, err := dns.Start(dns.ServerConfig{
-		Handler:    handler,
-		Address:    cfg.DNSAddress,
-		DoTAddress: cfg.DoTAddress,
-		DoHAddress: cfg.DoHAddress,
-		TLS:        tlsConfig,
-		Logger:     logger,
-	})
-	if err != nil {
-		return err
-	}
-
+	// Every fallible startup step runs before the listener binds, so a signal
+	// that arrives during boot cannot kill a resolver that is already
+	// answering: past this point the shutdown paths only close sockets.
 	rows, err := database.Upstreams(ctx)
 	if err != nil {
 		return err
@@ -267,7 +258,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Upstreams: engine.Upstreams(),
 	})
 	if err != nil {
-		_ = server.Shutdown(context.Background())
 		return err
 	}
 
@@ -278,7 +268,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dhcpServer = dhcp.New(dhcpConfig, database, leases, logger)
 		if err := dhcpServer.Load(ctx); err != nil {
 			_ = apiServer.Shutdown(context.Background())
-			_ = server.Shutdown(context.Background())
 			return err
 		}
 		dhcpGroup = slog.Group("dhcp",
@@ -287,6 +276,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			"gateway", dhcpConfig.Router,
 			"server", dhcpConfig.ServerIP,
 		)
+	}
+
+	server, err := dns.Start(dns.ServerConfig{
+		Handler:    handler,
+		Address:    cfg.DNSAddress,
+		DoTAddress: cfg.DoTAddress,
+		DoHAddress: cfg.DoHAddress,
+		TLS:        tlsConfig,
+		Logger:     logger,
+	})
+	if err != nil {
+		_ = apiServer.Shutdown(context.Background())
+		return err
 	}
 
 	logger.Info("aegis is serving",
