@@ -6,24 +6,15 @@ function base(children: JSX.Element): JSX.Element {
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
-      stroke-width="1.4"
+      stroke-width="1.5"
       stroke-linecap="round"
       stroke-linejoin="round"
+      aria-hidden="true"
     >
       {children}
     </svg>
   );
 }
-
-export const IconGraph = () =>
-  base(
-    <>
-      <circle cx="3" cy="13" r="1.2" />
-      <circle cx="8" cy="8" r="1.2" />
-      <circle cx="13" cy="3" r="1.2" />
-      <path d="M4 12 L7 9 M9 7 L12 4" />
-    </>,
-  );
 
 export const IconDashboard = () =>
   base(
@@ -35,36 +26,31 @@ export const IconDashboard = () =>
     </>,
   );
 
+export const IconConstellation = () =>
+  base(
+    <>
+      <path d="M4 12.4 L8 7.2 L12.6 10 L13 3.6" />
+      <circle cx="4" cy="12.4" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="7.2" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="12.6" cy="10" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="13" cy="3.6" r="1.7" fill="currentColor" stroke="none" />
+    </>,
+  );
+
 export const IconLog = () =>
   base(
     <>
-      <path d="M3 3h10 M3 6.5h10 M3 10h7 M3 13.5h4" />
-    </>,
-  );
-
-export const IconFocus = () =>
-  base(
-    <>
-      <circle cx="8" cy="8" r="5.5" />
-      <circle cx="8" cy="8" r="1.6" />
-    </>,
-  );
-
-export const IconClock = () =>
-  base(
-    <>
-      <circle cx="8" cy="8" r="6.2" />
-      <path d="M8 4.6 V8 l2.4 1.6" />
+      <path d="M3 3.5h10 M3 7h10 M3 10.5h6.5 M3 14h4" />
     </>,
   );
 
 export const IconClients = () =>
   base(
     <>
-      <circle cx="6" cy="6" r="2.4" />
-      <path d="M2.5 13.5c0-2 1.6-3.4 3.5-3.4s3.5 1.4 3.5 3.4" />
-      <circle cx="11.5" cy="6.5" r="1.9" />
-      <path d="M11 10.4c1.7 0 2.9 1.2 2.9 3.1" />
+      <circle cx="6" cy="5.6" r="2.4" />
+      <path d="M2.4 13.6c0-2 1.6-3.5 3.6-3.5s3.6 1.5 3.6 3.5" />
+      <circle cx="11.6" cy="6.4" r="1.9" />
+      <path d="M11.2 10.4c1.7.1 2.9 1.3 2.9 3.2" />
     </>,
   );
 
@@ -73,6 +59,22 @@ export const IconShield = () =>
     <>
       <path d="M8 1.8 L13.2 3.6 V8 c0 3.2-2.2 5.2-5.2 6.3 C5 13.2 2.8 11.2 2.8 8 V3.6 Z" />
       <path d="M5.8 8 l1.6 1.6 3-3.2" />
+    </>,
+  );
+
+export const IconRules = () =>
+  base(
+    <>
+      <path d="M3 4h8 M3 8h10 M3 12h6" />
+      <path d="M12.2 2.6 l1.4 1.4 -2.6 2.6 -1.6.2.2-1.6 Z" />
+    </>,
+  );
+
+export const IconClock = () =>
+  base(
+    <>
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M8 4.6 V8 l2.4 1.6" />
     </>,
   );
 
@@ -85,27 +87,11 @@ export const IconServices = () =>
     </>,
   );
 
-export const IconRules = () =>
+export const IconRewrite = () =>
   base(
     <>
-      <path d="M3 4h8 M3 8h10 M3 12h6" />
-      <path d="M12.2 2.6 l1.4 1.4 -2.6 2.6 -1.6.2.2-1.6 Z" />
-    </>,
-  );
-
-export const IconSources = () =>  base(
-    <>
-      <ellipse cx="8" cy="3.8" rx="5.5" ry="2.2" />
-      <path d="M2.5 3.8 v8.4 c0 1.2 2.5 2.2 5.5 2.2 s5.5-1 5.5-2.2 V3.8" />
-      <path d="M2.5 8 c0 1.2 2.5 2.2 5.5 2.2 s5.5-1 5.5-2.2" />
-    </>,
-  );
-
-export const IconGear = () =>
-  base(
-    <>
-      <circle cx="8" cy="8" r="2.4" />
-      <path d="M8 1.6v2 M8 12.4v2 M1.6 8h2 M12.4 8h2 M3.5 3.5l1.4 1.4 M11.1 11.1l1.4 1.4 M12.5 3.5l-1.4 1.4 M4.9 11.1l-1.4 1.4" />
+      <path d="M2.5 5.5 h9 M9.5 3 l2.5 2.5 -2.5 2.5" />
+      <path d="M13.5 11.5 h-9 M6.5 9 l-2.5 2.5 2.5 2.5" />
     </>,
   );
 
@@ -118,10 +104,36 @@ export const IconUpstream = () =>
     </>,
   );
 
-export const IconRewrite = () =>
+export const IconSources = () =>
   base(
     <>
-      <path d="M2.5 5.5 h9 M9.5 3 l2.5 2.5 -2.5 2.5" />
-      <path d="M13.5 11.5 h-9 M6.5 9 l-2.5 2.5 2.5 2.5" />
+      <ellipse cx="8" cy="3.8" rx="5.5" ry="2.2" />
+      <path d="M2.5 3.8 v8.4 c0 1.2 2.5 2.2 5.5 2.2 s5.5-1 5.5-2.2 V3.8" />
+      <path d="M2.5 8 c0 1.2 2.5 2.2 5.5 2.2 s5.5-1 5.5-2.2" />
+    </>,
+  );
+
+export const IconSystem = () =>
+  base(
+    <>
+      <path d="M8 1.8 L14 4.8 8 7.8 2 4.8 Z" />
+      <path d="M2 8 L8 11 14 8" />
+      <path d="M2 11.2 L8 14.2 14 11.2" />
+    </>,
+  );
+
+export const IconSearch = () =>
+  base(
+    <>
+      <circle cx="7" cy="7" r="4.4" />
+      <path d="M10.4 10.4 L13.6 13.6" />
+    </>,
+  );
+
+export const IconGear = () =>
+  base(
+    <>
+      <circle cx="8" cy="8" r="2.4" />
+      <path d="M8 1.6v2 M8 12.4v2 M1.6 8h2 M12.4 8h2 M3.5 3.5l1.4 1.4 M11.1 11.1l1.4 1.4 M12.5 3.5l-1.4 1.4 M4.9 11.1l-1.4 1.4" />
     </>,
   );

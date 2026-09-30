@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import type { BlockedService, Client, Schedule, ServiceWindow, ServiceWindowInput } from "./api";
 import { groupServices, groupState, serviceGroupLabel, toggled, toggledGroup } from "./services";
+import Drawer from "./Drawer";
 
 const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
@@ -55,6 +56,7 @@ export default function BlockedServices(props: Props) {
   const [winEditing, setWinEditing] = createSignal<string>();
   const [winBusy, setWinBusy] = createSignal(false);
   const [winError, setWinError] = createSignal<string>();
+  const [winDrawer, setWinDrawer] = createSignal(false);
 
   const grouped = createMemo(() => groupServices(props.services, props.serviceGroups));
 
@@ -162,6 +164,7 @@ export default function BlockedServices(props: Props) {
     setWinClients([...window.clients]);
     setWinServices([...window.services]);
     setWinError(undefined);
+    setWinDrawer(true);
   }
 
   async function submitWindow(event: SubmitEvent) {
@@ -192,6 +195,7 @@ export default function BlockedServices(props: Props) {
         services: winServices(),
       });
       resetWindow();
+      setWinDrawer(false);
     } catch (cause) {
       setWinError(String(cause));
     } finally {
@@ -216,237 +220,264 @@ export default function BlockedServices(props: Props) {
   }
 
   return (
-    <section class="panel blocked-services">
-      <div class="blocked-services-head">
-        <p class="muted">Block popular online services for one profile or one client.</p>
-        <div class="scope-picker">
-          <div class="seg" role="tablist">
-            <button
-              type="button"
-              class={`seg-btn${scope().kind === "profile" ? " active" : ""}`}
-              disabled={busy()}
-              onClick={() => pick("profile", scope().kind === "profile" ? scope().name : props.defaultProfile || props.profileNames[0] || "")}
-            >
-              Whole profile
-            </button>
-            <button
-              type="button"
-              class={`seg-btn${scope().kind === "client" ? " active" : ""}`}
-              disabled={busy()}
-              onClick={() => pick("client", scope().kind === "client" ? scope().name : props.clients[0]?.name || "")}
-            >
-              Single client
-            </button>
-          </div>
-          <Show
-            when={scope().kind === "client"}
-            fallback={
-              <select
-                data-testid="services-scope"
-                value={scope().name}
-                disabled={busy()}
-                onChange={(event) => pick("profile", event.currentTarget.value)}
-              >
-                <For each={props.profileNames}>{(name) => <option value={name}>{name}</option>}</For>
-              </select>
-            }
+    <div class="view">
+      <div class="subbar">
+        <div class="seg" role="tablist">
+          <button
+            type="button"
+            class={`seg-btn${scope().kind === "profile" ? " active" : ""}`}
+            disabled={busy()}
+            onClick={() => pick("profile", scope().kind === "profile" ? scope().name : props.defaultProfile || props.profileNames[0] || "")}
           >
+            Whole profile
+          </button>
+          <button
+            type="button"
+            class={`seg-btn${scope().kind === "client" ? " active" : ""}`}
+            disabled={busy()}
+            onClick={() => pick("client", scope().kind === "client" ? scope().name : props.clients[0]?.name || "")}
+          >
+            Single client
+          </button>
+        </div>
+        <Show
+          when={scope().kind === "client"}
+          fallback={
             <select
               data-testid="services-scope"
               value={scope().name}
               disabled={busy()}
-              onChange={(event) => pick("client", event.currentTarget.value)}
+              onChange={(event) => pick("profile", event.currentTarget.value)}
             >
-              <For each={props.clients}>{(client) => <option value={client.name}>{client.name}</option>}</For>
+              <For each={props.profileNames}>{(name) => <option value={name}>{name}</option>}</For>
             </select>
-          </Show>
-        </div>
-      </div>
-
-      <div class="blocked-services-summary">
-        <Show
-          when={scope().kind === "client"}
-          fallback={
-            <p class="muted" data-testid="scope-note">
-              These services are blocked for every client on <strong>{scope().name}</strong>.
-            </p>
           }
         >
-          <p class="muted" data-testid="scope-note">
-            Blocked for <strong>{scope().name}</strong> only, on top of its profile.{" "}
-            <Show when={inheritedCount() > 0}>
-              {inheritedCount()} more come from the <strong>{clientProfile(scope().name)}</strong> profile and show as
-              locked.
-            </Show>
-          </p>
+          <select
+            data-testid="services-scope"
+            value={scope().name}
+            disabled={busy()}
+            onChange={(event) => pick("client", event.currentTarget.value)}
+          >
+            <For each={props.clients}>{(client) => <option value={client.name}>{client.name}</option>}</For>
+          </select>
         </Show>
-        <Show when={saved() && !busy()}>
-          <span class="badge saved" data-testid="services-saved">
-            saved
-          </span>
-        </Show>
-      </div>
-
-      <div class="blocked-services-toolbar">
         <input
           type="search"
-          class="service-search"
           placeholder="Search services…"
           data-testid="services-search"
           value={search()}
           onInput={(event) => setSearch(event.currentTarget.value)}
         />
         <div class="blocked-services-actions">
-          <button type="button" data-testid="services-block-all" disabled={busy()} onClick={() => blockAll(props.services.map((service) => service.id))}>
+          <button type="button" class="btn-mini" data-testid="services-block-all" disabled={busy()} onClick={() => blockAll(props.services.map((service) => service.id))}>
             Block all
           </button>
-          <button type="button" data-testid="services-unblock-all" disabled={busy()} onClick={() => unblockAll(props.services.map((service) => service.id))}>
+          <button type="button" class="btn-mini" data-testid="services-unblock-all" disabled={busy()} onClick={() => unblockAll(props.services.map((service) => service.id))}>
             Unblock all
           </button>
         </div>
+        <span class="spacer" />
+        <Show when={saved() && !busy()}>
+          <span class="badge saved" data-testid="services-saved">
+            saved
+          </span>
+        </Show>
+        <button type="button" class="btn-mini" data-testid="services-refresh" onClick={() => void refreshCatalog()}>
+          Refresh catalog
+        </button>
       </div>
 
-      <Show when={props.services.length === 0}>
-        <p class="muted">No services in the catalog yet.</p>
-      </Show>
-
-      <For each={visibleGroups()}>
-        {(group) => (
-          <div class="service-section">
-            <div class="service-section-head">
-              <h2>{serviceGroupLabel(group.group)}</h2>
-              <span class="muted service-count">
-                {group.services.filter((service) => editableIds().has(service.id) || inheritedIds().has(service.id)).length}
-                /
-                {group.services.length}
-              </span>
-              <button type="button" class="link block-link" disabled={busy()} onClick={() => blockAll(group.services.map((service) => service.id))}>
-                Block all
-              </button>
-              <button type="button" class="link unblock-link" disabled={busy()} onClick={() => unblockAll(group.services.map((service) => service.id))}>
-                Unblock all
-              </button>
-            </div>
-            <div class="service-grid">
-              <For each={group.services}>
-                {(service) => (
-                  <label
-                    class={`service-card${cardState(service).inherited ? " inherited" : ""}`}
-                    title={cardState(service).inherited ? `Blocked by the ${clientProfile(scope().name)} profile` : ""}
-                  >
-                    <Show when={service.icon_svg} fallback={<span class="service-icon service-icon-fallback">{service.name[0]}</span>}>
-                      <span class="service-icon" innerHTML={service.icon_svg} />
-                    </Show>
-                    <span class="service-name">{service.name}</span>
-                    <Show when={cardState(service).inherited}>
-                      <span class="badge profile-badge">profile</span>
-                    </Show>
-                    <input
-                      type="checkbox"
-                      class="switch"
-                      data-testid={`service-${service.id}`}
-                      checked={cardState(service).own || cardState(service).inherited}
-                      disabled={busy() || cardState(service).inherited}
-                      onChange={() => void toggle(service.id)}
-                    />
-                  </label>
-                )}
-              </For>
-            </div>
+      <div class="view-scroll">
+        <div class="view-inner" style={{ "max-width": "none" }}>
+          <div class="blocked-services-summary">
+            <Show
+              when={scope().kind === "client"}
+              fallback={
+                <p class="muted" data-testid="scope-note" style={{ "font-size": "12px" }}>
+                  These services are blocked for every client on <strong>{scope().name}</strong>.
+                </p>
+              }
+            >
+              <p class="muted" data-testid="scope-note" style={{ "font-size": "12px" }}>
+                Blocked for <strong>{scope().name}</strong> only, on top of its profile.{" "}
+                <Show when={inheritedCount() > 0}>
+                  {inheritedCount()} more come from the <strong>{clientProfile(scope().name)}</strong> profile and show as
+                  locked.
+                </Show>
+              </p>
+            </Show>
           </div>
-        )}
-      </For>
 
-      <div class="windows-section">
-        <div class="windows-head">
-          <h2>Time windows</h2>
-          <p class="muted">
-            A window changes service blocking for its clients while its schedule holds. Block adds blocks during the
-            window; allow exempts the services from the blocks that hold outside it.
-          </p>
-        </div>
-        <Show when={props.windows.length === 0}>
-          <p class="muted" data-testid="windows-empty">
-            No windows yet. Always-on toggles above are active around the clock.
-          </p>
-        </Show>
-        <ul>
-          <For each={props.windows}>
-            {(window) => (
-              <li data-testid="window-row">
-                <div>
-                  <strong>{window.name}</strong>
-                  <span class={`badge ${window.action === "allow" ? "allow-badge" : "block-badge"}`} data-testid="window-action">
-                    {window.action}
-                  </span>
-                  <span class="muted">{describeSchedule(props.schedules.find((entry) => entry.name === window.schedule))}</span>
-                  <span class="selectors">{window.clients.join(", ")}</span>
-                  <span class="selectors">
-                    {window.services.length} service{window.services.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div class="row-actions">
-                  <button type="button" data-testid="window-edit" onClick={() => editWindow(window)}>
-                    Edit
-                  </button>
-                  <button type="button" class="btn-danger" data-testid="window-delete" onClick={() => void removeWindow(window.name)}>
-                    Delete
-                  </button>
-                </div>
-              </li>
-            )}
-          </For>
-        </ul>
-
-        <form onSubmit={(event) => void submitWindow(event)}>
-          <h3>{winEditing() ? `Edit ${winEditing()}` : "New window"}</h3>
-          <div class="window-form-row">
-            <label>
-              Name
-              <input
-                data-testid="window-name"
-                value={winName()}
-                placeholder="video-time"
-                disabled={winEditing() !== undefined}
-                onInput={(event) => setWinName(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              Schedule
-              <select data-testid="window-schedule" value={winSchedule()} onInput={(event) => setWinSchedule(event.currentTarget.value)}>
-                <option value="">choose a schedule</option>
-                <For each={props.schedules}>{(entry) => <option value={entry.name}>{entry.name}</option>}</For>
-              </select>
-            </label>
-            <div class="window-action-picker">
-              <span class="muted">While the schedule holds</span>
-              <div class="seg">
-                <button
-                  type="button"
-                  class={`seg-btn${winAction() === "block" ? " active" : ""}`}
-                  data-testid="window-block"
-                  disabled={winBusy()}
-                  onClick={() => setWinAction("block")}
-                >
-                  Block
-                </button>
-                <button
-                  type="button"
-                  class={`seg-btn${winAction() === "allow" ? " active" : ""}`}
-                  data-testid="window-allow"
-                  disabled={winBusy()}
-                  onClick={() => setWinAction("allow")}
-                >
-                  Allow
-                </button>
-              </div>
-            </div>
-          </div>
-          <Show when={props.schedules.length === 0}>
-            <p class="muted">Create a schedule first; a window is only active while its schedule holds.</p>
+          <Show when={props.services.length === 0}>
+            <p class="muted">No services in the catalog yet.</p>
           </Show>
 
-          <fieldset class="services" data-testid="window-clients">
+          <For each={visibleGroups()}>
+            {(group) => (
+              <div class="service-section">
+                <div class="service-section-head">
+                  <h2>{serviceGroupLabel(group.group)}</h2>
+                  <span class="service-count">
+                    {group.services.filter((service) => editableIds().has(service.id) || inheritedIds().has(service.id)).length}
+                    /
+                    {group.services.length}
+                  </span>
+                  <button type="button" class="btn-mini" disabled={busy()} onClick={() => blockAll(group.services.map((service) => service.id))}>
+                    Block all
+                  </button>
+                  <button type="button" class="btn-mini" disabled={busy()} onClick={() => unblockAll(group.services.map((service) => service.id))}>
+                    Unblock all
+                  </button>
+                </div>
+                <div class="service-grid">
+                  <For each={group.services}>
+                    {(service) => (
+                      <label
+                        class={`service-card${cardState(service).inherited ? " inherited" : ""}`}
+                        title={cardState(service).inherited ? `Blocked by the ${clientProfile(scope().name)} profile` : ""}
+                      >
+                        <Show when={service.icon_svg} fallback={<span class="service-icon service-icon-fallback">{service.name[0]}</span>}>
+                          <span class="service-icon" innerHTML={service.icon_svg} />
+                        </Show>
+                        <span class="service-name">{service.name}</span>
+                        <Show when={cardState(service).inherited}>
+                          <span class="badge profile">profile</span>
+                        </Show>
+                        <input
+                          type="checkbox"
+                          class="switch"
+                          data-testid={`service-${service.id}`}
+                          checked={cardState(service).own || cardState(service).inherited}
+                          disabled={busy() || cardState(service).inherited}
+                          onChange={() => void toggle(service.id)}
+                        />
+                      </label>
+                    )}
+                  </For>
+                </div>
+              </div>
+            )}
+          </For>
+
+          <section class="sheet" style={{ "margin-top": "22px" }}>
+            <div class="sheet-head">
+              <h2>Time windows</h2>
+              <span class="muted" style={{ "font-size": "11.5px", "margin-right": "12px" }}>
+                A window changes service blocking for its clients while its schedule holds.
+              </span>
+              <button type="button" class="btn-mini" onClick={() => { resetWindow(); setWinDrawer(true); }}>
+                + New window
+              </button>
+            </div>
+            <Show when={winError()}>
+              <p class="error" style={{ margin: "10px 16px" }}>
+                {winError()}
+              </p>
+            </Show>
+            <Show when={props.windows.length === 0}>
+              <p class="muted" data-testid="windows-empty" style={{ padding: "12px 16px" }}>
+                No windows yet. Always-on toggles above are active around the clock.
+              </p>
+            </Show>
+            <ul style={{ "list-style": "none", padding: "10px 12px", display: "flex", "flex-direction": "column", gap: "8px" }}>
+              <For each={props.windows}>
+                {(window) => (
+                  <li
+                    data-testid="window-row"
+                    style={{
+                      display: "flex",
+                      "align-items": "center",
+                      "justify-content": "space-between",
+                      gap: "12px",
+                      padding: "9px 12px",
+                      border: "1px solid var(--line)",
+                      "border-radius": "12px",
+                      background: "var(--surface-2)",
+                    }}
+                  >
+                    <div style={{ display: "flex", "flex-direction": "column", gap: "2px", "min-width": "0" }}>
+                      <span class="entry-title">
+                        {window.name}
+                        <span class={`badge ${window.action === "allow" ? "allow" : "block"}`} data-testid="window-action">
+                          {window.action}
+                        </span>
+                      </span>
+                      <span class="entry-sub">
+                        {describeSchedule(props.schedules.find((entry) => entry.name === window.schedule))}
+                        {" · "}
+                        {window.clients.join(", ")}
+                        {" · "}
+                        {window.services.length} service{window.services.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div class="row-actions">
+                      <button type="button" class="btn-mini" data-testid="window-edit" onClick={() => editWindow(window)}>
+                        Edit
+                      </button>
+                      <button type="button" class="btn-mini" data-testid="window-delete" onClick={() => void removeWindow(window.name)}>
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </section>
+
+          {error() ? <p class="error">{error()}</p> : null}
+        </div>
+      </div>
+
+      <Drawer open={winDrawer()} title={winEditing() ? `Edit ${winEditing()}` : "New window"} onClose={() => setWinDrawer(false)}>
+        <form onSubmit={(event) => void submitWindow(event)} style={{ display: "contents" }}>
+          <label>
+            Name
+            <input
+              data-testid="window-name"
+              value={winName()}
+              placeholder="video-time"
+              disabled={winEditing() !== undefined}
+              onInput={(event) => setWinName(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            Schedule
+            <select data-testid="window-schedule" value={winSchedule()} onInput={(event) => setWinSchedule(event.currentTarget.value)}>
+              <option value="">choose a schedule</option>
+              <For each={props.schedules}>{(entry) => <option value={entry.name}>{entry.name}</option>}</For>
+            </select>
+          </label>
+          <Show when={props.schedules.length === 0}>
+            <p class="muted" style={{ "font-size": "11.5px" }}>
+              Create a schedule first; a window is only active while its schedule holds.
+            </p>
+          </Show>
+          <div class="window-action-picker">
+            <span>While the schedule holds</span>
+            <div class="seg">
+              <button
+                type="button"
+                class={`seg-btn${winAction() === "block" ? " active" : ""}`}
+                data-testid="window-block"
+                disabled={winBusy()}
+                onClick={() => setWinAction("block")}
+              >
+                Block
+              </button>
+              <button
+                type="button"
+                class={`seg-btn${winAction() === "allow" ? " active" : ""}`}
+                data-testid="window-allow"
+                disabled={winBusy()}
+                onClick={() => setWinAction("allow")}
+              >
+                Allow
+              </button>
+            </div>
+          </div>
+
+          <fieldset class="services" data-testid="window-clients" style={{ width: "100%" }}>
             <legend>Clients</legend>
             <Show when={props.clients.length === 0}>
               <p class="muted">No clients yet.</p>
@@ -467,82 +498,76 @@ export default function BlockedServices(props: Props) {
             </For>
           </fieldset>
 
-          <fieldset class="services" data-testid="window-services">
+          <fieldset class="services" data-testid="window-services" style={{ width: "100%" }}>
             <legend>Services</legend>
             <Show when={props.services.length === 0}>
               <p class="muted">No services in the catalog yet.</p>
             </Show>
-            <For each={groupServices(props.services, props.serviceGroups)}>
-              {(group) => {
-                const key = group.group || "other";
-                const ids = group.services.map((service) => service.id);
-                const state = () => groupState(ids, winServices());
-                const count = () => ids.filter((id) => winServices().includes(id)).length;
-                const open = () => !winCollapsed().includes(key);
-                return (
-                  <div class="window-group">
-                    <div class="group-head">
-                      <label class="toggle">
-                        <input
-                          type="checkbox"
-                          data-testid={`window-group-${key}`}
-                          checked={state() === "all"}
-                          disabled={winBusy()}
-                          onChange={() => setWinServices((current) => toggledGroup(current, ids))}
-                        />
-                        <strong>{serviceGroupLabel(group.group)}</strong>
-                      </label>
-                      <span class="muted">
-                        {count()}/{ids.length}
-                      </span>
-                      <button type="button" class="btn-ghost" data-testid={`window-expand-${key}`} onClick={() => toggleCollapsed(key)}>
-                        {open() ? "Hide" : "Show"}
-                      </button>
-                    </div>
-                    <Show when={open()}>
-                      <div class="group-services">
-                        <For each={group.services}>
-                          {(service) => (
-                            <label class="toggle">
-                              <input
-                                type="checkbox"
-                                data-testid={`window-service-${service.id}`}
-                                checked={winServices().includes(service.id)}
-                                disabled={winBusy()}
-                                onChange={() => setWinServices((current) => toggled(current, service.id))}
-                              />
-                              {service.name}
-                            </label>
-                          )}
-                        </For>
+            <div style={{ display: "flex", "flex-direction": "column", gap: "10px", width: "100%" }}>
+              <For each={groupServices(props.services, props.serviceGroups)}>
+                {(group) => {
+                  const key = group.group || "other";
+                  const ids = group.services.map((service) => service.id);
+                  const state = () => groupState(ids, winServices());
+                  const count = () => ids.filter((id) => winServices().includes(id)).length;
+                  const open = () => !winCollapsed().includes(key);
+                  return (
+                    <div class="window-group">
+                      <div class="group-head">
+                        <label class="toggle">
+                          <input
+                            type="checkbox"
+                            data-testid={`window-group-${key}`}
+                            checked={state() === "all"}
+                            disabled={winBusy()}
+                            onChange={() => setWinServices((current) => toggledGroup(current, ids))}
+                          />
+                          <strong>{serviceGroupLabel(group.group)}</strong>
+                        </label>
+                        <span class="muted">
+                          {count()}/{ids.length}
+                        </span>
+                        <button type="button" class="btn-mini" data-testid={`window-expand-${key}`} onClick={() => toggleCollapsed(key)}>
+                          {open() ? "Hide" : "Show"}
+                        </button>
                       </div>
-                    </Show>
-                  </div>
-                );
-              }}
-            </For>
+                      <Show when={open()}>
+                        <div class="group-services">
+                          <For each={group.services}>
+                            {(service) => (
+                              <label class="toggle">
+                                <input
+                                  type="checkbox"
+                                  data-testid={`window-service-${service.id}`}
+                                  checked={winServices().includes(service.id)}
+                                  disabled={winBusy()}
+                                  onChange={() => setWinServices((current) => toggled(current, service.id))}
+                                />
+                                {service.name}
+                              </label>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                    </div>
+                  );
+                }}
+              </For>
+            </div>
           </fieldset>
 
-          <div class="row-actions">
-            <button type="submit" data-testid="window-save" disabled={winBusy()}>
-              Save window
-            </button>
+          <div class="row-actions" style={{ "justify-content": "flex-end" }}>
             <Show when={winEditing()}>
-              <button type="button" onClick={resetWindow}>
-                Cancel
+              <button type="button" class="btn-danger" onClick={() => void removeWindow(winEditing()!)}>
+                Delete
               </button>
             </Show>
+            <button type="submit" class="btn" data-testid="window-save" disabled={winBusy()}>
+              Save window
+            </button>
           </div>
-          {winError() ? <p class="error">{winError()}</p> : null}
         </form>
-      </div>
-
-      <div class="row-actions">
-        <button type="button" data-testid="services-refresh" onClick={() => void refreshCatalog()}>
-          Refresh catalog
-        </button>
-      </div>
-      {error() ? <p class="error">{error()}</p> : null}
-    </section>
+      </Drawer>
+    </div>
   );
 }

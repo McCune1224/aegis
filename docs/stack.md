@@ -59,22 +59,22 @@ sqlc's SQLite engine covers ordinary CRUD and filtering well. Its type inference
 | Framework | `solid-js@2.0.0-rc.8` | Pin exactly. Pre-release, API frozen at RC. |
 | Build | Vite | With `@solidjs/vite-plugin`. |
 | Router | `@solidjs/router` | Track the `next` dist-tag for Solid 2. |
-| WebGL renderer | `pixi.js@8.x` | 8.16.0 current. WebGL and WebGPU, canvas fallback. |
+| Constellation graph | SVG, own layer over `elkjs` | Was `pixi.js` WebGL sprites; the Swiss rebuild replaced glow sprites with crisp vector markers and removed the dependency. |
 | Graph layout | `elkjs` | Layered DAG layout, which matches a DNS pipeline. |
 | Time series charts | `uplot` | Roughly 45KB, fast at high point counts. |
 | Tests | `vitest` + `@solidjs/testing-library@next` | |
-| E2E | `playwright` | The verification surface for the WebGL UI. |
+| E2E | `playwright` | The verification surface for the SVG graph UI. |
 | Types | `typescript` | Strict mode. |
 
 ### Solid 2 risk and mitigation
 
 `solid-js@2.0.0-rc.8` is a release candidate, not a stable release. All runtime packages are ESM-only and require Node >= 22.12. Local Node is v22.23.1, so that is satisfied. Ancillary packages (`@solidjs/router`, `solid-primitives`, testing library) are mid-migration and may need `next` tags.
 
-Exposure is limited because there is no mature Solid-native node graph library to depend on. The graph canvas is our own code over PixiJS, so the surface area touching Solid is signals, stores, and JSX. If RC churn becomes a tax before stable, dropping to Solid 1.9.x touches component code but not the renderer.
+Exposure is limited because there is no mature Solid-native node graph library to depend on. The graph is our own SVG layer over elkjs, so the surface area touching Solid is signals, stores, and JSX. If RC churn becomes a tax before stable, dropping to Solid 1.9.x touches component code but not the renderer.
 
 ### Why we own the graph layer
 
-React Flow has no Solid equivalent at parity. The graph is the product's differentiator, so owning it is the intent rather than a fallback. The Solid layer holds graph state in signals and stores. The PixiJS layer renders nodes, edges, and query-flow particles. Layout comes from elkjs. Interaction is translated from DOM pointer events into graph coordinates.
+React Flow has no Solid equivalent at parity. The graph is the product's differentiator, so owning it is the intent rather than a fallback. The Solid layer holds graph state in signals and stores. The SVG layer renders nodes, edges, and query-flow markers. Layout comes from elkjs. Interaction is translated from DOM pointer events into graph coordinates.
 
 ## Repository layout
 

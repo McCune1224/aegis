@@ -1,5 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import { previewSource, refreshSource, type CatalogEntry, type Source, type SourceInput, type SourcePreview } from "./api";
+import DataTable, { type Column } from "./DataTable";
+import Drawer from "./Drawer";
 
 const formats = ["hosts", "domains", "adblock"];
 
@@ -58,6 +60,7 @@ export default function Sources(props: Props) {
   const [busy, setBusy] = createSignal(false);
   const [preview, setPreview] = createSignal<SourcePreview>();
   const [working, setWorking] = createSignal("");
+  const [drawer, setDrawer] = createSignal(false);
 
   function pickCatalog(entry: string) {
     const known = props.catalog.find((item) => item.name === entry);
@@ -67,13 +70,6 @@ export default function Sources(props: Props) {
     setName(known.name);
     setUrl(known.url);
     setFormat(known.format);
-  }
-
-  function reset() {
-    setName("");
-    setUrl("");
-    setFormat("hosts");
-    setHours("");
   }
 
   async function submit(event: SubmitEvent) {
@@ -92,7 +88,11 @@ export default function Sources(props: Props) {
         enabled: true,
         refresh_seconds: Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 3600) : undefined,
       });
-      reset();
+      setName("");
+      setUrl("");
+      setFormat("hosts");
+      setHours("");
+      setDrawer(false);
     } catch (cause) {
       setError(String(cause));
     } finally {
@@ -145,89 +145,158 @@ export default function Sources(props: Props) {
     }
   }
 
-  return (
-    <div class="screen-inner">
-      <section class="panel">
-        <header>
-          <h2>Sources</h2>
-        </header>
-        <ul>
-          <For each={props.sources}>
-            {(source) => (
-              <li data-testid="source-row">
-                <div>
-                  <strong>{source.name}</strong>
-                  <span class="muted">
-                    {source.format} · {source.rule_count} rules
-                    {source.skipped > 0 ? ` · ${source.skipped} skipped` : ""} · {fetchTime(source)}
-                    {schedule(source) ? ` · ${schedule(source)}` : ""}
-                  </span>
-                  <span class="selectors">{source.url}</span>
-                  <Show when={source.last_error}>
-                    <p class="error" data-testid="source-fetch-error">
-                      {source.last_error}
-                    </p>
-                  </Show>
-                  <Show when={preview()?.name === source.name}>
-                    <div class="preview" data-testid="source-preview">
-                      <Show when={preview()?.notModified}>
-                        <p class="muted">the remote list has not changed</p>
-                      </Show>
-                      <Show when={!preview()?.notModified}>
-                        <p class="muted">a refresh would add {preview()?.added.length} and remove {preview()?.removed.length} domains</p>
-                        <Show when={(preview()?.added.length ?? 0) > 0}>
-                          <span class="selectors">adding: {preview()?.added.join(", ")}</span>
-                        </Show>
-                        <Show when={(preview()?.removed.length ?? 0) > 0}>
-                          <span class="selectors">removing: {preview()?.removed.join(", ")}</span>
-                        </Show>
-                      </Show>
-                    </div>
-                  </Show>
-                </div>
-                <div class="row-actions">
-                  <span class={`badge ${health(source).kind}`} data-testid="source-health">
-                    {health(source).label}
-                  </span>
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    disabled={working() === source.name}
-                    onClick={() => void runPreview(source.name)}
-                  >
-                    Preview
-                  </button>
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    data-testid="source-refresh"
-                    disabled={working() === source.name}
-                    onClick={() => void refresh(source.name)}
-                  >
-                    Refresh
-                  </button>
-                  <label>
-                    <input
-                      type="checkbox"
-                      data-testid="source-toggle"
-                      checked={source.enabled}
-                      onChange={(event) => void toggle(source, event.currentTarget.checked)}
-                    />
-                    enabled
-                  </label>
-                  <button type="button" class="btn-danger" onClick={() => void remove(source.name)}>
-                    Delete
-                  </button>
-                </div>
-              </li>
-            )}
-          </For>
-        </ul>
-      </section>
+  const columns: Column<Source>[] = [
+    {
+      key: "name",
+      label: "Source",
+      sortable: true,
+      value: (source) => source.name,
+      render: (source) => (
+        <div style={{ display: "flex", "flex-direction": "column", gap: "2px" }}>
+          <span class="mono">{source.name}</span>
+          <span class="selectors">{source.url}</span>
+          <Show when={source.last_error}>
+            <p class="error" data-testid="source-fetch-error" style={{ "margin-top": "4px" }}>
+              {source.last_error}
+            </p>
+          </Show>
+          <Show when={preview()?.name === source.name}>
+            <div class="preview" data-testid="source-preview">
+              <Show when={preview()?.notModified}>
+                <p class="muted">the remote list has not changed</p>
+              </Show>
+              <Show when={!preview()?.notModified}>
+                <p class="muted">a refresh would add {preview()?.added.length} and remove {preview()?.removed.length} domains</p>
+                <Show when={(preview()?.added.length ?? 0) > 0}>
+                  <span class="selectors">adding: {preview()?.added.join(", ")}</span>
+                </Show>
+                <Show when={(preview()?.removed.length ?? 0) > 0}>
+                  <span class="selectors">removing: {preview()?.removed.join(", ")}</span>
+                </Show>
+              </Show>
+            </div>
+          </Show>
+        </div>
+      ),
+    },
+    {
+      key: "format",
+      label: "Format",
+      sortable: true,
+      value: (source) => source.format,
+      render: (source) => <span class="badge kind">{source.format}</span>,
+    },
+    {
+      key: "rules",
+      label: "Rules",
+      sortable: true,
+      value: (source) => source.rule_count,
+      render: (source) => (
+        <span class="mono">
+          {source.rule_count}
+          <Show when={source.skipped > 0}>
+            <span class="muted"> · {source.skipped} skipped</span>
+          </Show>
+        </span>
+      ),
+    },
+    {
+      key: "fetched",
+      label: "Last fetch",
+      sortable: true,
+      value: (source) => source.last_fetch ?? "",
+      render: (source) => (
+        <span class="muted" style={{ "font-size": "11.5px" }}>
+          {fetchTime(source)}
+          {schedule(source) ? ` · ${schedule(source)}` : ""}
+        </span>
+      ),
+    },
+    {
+      key: "health",
+      label: "Health",
+      value: (source) => health(source).label,
+      render: (source) => (
+        <span class={`badge ${health(source).kind}`} data-testid="source-health">
+          {health(source).label}
+        </span>
+      ),
+    },
+    {
+      key: "enabled",
+      label: "On",
+      value: (source) => (source.enabled ? 1 : 0),
+      render: (source) => (
+        <input
+          type="checkbox"
+          class="switch"
+          data-testid="source-toggle"
+          checked={source.enabled}
+          onChange={(event) => void toggle(source, event.currentTarget.checked)}
+        />
+      ),
+    },
+    {
+      key: "actions",
+      label: "",
+      value: () => "",
+      render: (source) => (
+        <div class="row-actions">
+          <button
+            type="button"
+            class="btn-mini"
+            disabled={working() === source.name}
+            onClick={() => void runPreview(source.name)}
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            class="btn-mini"
+            data-testid="source-refresh"
+            disabled={working() === source.name}
+            onClick={() => void refresh(source.name)}
+          >
+            Refresh
+          </button>
+          <button type="button" class="btn-mini" onClick={() => void remove(source.name)}>
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ];
 
-      <section class="panel">
-        <form onSubmit={(event) => void submit(event)}>
-          <h2>New source</h2>
+  return (
+    <>
+      <div class="view">
+        <div class="subbar">
+          <h2 style={{ "font-size": "10.5px", "letter-spacing": "0.13em", "text-transform": "uppercase", color: "var(--text-2)", "font-weight": "650", "margin-right": "auto" }}>
+            {props.sources.length} sources
+          </h2>
+          <button type="button" class="btn" data-testid="sources-new" onClick={() => setDrawer(true)}>
+            + New source
+          </button>
+        </div>
+        <Show when={error()}>
+          <p class="alert-line error-line" role="alert">
+            {error()}
+          </p>
+        </Show>
+        <div style={{ flex: "1", "min-height": "0", overflow: "auto" }}>
+          <DataTable
+            columns={columns}
+            rows={props.sources}
+            rowKey={(source) => source.name}
+            testid="source-rows"
+            rowTestid={() => "source-row"}
+            empty="no sources yet — add a blocklist below"
+          />
+        </div>
+      </div>
+
+      <Drawer open={drawer()} title="New source" onClose={() => setDrawer(false)}>
+        <form onSubmit={(event) => void submit(event)} style={{ display: "contents" }}>
           <label>
             Known list
             <select data-testid="source-catalog" value="" onChange={(event) => pickCatalog(event.currentTarget.value)}>
@@ -264,14 +333,14 @@ export default function Sources(props: Props) {
               onInput={(event) => setHours(event.currentTarget.value)}
             />
           </label>
-          <div class="row-actions">
-            <button type="submit" data-testid="source-save" disabled={busy()}>
+          {error() ? <p class="error">{error()}</p> : null}
+          <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+            <button type="submit" class="btn" data-testid="source-save" disabled={busy()}>
               Save
             </button>
           </div>
-          {error() ? <p class="error">{error()}</p> : null}
         </form>
-      </section>
-    </div>
+      </Drawer>
+    </>
   );
 }
