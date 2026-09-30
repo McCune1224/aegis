@@ -471,3 +471,10 @@ func TestAQueriedNameAppearsInTheQueryLogEndpoint(t *testing.T) {
 	require.Contains(t, body, "ads.example.com")
 	require.Contains(t, body, "127.0.0.1")
 }
+
+func TestAQueryLogNameThatIsNotADomainIsRefused(t *testing.T) {
+	h := startHarness(t)
+
+	status, body := h.do(t, http.MethodGet, "/api/v1/queries?name=**bad**", "")
+	require.Equal(t, http.StatusBadRequest, status, body)
+}
