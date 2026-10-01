@@ -8,7 +8,7 @@ API_ADDRESS ?= 127.0.0.1:8080
 DNS_ADDRESS ?= 127.0.0.1:15353
 DEV_DB ?= bin/dev.db
 
-.PHONY: build server test check gen fmt vet lint mutants tools crossbuild clean web dev run
+.PHONY: build server test check gen fmt vet lint mutants tools crossbuild clean web dev run media
 
 build: web
 	$(GO) build -o $(BIN) ./cmd/aegis
@@ -85,6 +85,11 @@ mutants:
 	@for p in ./internal/filter ./internal/blocklist ./internal/services ./internal/metrics ./internal/ratelimit ./internal/config; do \
 		gremlins unleash $$p || exit 1; \
 	done
+
+# media regenerates the images in README.md and docs/. It needs the built binary,
+# the built web bundle inside it, dig, and a Chromium to drive.
+media: build
+	node scripts/media/shoot.mjs
 
 tools:
 	$(GO) install github.com/pressly/goose/v3/cmd/goose@latest
