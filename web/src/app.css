@@ -545,11 +545,15 @@ button {
    border-right: none;
 }
 
+/* The active rule has to out-specify the hover rule. `:hover:not(:disabled)`
+   is 0,3,0, so a plain `.seg-btn.active` at 0,2,0 loses to it and hovering the
+   selected segment paints ink on ink and the label disappears. */
 .seg-btn:hover:not(:disabled) {
    color: var(--ink);
 }
 
-.seg-btn.active {
+.seg-btn.active,
+.seg-btn.active:hover:not(:disabled) {
    background: var(--ink);
    color: var(--paper);
 }
