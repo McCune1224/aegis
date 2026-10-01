@@ -76,6 +76,21 @@ cannot nest inside a button, so an entry is now a `div` with `role="button"`,
 a `tabindex`, and Enter and Space handling. The action row stops propagation,
 so clicking Edit does not also select the row.
 
+## Confirming and reporting
+
+Two verbs need saying out loud before the record is complete.
+
+- **Delete arms first.** The first press reads Confirm delete, the second
+  fires, and it disarms after four seconds. A one-click delete beside
+  Duplicate is a misclick waiting to happen, and a dialog on every row is
+  heavier than the mistake it prevents. Each button also names its row, so a
+  column reads Delete ads.example.com rather than Delete, Delete, Delete.
+- **Every write says what it is doing.** `crud.run` carries a `SaveState`,
+  and `SaveStatus` renders it beside the Save button. Saving stays while the
+  request runs and is announced with `aria-busy`; saved clears itself after
+  2.5 seconds so the badge never becomes decoration. A failed run leaves no
+  badge and shows the error instead.
+
 ## Not in this contract
 
 Blocked services is a different shape on top of its window list: a scope picker
