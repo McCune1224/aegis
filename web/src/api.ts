@@ -1,8 +1,8 @@
 export type Profile = {
-  name: string;
-  extends?: string;
-  mode?: string;
-  custom?: string;
+   name: string;
+   extends?: string;
+   mode?: string;
+   custom?: string;
 };
 
 // BLOCKING_MODES is the vocabulary the server accepts for a profile's mode, in
@@ -10,277 +10,277 @@ export type Profile = {
 export const BLOCKING_MODES = ["nxdomain", "null-address", "custom-address", "refused"] as const;
 
 export type Client = {
-  name: string;
-  profile: string;
-  notes: string;
-  addresses: string[];
-  macs: string[];
-  prefixes: string[];
+   name: string;
+   profile: string;
+   notes: string;
+   addresses: string[];
+   macs: string[];
+   prefixes: string[];
 };
 
 // A blank field means inherit or none, so only the fields that were set travel
 // on the wire.
 export type ProfileInput = {
-  extends?: string;
-  mode?: string;
-  custom?: string;
+   extends?: string;
+   mode?: string;
+   custom?: string;
 };
 
 export type ClientInput = {
-  profile: string;
-  notes: string;
-  addresses: string[];
-  macs: string[];
-  prefixes: string[];
+   profile: string;
+   notes: string;
+   addresses: string[];
+   macs: string[];
+   prefixes: string[];
 };
 
 export type Source = {
-  name: string;
-  url: string;
-  format: string;
-  enabled: boolean;
-  last_fetch?: string;
-  last_error?: string;
-  rule_count: number;
-  skipped: number;
-  failures: number;
-  refresh_seconds: number;
+   name: string;
+   url: string;
+   format: string;
+   enabled: boolean;
+   last_fetch?: string;
+   last_error?: string;
+   rule_count: number;
+   skipped: number;
+   failures: number;
+   refresh_seconds: number;
 };
 
 // Absent fields keep what is stored, so a one-field body toggles or repoints a
 // source without resending the rest.
 export type SourceInput = {
-  url?: string;
-  format?: string;
-  enabled?: boolean;
-  refresh_seconds?: number;
+   url?: string;
+   format?: string;
+   enabled?: boolean;
+   refresh_seconds?: number;
 };
 
 export type CatalogEntry = {
-  name: string;
-  url: string;
-  format: string;
+   name: string;
+   url: string;
+   format: string;
 };
 
 export type Rule = {
-  id: number;
-  domain: string;
-  kind: string;
-  action: string;
-  schedule?: string;
-  client?: string;
-  notes?: string;
-  created?: string;
+   id: number;
+   domain: string;
+   kind: string;
+   action: string;
+   schedule?: string;
+   client?: string;
+   notes?: string;
+   created?: string;
 };
 
 // A rule has no inherited fields, so every field the body names is replaced and
 // the rest survive. A schedule keeps the rule active only while its windows
 // cover the query minute, and a client scopes it to one identity.
 export type RuleInput = {
-  domain?: string;
-  kind?: string;
-  action?: string;
-  schedule?: string;
-  client?: string;
-  notes?: string;
+   domain?: string;
+   kind?: string;
+   action?: string;
+   schedule?: string;
+   client?: string;
+   notes?: string;
 };
 
 export type ScheduleWindow = {
-  days: number[];
-  start: string;
-  end: string;
+   days: number[];
+   start: string;
+   end: string;
 };
 
 export type Schedule = {
-  name: string;
-  priority: number;
-  windows: ScheduleWindow[];
+   name: string;
+   priority: number;
+   windows: ScheduleWindow[];
 };
 
 export type ScheduleInput = {
-  priority: number;
-  windows: ScheduleWindow[];
+   priority: number;
+   windows: ScheduleWindow[];
 };
 
 export type Status = {
-  upstreams: string[];
-  rules?: number;
+   upstreams: string[];
+   rules?: number;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  if (!response.ok) {
-    throw new Error(await errorMessage(response));
-  }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  return (await response.json()) as T;
+   const response = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...init,
+   });
+   if (!response.ok) {
+      throw new Error(await errorMessage(response));
+   }
+   if (response.status === 204) {
+      return undefined as T;
+   }
+   return (await response.json()) as T;
 }
 
 async function errorMessage(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: string };
-    return body.error ?? `HTTP ${response.status}`;
-  } catch {
-    return `HTTP ${response.status}`;
-  }
+   try {
+      const body = (await response.json()) as { error?: string };
+      return body.error ?? `HTTP ${response.status}`;
+   } catch {
+      return `HTTP ${response.status}`;
+   }
 }
 
 export function getStatus(): Promise<Status> {
-  return request<Status>("/api/v1/status");
+   return request<Status>("/api/v1/status");
 }
 
 export function listProfiles(): Promise<Profile[]> {
-  return request<Profile[]>("/api/v1/profiles");
+   return request<Profile[]>("/api/v1/profiles");
 }
 
 export function saveProfile(name: string, input: ProfileInput): Promise<Profile> {
-  const body: Record<string, string> = {};
-  if (input.extends) body.extends = input.extends;
-  if (input.mode) body.mode = input.mode;
-  if (input.custom) body.custom = input.custom;
-  return request<Profile>(`/api/v1/profiles/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
+   const body: Record<string, string> = {};
+   if (input.extends) body.extends = input.extends;
+   if (input.mode) body.mode = input.mode;
+   if (input.custom) body.custom = input.custom;
+   return request<Profile>(`/api/v1/profiles/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+   });
 }
 
 export function deleteProfile(name: string): Promise<void> {
-  return request<void>(`/api/v1/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
+   return request<void>(`/api/v1/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 export type BlockedService = {
-  id: string;
-  name: string;
-  group: string;
-  rule_count: number;
-  icon_svg?: string;
-  profiles: string[];
-  clients: string[];
+   id: string;
+   name: string;
+   group: string;
+   rule_count: number;
+   icon_svg?: string;
+   profiles: string[];
+   clients: string[];
 };
 
 export type ServiceCatalog = {
-  services: BlockedService[];
-  groups: string[];
-  fetched_at?: string;
+   services: BlockedService[];
+   groups: string[];
+   fetched_at?: string;
 };
 
 export type ProfileServices = {
-  profile: string;
-  services: string[];
+   profile: string;
+   services: string[];
 };
 
 export type ClientServices = {
-  client: string;
-  services: string[];
+   client: string;
+   services: string[];
 };
 
 export function listServices(): Promise<ServiceCatalog> {
-  return request<ServiceCatalog>("/api/v1/services");
+   return request<ServiceCatalog>("/api/v1/services");
 }
 
 export function listProfileServices(name: string): Promise<ProfileServices> {
-  return request<ProfileServices>(`/api/v1/profiles/${encodeURIComponent(name)}/services`);
+   return request<ProfileServices>(`/api/v1/profiles/${encodeURIComponent(name)}/services`);
 }
 
 // saveProfileServices replaces the whole set of services one profile blocks.
 export function saveProfileServices(name: string, services: string[]): Promise<ProfileServices> {
-  return request<ProfileServices>(`/api/v1/profiles/${encodeURIComponent(name)}/services`, {
-    method: "PUT",
-    body: JSON.stringify({ services }),
-  });
+   return request<ProfileServices>(`/api/v1/profiles/${encodeURIComponent(name)}/services`, {
+      method: "PUT",
+      body: JSON.stringify({ services }),
+   });
 }
 
 export function listClientServices(name: string): Promise<ClientServices> {
-  return request<ClientServices>(`/api/v1/clients/${encodeURIComponent(name)}/services`);
+   return request<ClientServices>(`/api/v1/clients/${encodeURIComponent(name)}/services`);
 }
 
 // saveClientServices replaces the whole set of services one client blocks for
 // itself, on top of what its profile blocks.
 export function saveClientServices(name: string, services: string[]): Promise<ClientServices> {
-  return request<ClientServices>(`/api/v1/clients/${encodeURIComponent(name)}/services`, {
-    method: "PUT",
-    body: JSON.stringify({ services }),
-  });
+   return request<ClientServices>(`/api/v1/clients/${encodeURIComponent(name)}/services`, {
+      method: "PUT",
+      body: JSON.stringify({ services }),
+   });
 }
 
 export function refreshServices(): Promise<void> {
-  return request<void>("/api/v1/services/refresh", { method: "POST" });
+   return request<void>("/api/v1/services/refresh", { method: "POST" });
 }
 
 export type SafesearchEngine = {
-  id: string;
-  name: string;
-  rule_count: number;
-  profiles: string[];
+   id: string;
+   name: string;
+   rule_count: number;
+   profiles: string[];
 };
 
 export type SafesearchCatalog = {
-  engines: SafesearchEngine[];
+   engines: SafesearchEngine[];
 };
 
 export type ProfileSafesearch = {
-  profile: string;
-  engines: string[];
+   profile: string;
+   engines: string[];
 };
 
 export function listSafesearch(): Promise<SafesearchCatalog> {
-  return request<SafesearchCatalog>("/api/v1/safesearch");
+   return request<SafesearchCatalog>("/api/v1/safesearch");
 }
 
 // saveProfileSafesearch replaces the whole set of engines one profile enforces.
 export function saveProfileSafesearch(name: string, engines: string[]): Promise<ProfileSafesearch> {
-  return request<ProfileSafesearch>(`/api/v1/profiles/${encodeURIComponent(name)}/safesearch`, {
-    method: "PUT",
-    body: JSON.stringify({ engines }),
-  });
+   return request<ProfileSafesearch>(`/api/v1/profiles/${encodeURIComponent(name)}/safesearch`, {
+      method: "PUT",
+      body: JSON.stringify({ engines }),
+   });
 }
 
 export function getDefaultProfile(): Promise<{ profile: string }> {
-  return request<{ profile: string }>("/api/v1/default-profile");
+   return request<{ profile: string }>("/api/v1/default-profile");
 }
 
 export function setDefaultProfile(profile: string): Promise<{ profile: string }> {
-  return request<{ profile: string }>("/api/v1/default-profile", {
-    method: "PUT",
-    body: JSON.stringify({ profile }),
-  });
+   return request<{ profile: string }>("/api/v1/default-profile", {
+      method: "PUT",
+      body: JSON.stringify({ profile }),
+   });
 }
 
 export type Lease = {
-  address: string;
-  mac: string;
-  client?: string;
-  hostname?: string;
-  expires: number;
+   address: string;
+   mac: string;
+   client?: string;
+   hostname?: string;
+   expires: number;
 };
 
 export type Discovery = {
-  mac: string;
-  address: string;
-  hostname?: string;
-  first: number;
-  last: number;
+   mac: string;
+   address: string;
+   hostname?: string;
+   first: number;
+   last: number;
 };
 
 export function listLeases(): Promise<{ leases: Lease[] }> {
-  return request<{ leases: Lease[] }>("/api/v1/leases");
+   return request<{ leases: Lease[] }>("/api/v1/leases");
 }
 
 export function listDiscoveries(): Promise<{ discoveries: Discovery[] }> {
-  return request<{ discoveries: Discovery[] }>("/api/v1/discoveries");
+   return request<{ discoveries: Discovery[] }>("/api/v1/discoveries");
 }
 
 export function dismissDiscovery(mac: string): Promise<void> {
-  return request<void>(`/api/v1/discoveries/${encodeURIComponent(mac)}`, { method: "DELETE" });
+   return request<void>(`/api/v1/discoveries/${encodeURIComponent(mac)}`, { method: "DELETE" });
 }
 
 export function listClients(): Promise<Client[]> {
-  return request<Client[]>("/api/v1/clients");
+   return request<Client[]>("/api/v1/clients");
 }
 
 export type Observed = {
@@ -295,85 +295,89 @@ export function listObserved(): Promise<Observed[]> {
 }
 
 export function saveClient(name: string, input: ClientInput): Promise<Client> {
-  return request<Client>(`/api/v1/clients/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
+   return request<Client>(`/api/v1/clients/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+   });
 }
 
 export function deleteClient(name: string): Promise<void> {
-  return request<void>(`/api/v1/clients/${encodeURIComponent(name)}`, { method: "DELETE" });
+   return request<void>(`/api/v1/clients/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 export function listSources(): Promise<Source[]> {
-  return request<Source[]>("/api/v1/sources");
+   return request<Source[]>("/api/v1/sources");
 }
 
 export function saveSource(name: string, input: SourceInput): Promise<Source> {
-  const body: Record<string, unknown> = {};
-  if (input.url !== undefined) body.url = input.url;
-  if (input.format !== undefined) body.format = input.format;
-  if (input.enabled !== undefined) body.enabled = input.enabled;
-  return request<Source>(`/api/v1/sources/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
+   const body: Record<string, unknown> = {};
+   if (input.url !== undefined) body.url = input.url;
+   if (input.format !== undefined) body.format = input.format;
+   if (input.enabled !== undefined) body.enabled = input.enabled;
+   // The store keeps a 0 interval as "use the default schedule", so a cleared
+   // box has to travel as 0 rather than be left out, or editing a source would
+   // silently keep the interval the operator just erased.
+   if (input.refresh_seconds !== undefined) body.refresh_seconds = input.refresh_seconds;
+   return request<Source>(`/api/v1/sources/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+   });
 }
 
 export function deleteSource(name: string): Promise<void> {
-  return request<void>(`/api/v1/sources/${encodeURIComponent(name)}`, { method: "DELETE" });
+   return request<void>(`/api/v1/sources/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 export function listCatalog(): Promise<CatalogEntry[]> {
-  return request<CatalogEntry[]>("/api/v1/sources/catalog");
+   return request<CatalogEntry[]>("/api/v1/sources/catalog");
 }
 
 export type SourcePreview = {
-  name: string;
-  added: string[];
-  removed: string[];
-  notModified: boolean;
+   name: string;
+   added: string[];
+   removed: string[];
+   notModified: boolean;
 };
 
 // previewSource fetches the remote list and reports the domains a refresh
 // would add and remove, without applying anything.
 export function previewSource(name: string): Promise<SourcePreview> {
-  return request<SourcePreview>(`/api/v1/sources/${encodeURIComponent(name)}/preview`);
+   return request<SourcePreview>(`/api/v1/sources/${encodeURIComponent(name)}/preview`);
 }
 
 export function refreshSource(name: string): Promise<void> {
-  return request<void>(`/api/v1/sources/${encodeURIComponent(name)}/refresh`, { method: "POST" });
+   return request<void>(`/api/v1/sources/${encodeURIComponent(name)}/refresh`, { method: "POST" });
 }
 
 export function listRules(): Promise<Rule[]> {
-  return request<Rule[]>("/api/v1/rules");
+   return request<Rule[]>("/api/v1/rules");
 }
 
 export function createRule(input: RuleInput): Promise<Rule> {
-  return request<Rule>("/api/v1/rules", { method: "POST", body: JSON.stringify(input) });
+   return request<Rule>("/api/v1/rules", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function updateRule(id: number, input: RuleInput): Promise<Rule> {
-  return request<Rule>(`/api/v1/rules/${id}`, { method: "PUT", body: JSON.stringify(input) });
+   return request<Rule>(`/api/v1/rules/${id}`, { method: "PUT", body: JSON.stringify(input) });
 }
 
 export function deleteRule(id: number): Promise<void> {
-  return request<void>(`/api/v1/rules/${id}`, { method: "DELETE" });
+   return request<void>(`/api/v1/rules/${id}`, { method: "DELETE" });
 }
 
 export function listSchedules(): Promise<Schedule[]> {
-  return request<Schedule[]>("/api/v1/schedules");
+   return request<Schedule[]>("/api/v1/schedules");
 }
 
 export function saveSchedule(name: string, input: ScheduleInput): Promise<Schedule> {
-  return request<Schedule>(`/api/v1/schedules/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
+   return request<Schedule>(`/api/v1/schedules/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+   });
 }
 
 export function deleteSchedule(name: string): Promise<void> {
-  return request<void>(`/api/v1/schedules/${encodeURIComponent(name)}`, { method: "DELETE" });
+   return request<void>(`/api/v1/schedules/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 // A window changes service blocking for a set of clients, but only while its
@@ -381,198 +385,198 @@ export function deleteSchedule(name: string): Promise<void> {
 // window; action "allow" exempts the services from the blocks that hold
 // outside it. Outside the window it changes nothing.
 export type ServiceWindow = {
-  name: string;
-  action: "block" | "allow";
-  schedule: string;
-  clients: string[];
-  services: string[];
+   name: string;
+   action: "block" | "allow";
+   schedule: string;
+   clients: string[];
+   services: string[];
 };
 
 // The body is the whole window, so a client or service left out is dropped.
 export type ServiceWindowInput = {
-  action: "block" | "allow";
-  schedule: string;
-  clients: string[];
-  services: string[];
+   action: "block" | "allow";
+   schedule: string;
+   clients: string[];
+   services: string[];
 };
 
 export function listWindows(): Promise<ServiceWindow[]> {
-  return request<ServiceWindow[]>("/api/v1/windows");
+   return request<ServiceWindow[]>("/api/v1/windows");
 }
 
 export function saveWindow(name: string, input: ServiceWindowInput): Promise<ServiceWindow> {
-  return request<ServiceWindow>(`/api/v1/windows/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
+   return request<ServiceWindow>(`/api/v1/windows/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+   });
 }
 
 export function deleteWindow(name: string): Promise<void> {
-  return request<void>(`/api/v1/windows/${encodeURIComponent(name)}`, { method: "DELETE" });
+   return request<void>(`/api/v1/windows/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 export type Rewrite = {
-  pattern: string;
-  target: string;
+   pattern: string;
+   target: string;
 };
 
 export function listRewrites(): Promise<Rewrite[]> {
-  return request<Rewrite[]>("/api/v1/rewrites");
+   return request<Rewrite[]>("/api/v1/rewrites");
 }
 
 export function saveRewrite(pattern: string, target: string): Promise<Rewrite> {
-  return request<Rewrite>(`/api/v1/rewrites/${encodeURIComponent(pattern)}`, {
-    method: "PUT",
-    body: JSON.stringify({ target }),
-  });
+   return request<Rewrite>(`/api/v1/rewrites/${encodeURIComponent(pattern)}`, {
+      method: "PUT",
+      body: JSON.stringify({ target }),
+   });
 }
 
 export function deleteRewrite(pattern: string): Promise<void> {
-  return request<void>(`/api/v1/rewrites/${encodeURIComponent(pattern)}`, { method: "DELETE" });
+   return request<void>(`/api/v1/rewrites/${encodeURIComponent(pattern)}`, { method: "DELETE" });
 }
 
 export type Upstream = {
-  name: string;
-  url: string;
-  enabled: boolean;
-  backup: boolean;
-  latency_ms: number;
-  failures: number;
-  down: boolean;
+   name: string;
+   url: string;
+   enabled: boolean;
+   backup: boolean;
+   latency_ms: number;
+   failures: number;
+   down: boolean;
 };
 
 export type UpstreamInput = {
-  url: string;
-  enabled: boolean;
-  backup: boolean;
+   url: string;
+   enabled: boolean;
+   backup: boolean;
 };
 
 export function listUpstreams(): Promise<Upstream[]> {
-  return request<Upstream[]>("/api/v1/upstreams");
+   return request<Upstream[]>("/api/v1/upstreams");
 }
 
 export function saveUpstream(name: string, input: UpstreamInput): Promise<Upstream> {
-  return request<Upstream>(`/api/v1/upstreams/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
+   return request<Upstream>(`/api/v1/upstreams/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+   });
 }
 
 export function deleteUpstream(name: string): Promise<void> {
-  return request<void>(`/api/v1/upstreams/${encodeURIComponent(name)}`, { method: "DELETE" });
+   return request<void>(`/api/v1/upstreams/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 export type Route = {
-  id: number;
-  domain: string;
-  client: string;
-  upstream: string;
+   id: number;
+   domain: string;
+   client: string;
+   upstream: string;
 };
 
 // A blank domain matches every name and a blank client matches every client,
 // so the router fills the gaps a rule leaves open.
 export type RouteInput = {
-  domain: string;
-  client: string;
-  upstream: string;
+   domain: string;
+   client: string;
+   upstream: string;
 };
 
 export function listRoutes(): Promise<Route[]> {
-  return request<Route[]>("/api/v1/routes");
+   return request<Route[]>("/api/v1/routes");
 }
 
 export function createRoute(input: RouteInput): Promise<Route> {
-  return request<Route>("/api/v1/routes", { method: "POST", body: JSON.stringify(input) });
+   return request<Route>("/api/v1/routes", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function updateRoute(id: number, input: RouteInput): Promise<Route> {
-  return request<Route>(`/api/v1/routes/${id}`, { method: "PUT", body: JSON.stringify(input) });
+   return request<Route>(`/api/v1/routes/${id}`, { method: "PUT", body: JSON.stringify(input) });
 }
 
 export function deleteRoute(id: number): Promise<void> {
-  return request<void>(`/api/v1/routes/${id}`, { method: "DELETE" });
+   return request<void>(`/api/v1/routes/${id}`, { method: "DELETE" });
 }
 
 export type AccessSettings = {
-  allowed: string[];
-  disallowed: string[];
+   allowed: string[];
+   disallowed: string[];
 };
 
 export function getAccess(): Promise<AccessSettings> {
-  return request<AccessSettings>("/api/v1/access");
+   return request<AccessSettings>("/api/v1/access");
 }
 
 export function saveAccess(input: AccessSettings): Promise<AccessSettings> {
-  return request<AccessSettings>("/api/v1/access", {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
+   return request<AccessSettings>("/api/v1/access", {
+      method: "PUT",
+      body: JSON.stringify(input),
+   });
 }
 
 export type QueryEntry = {
-  time: string;
-  client: string;
-  name: string;
-  type: string;
-  verdict: string;
-  rule?: string;
-  threat?: string;
+   time: string;
+   client: string;
+   name: string;
+   type: string;
+   verdict: string;
+   rule?: string;
+   threat?: string;
 };
 
 // ThreatFinding is one pattern the analyser recorded, with the evidence that
 // earned it.
 export type ThreatFinding = {
-  time: number;
-  client: string;
-  kind: string;
-  summary: string;
-  evidence: string[];
+   time: number;
+   client: string;
+   kind: string;
+   summary: string;
+   evidence: string[];
 };
 
 export function listThreatFindings(limit = 50): Promise<{ findings: ThreatFinding[] }> {
-  return request<{ findings: ThreatFinding[] }>(`/api/v1/threats/findings?limit=${limit}`);
+   return request<{ findings: ThreatFinding[] }>(`/api/v1/threats/findings?limit=${limit}`);
 }
 
 export type QueryFilterInput = {
-  client?: string;
-  name?: string;
-  verdict?: string;
-  limit?: number;
+   client?: string;
+   name?: string;
+   verdict?: string;
+   limit?: number;
 };
 
 export function listQueries(filter: QueryFilterInput = {}): Promise<{ queries: QueryEntry[] }> {
-  const params = new URLSearchParams();
-  if (filter.client) params.set("client", filter.client);
-  if (filter.name) params.set("name", filter.name);
-  if (filter.verdict) params.set("verdict", filter.verdict);
-  if (filter.limit) params.set("limit", String(filter.limit));
-  const query = params.toString();
-  return request<{ queries: QueryEntry[] }>(`/api/v1/queries${query ? `?${query}` : ""}`);
+   const params = new URLSearchParams();
+   if (filter.client) params.set("client", filter.client);
+   if (filter.name) params.set("name", filter.name);
+   if (filter.verdict) params.set("verdict", filter.verdict);
+   if (filter.limit) params.set("limit", String(filter.limit));
+   const query = params.toString();
+   return request<{ queries: QueryEntry[] }>(`/api/v1/queries${query ? `?${query}` : ""}`);
 }
 
 export type Decision = {
-  time: string;
-  address: string;
-  name: string;
-  type: string;
-  action: string;
-  rule?: { id: string; source: string; pattern: string };
-  // client is the identity the resolver named for the address, absent when
-  // nothing claims it.
-  client?: string;
+   time: string;
+   address: string;
+   name: string;
+   type: string;
+   action: string;
+   rule?: { id: string; source: string; pattern: string };
+   // client is the identity the resolver named for the address, absent when
+   // nothing claims it.
+   client?: string;
 };
 
 // streamQueries subscribes to the live decision stream and returns the
 // unsubscribe function. The browser's EventSource reconnects on its own, which
 // a long-lived dashboard wants.
 export function streamQueries(onEvent: (decision: Decision) => void): () => void {
-  const source = new EventSource("/api/v1/stream/queries");
-  source.onmessage = (message) => {
-    try {
-      onEvent(JSON.parse(message.data) as Decision);
-    } catch {
-      return;
-    }
-  };
-  return () => source.close();
+   const source = new EventSource("/api/v1/stream/queries");
+   source.onmessage = (message) => {
+      try {
+         onEvent(JSON.parse(message.data) as Decision);
+      } catch {
+         return;
+      }
+   };
+   return () => source.close();
 }
