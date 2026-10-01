@@ -6,7 +6,7 @@ import { frame, ensureVisible, pan, toWorld, zoomAt, type Box, type Camera } fro
 import type { Decision } from "./api";
 import { effectiveMode } from "./resolve";
 import type { QueryLog } from "./querylog";
-import { buildTopology, clientFor, upstreamNodeID, type NodeKind, type Topology } from "./topology";
+import { buildTopology, clientFor, upstreamNodeID, type Device, type NodeKind, type Topology } from "./topology";
 import { admit, advance, emptyFlow, PULSE_LIFE_SECONDS, segment, streak, trail, type Flow } from "./flow";
 import { cellWidth, fitLabel, LABEL_MAX, ROW_HEIGHT, STAR_CELL, type Measure } from "./label";
 import { linkIntent, type LinkIntent } from "./edit";
@@ -18,9 +18,12 @@ type Props = {
    defaultProfile: string;
    upstreams: string[];
    log: QueryLog;
+   devices: Device[];
    onSaveClient: (name: string, input: { profile: string; notes: string; addresses: string[]; macs: string[]; prefixes: string[] }) => Promise<void>;
    onSaveProfile: (name: string, input: ProfileInput) => Promise<void>;
    onSetDefault: (name: string) => Promise<void>;
+   onClaimDevice: (device: Device, name: string) => Promise<void>;
+   onDeleteClient: (name: string) => Promise<void>;
 };
 
 type Placed = {
@@ -63,6 +66,7 @@ const MARKER: Record<NodeKind, number> = {
    profile: 20,
    upstream: 26,
    rule: 12,
+   device: 14,
 };
 
 const fontStack = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -132,7 +136,7 @@ export default function Graph(props: Props) {
    let draft: { from: string; x: number; y: number; target?: string; legal: boolean } | undefined;
 
    createEffect(
-      () => [buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams, props.rules)] as const,
+      () => [buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams, props.rules, props.devices)] as const,
       ([topology]) => {
          void draw(topology);
       },
@@ -171,15 +175,20 @@ export default function Graph(props: Props) {
    }
 
    // One marker per kind: circle for a client, square for a profile, solid
-   // diamond for the upstream, small red square for a rule. The shape carries
-   // the kind so colour never has to.
+   // diamond for the upstream, small red square for a rule, dashed circle for a
+   // device nothing claims yet. The shape carries the kind so colour never has
+   // to.
    function markerFor(kind: NodeKind, x: number, y: number): SVGElement {
       const size = MARKER[kind];
       const half = size / 2;
       const stroke = INK;
-      if (kind === "client" || kind === "upstream") {
+      if (kind === "client" || kind === "upstream" || kind === "device") {
          const fill = kind === "upstream" ? INK : "#ffffff";
-         return el("circle", { cx: x, cy: y, r: half, fill, stroke, "stroke-width": 2 });
+         const marker = el("circle", { cx: x, cy: y, r: half, fill, stroke, "stroke-width": 2 });
+         if (kind === "device") {
+            marker.setAttribute("stroke-dasharray", "3 3");
+         }
+         return marker;
       }
       if (kind === "rule") {
          return el("rect", {
@@ -280,6 +289,12 @@ export default function Graph(props: Props) {
             ...[...placed.values()].flatMap((node) => {
                const labelX = node.x + STAR_CELL / 2;
                const group = el("g", { "data-id": node.id });
+               // A passive device sits at half strength: it holds no policy, so
+               // it must not read as part of the answering pipeline.
+               if (node.kind === "device") {
+                  group.setAttribute("opacity", "0.45");
+                  group.setAttribute("data-dimmed", "true");
+               }
                group.appendChild(markerFor(node.kind, node.x, node.y));
                const label = el("text", {
                   x: labelX,
@@ -658,7 +673,7 @@ export default function Graph(props: Props) {
             });
          }
          setSelected(to);
-         void draw(buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams, props.rules));
+         void draw(buildTopology(props.profiles, props.clients, props.defaultProfile, props.upstreams, props.rules, props.devices));
       } catch (cause) {
          setGraphError(String(cause));
       }
@@ -717,6 +732,14 @@ export default function Graph(props: Props) {
          return undefined;
       }
       return props.rules.find((rule) => `rule:${rule.id}` === node.id);
+   };
+
+   const selectedDevice = () => {
+      const node = selectedNode();
+      if (!node || node.kind !== "device") {
+         return undefined;
+      }
+      return props.devices.find((device) => device.id === node.id);
    };
 
    return (
@@ -853,6 +876,29 @@ export default function Graph(props: Props) {
                            macs: client().macs,
                            prefixes: client().prefixes,
                         });
+                        setSelected(undefined);
+                     }}
+                  />
+                  <RemoveClient name={client().name} onRemove={async () => {
+                     await props.onDeleteClient(client().name);
+                     setSelected(undefined);
+                  }} />
+               </div>
+            )}
+         </Show>
+         <Show when={selectedDevice()}>
+            {(device) => (
+               <div class="graph-panel" data-testid="graph-panel">
+                  <header>
+                     <h2>{device().label}</h2>
+                     <button type="button" class="icon-btn" aria-label="close" onClick={() => setSelected(undefined)}>
+                        ×
+                     </button>
+                  </header>
+                  <ClaimPanel
+                     device={device()}
+                     onClaim={async (name) => {
+                        await props.onClaimDevice(device(), name);
                         setSelected(undefined);
                      }}
                   />
@@ -997,6 +1043,96 @@ function ClientPanel(props: { client: Client; profiles: Profile[]; onSave: (prof
          >
             Save policy
          </button>
+      </div>
+   );
+}
+
+// RemoveClient is the delete the graph offers on a saved client. It arms like
+// every row delete in the console: the second press fires.
+function RemoveClient(props: { name: string; onRemove: () => Promise<void> }) {
+   const [armed, setArmed] = createSignal(false);
+   const [busy, setBusy] = createSignal(false);
+   const [error, setError] = createSignal<string>();
+
+   createEffect(
+      () => armed(),
+      (isArmed) => {
+         if (!isArmed) {
+            return;
+         }
+         const timer = setTimeout(() => setArmed(false), 4000);
+         return () => clearTimeout(timer);
+      },
+   );
+
+   async function remove() {
+      if (!armed()) {
+         setArmed(true);
+         return;
+      }
+      setBusy(true);
+      setError(undefined);
+      try {
+         await props.onRemove();
+      } catch (cause) {
+         setError(String(cause));
+      } finally {
+         setBusy(false);
+         setArmed(false);
+      }
+   }
+
+   return (
+      <div class="graph-panel-body">
+         <button
+            type="button"
+            class={armed() ? "btn btn-danger" : "btn"}
+            data-testid="client-remove"
+            disabled={busy()}
+            onClick={() => void remove()}
+         >
+            {armed() ? "Confirm remove" : "Remove client"}
+         </button>
+         {error() ? <p class="error">{error()}</p> : null}
+      </div>
+   );
+}
+
+// ClaimPanel turns a passive device into a saved client. The name starts as
+// what the network called it, and the claim writes through the clients API the
+// same way the clients page does.
+function ClaimPanel(props: { device: Device; onClaim: (name: string) => Promise<void> }) {
+   const [name, setName] = createSignal(props.device.label);
+   const [busy, setBusy] = createSignal(false);
+   const [error, setError] = createSignal<string>();
+
+   async function claim() {
+      if (!name().trim()) {
+         setError("a client needs a name");
+         return;
+      }
+      setBusy(true);
+      setError(undefined);
+      try {
+         await props.onClaim(name().trim());
+      } catch (cause) {
+         setError(String(cause));
+      } finally {
+         setBusy(false);
+      }
+   }
+
+   return (
+      <div class="graph-panel-body">
+         <p class="muted">{props.device.detail}</p>
+         <label>
+            Client name
+            <input data-testid="device-claim-name" value={name()} onInput={(event) => setName(event.currentTarget.value)} />
+         </label>
+         <button type="button" class="btn" data-testid="device-claim" disabled={busy()} onClick={() => void claim()}>
+            Claim client
+         </button>
+         {error() ? <p class="error">{error()}</p> : null}
       </div>
    );
 }

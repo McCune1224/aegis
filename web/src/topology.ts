@@ -1,6 +1,6 @@
-import type { Client, Profile, Rule } from "./api";
+import type { Client, Discovery, Observed, Profile, Rule } from "./api";
 
-export type NodeKind = "client" | "profile" | "upstream" | "rule";
+export type NodeKind = "client" | "profile" | "upstream" | "rule" | "device";
 
 export type GraphNode = {
   id: string;
@@ -25,6 +25,63 @@ export function upstreamNodeID(address: string): string {
 }
 export const defaultClientID = "client:unidentified";
 
+// Device is one hardware address the server has seen that no client record
+// names: a DHCP discovery, a query-log address, or both at once. It holds no
+// policy, so the graph draws it passively and the panel is how it becomes a
+// client.
+export type Device = {
+  id: string;
+  label: string;
+  detail: string;
+  address: string;
+  mac?: string;
+  source: "dhcp" | "queries" | "dhcp + queries";
+};
+
+// seenDevices merges the two sighting feeds into one passive-device list,
+// dropping anything a saved client already claims. One address seen by both
+// feeds is one device; the hardware address and the hostname survive the merge.
+export function seenDevices(
+  discoveries: Discovery[],
+  observed: Observed[],
+  clients: Client[],
+): Device[] {
+  const claimed = new Set(clients.flatMap((client) => client.addresses));
+  const queried = new Map<string, Observed>();
+  for (const entry of observed) {
+    if (!entry.claimed && !claimed.has(entry.client)) {
+      queried.set(entry.client, entry);
+    }
+  }
+
+  const devices: Device[] = [];
+  for (const discovery of discoveries) {
+    if (claimed.has(discovery.address)) {
+      continue;
+    }
+    const source: Device["source"] = queried.has(discovery.address) ? "dhcp + queries" : "dhcp";
+    devices.push({
+      id: `device:${discovery.address}`,
+      label: discovery.hostname || discovery.address,
+      detail: `${discovery.address} · ${source}`,
+      address: discovery.address,
+      mac: discovery.mac,
+      source,
+    });
+    queried.delete(discovery.address);
+  }
+  for (const entry of queried.values()) {
+    devices.push({
+      id: `device:${entry.client}`,
+      label: entry.client,
+      detail: `${entry.client} · queries`,
+      address: entry.client,
+      source: "queries",
+    });
+  }
+  return devices;
+}
+
 // buildTopology is the shape the resolver actually applies: clients point at a
 // profile, profiles inherit from a parent, and every profile answers through
 // every configured upstream, because the pool fails over between them. The
@@ -35,6 +92,7 @@ export function buildTopology(
   defaultProfile: string,
   upstreams: string[],
   rules: Rule[] = [],
+  devices: Device[] = [],
 ): Topology {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
@@ -78,6 +136,10 @@ export function buildTopology(
       kind: "client",
     });
     edges.push({ id: `policy:${client.name}`, from: `client:${client.name}`, to: `profile:${client.profile}` });
+  }
+
+  for (const device of devices) {
+    nodes.push({ id: device.id, label: device.label, detail: device.detail, kind: "device" });
   }
 
   for (const rule of rules) {

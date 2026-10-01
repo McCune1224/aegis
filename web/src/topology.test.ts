@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Client, Profile, Rule } from "./api";
-import { buildTopology, clientFor, defaultClientID } from "./topology";
+import type { Client, Discovery, Observed, Profile, Rule } from "./api";
+import { buildTopology, clientFor, defaultClientID, seenDevices } from "./topology";
 
 const phone: Client = {
   name: "phone",
@@ -79,5 +79,64 @@ describe("buildTopology with rules", () => {
   it("places no rule nodes when no custom rules exist", () => {
     const topology = buildTopology([kids], [phone], "default", [], []);
     expect(topology.nodes.filter((node) => node.kind === "rule")).toEqual([]);
+  });
+});
+
+describe("seen devices the graph draws passively", () => {
+  const discovery: Discovery = {
+    mac: "aa:bb:cc:00:00:42",
+    address: "10.9.9.77",
+    hostname: "livingroom-tv",
+    first: 1,
+    last: 2,
+  };
+  const observed: Observed = { client: "127.0.0.1", queries: 4, last_seen: 2, claimed: false };
+
+  it("turns an unclaimed discovery into a node named for its hostname", () => {
+    expect(seenDevices([discovery], [], [])).toEqual([
+      { id: "device:10.9.9.77", label: "livingroom-tv", detail: "10.9.9.77 · dhcp", address: "10.9.9.77", mac: "aa:bb:cc:00:00:42", source: "dhcp" },
+    ]);
+  });
+
+  it("names a discovery with no hostname for its address", () => {
+    const unnamed: Discovery = { ...discovery, hostname: "" };
+    expect(seenDevices([unnamed], [], [])[0].label).toBe("10.9.9.77");
+  });
+
+  it("draws an unclaimed observed address as a query-seen device", () => {
+    expect(seenDevices([], [observed], [])).toEqual([
+      { id: "device:127.0.0.1", label: "127.0.0.1", detail: "127.0.0.1 · queries", address: "127.0.0.1", mac: undefined, source: "queries" },
+    ]);
+  });
+
+  it("merges one address seen twice into one device and says both", () => {
+    const sameAddress: Observed = { client: "10.9.9.77", queries: 9, last_seen: 5, claimed: false };
+    const devices = seenDevices([discovery], [sameAddress], []);
+    expect(devices).toHaveLength(1);
+    expect(devices[0].detail).toBe("10.9.9.77 · dhcp + queries");
+    expect(devices[0].mac).toBe("aa:bb:cc:00:00:42");
+  });
+
+  it("skips a claimed observed address and an address a client record holds", () => {
+    const claimed: Observed = { ...observed, claimed: true };
+    expect(seenDevices([], [claimed], [])).toEqual([]);
+    const taken: Client = { ...phone, addresses: ["10.9.9.77"] };
+    expect(seenDevices([discovery], [], [taken])).toEqual([]);
+  });
+});
+
+describe("buildTopology with seen devices", () => {
+  it("places devices as passive nodes of their own kind, wired to nothing", () => {
+    const devices = seenDevices(
+      [{ mac: "aa:bb:cc:00:00:42", address: "10.9.9.77", hostname: "livingroom-tv", first: 1, last: 2 }],
+      [{ client: "127.0.0.1", queries: 4, last_seen: 2, claimed: false }],
+      [],
+    );
+    const topology = buildTopology([kids], [phone], "default", [], [], devices);
+    expect(topology.nodes.filter((node) => node.kind === "device")).toEqual([
+      { id: "device:10.9.9.77", label: "livingroom-tv", detail: "10.9.9.77 · dhcp", kind: "device" },
+      { id: "device:127.0.0.1", label: "127.0.0.1", detail: "127.0.0.1 · queries", kind: "device" },
+    ]);
+    expect(topology.edges.filter((edge) => edge.id.includes("device:"))).toEqual([]);
   });
 });

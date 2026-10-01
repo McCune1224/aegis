@@ -83,6 +83,7 @@ import Rules from "./Rules";
 import Sources from "./Sources";
 import Upstreams from "./Upstreams";
 import Settings from "./Settings";
+import { seenDevices, type Device } from "./topology";
 import { createQueryLog } from "./querylog";
 
 export type Tab =
@@ -447,6 +448,21 @@ export default function App() {
     await refresh();
   }
 
+  // claimDevice routes a graph claim through the feed the sighting came from:
+  // a DHCP discovery keeps its hardware address, a query-log address claims by
+  // what the resolver saw.
+  async function claimDevice(device: Device, name: string) {
+    const discovery = device.mac ? discoveries().find((entry) => entry.mac === device.mac) : undefined;
+    if (discovery) {
+      await claimDiscovery(discovery, name);
+      return;
+    }
+    const entry = observed().find((seen) => seen.client === device.address);
+    await claimObserved(
+      entry ?? { client: device.address, queries: 0, last_seen: Date.now(), claimed: false },
+    );
+  }
+
   async function saveAccess(input: AccessSettings) {
     await putAccess(input);
     await refresh();
@@ -524,9 +540,12 @@ export default function App() {
                 defaultProfile={defaultProfile()}
                 upstreams={upstreams()}
                 log={log}
+                devices={seenDevices(discoveries(), observed(), clients())}
                 onSaveClient={saveClient}
                 onSaveProfile={saveProfile}
                 onSetDefault={makeDefault}
+                onClaimDevice={claimDevice}
+                onDeleteClient={deleteClient}
               />
             </div>
           </Show>
