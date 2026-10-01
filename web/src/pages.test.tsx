@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { flush } from "solid-js";
+import { createSignal, flush } from "solid-js";
 import { render } from "@solidjs/web";
 import type { JSX } from "@solidjs/web";
 import { describe, expect, it } from "vitest";
@@ -225,5 +225,65 @@ describe("duplicate copies the row under a free key", () => {
       expect(drawerTitle(host)).toBe("Duplicate kids");
       expect(value(host, "profile-name")).toBe("kids-copy-2");
       expect(host.querySelector<HTMLInputElement>('[data-testid="profile-name"]')?.disabled).toBe(false);
+   });
+});
+
+describe("Blocked Services save feedback", () => {
+   function servicesProps(names: string[], onSave: () => Promise<void>) {
+      return {
+         services: [{ id: "chatgpt", name: "ChatGPT", group: "Artificial intelligence", rule_count: 1, profiles: [], clients: [] }],
+         serviceGroups: ["Artificial intelligence"],
+         profileNames: names,
+         clients: [],
+         defaultProfile: names[0] ?? "",
+         schedules: [],
+         windows: [],
+         onSave,
+         onRefreshServices: noop,
+         onSaveWindow: noop,
+         onDeleteWindow: noop,
+      };
+   }
+
+   it("adopts a scope once the first load lands", () => {
+      document.body.innerHTML = "";
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const [names, setNames] = createSignal<string[]>([]);
+      render(() => <BlockedServices {...servicesProps(names(), noop)} />, host);
+      flush();
+
+      expect(host.querySelector('[data-testid="scope-note"]')?.textContent).toContain("blocked for every client on .");
+
+      setNames(["default"]);
+      flush();
+      expect(host.querySelector('[data-testid="scope-note"]')?.textContent).toContain("blocked for every client on default.");
+   });
+
+   it("explains the write while it travels and reports the result", async () => {
+      document.body.innerHTML = "";
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+         release = resolve;
+      });
+      render(() => <BlockedServices {...servicesProps(["default"], () => gate)} />, host);
+      flush();
+
+      const checkbox = host.querySelector<HTMLInputElement>('[data-testid="service-chatgpt"]');
+      checkbox?.click();
+      flush();
+
+      const status = host.querySelector('[data-testid="save-status"]');
+      expect(status?.textContent).toBe("saving…");
+      expect(status?.getAttribute("aria-busy")).toBe("true");
+      expect(checkbox?.disabled).toBe(true);
+
+      release();
+      await gate;
+      flush();
+      expect(host.querySelector('[data-testid="save-status"]')?.textContent).toBe("saved");
+      expect(checkbox?.disabled).toBe(false);
    });
 });

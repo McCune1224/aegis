@@ -1,9 +1,10 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, createEffect, For, Show } from "solid-js";
 import type { BlockedService, Client, Schedule, ServiceWindow, ServiceWindowInput } from "./api";
 import CrudActions from "./CrudActions";
-import { createCrud, duplicateName, editorTitle } from "./crud";
+import { createCrud, duplicateName, editorTitle, type SaveState } from "./crud";
 import { groupServices, groupState, serviceGroupLabel, toggled, toggledGroup } from "./services";
 import Drawer from "./Drawer";
+import SaveStatus from "./SaveStatus";
 
 const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
@@ -46,8 +47,33 @@ export default function BlockedServices(props: Props) {
    });
    const [search, setSearch] = createSignal("");
    const [busy, setBusy] = createSignal(false);
-   const [saved, setSaved] = createSignal(false);
+   const [saveState, setSaveState] = createSignal<SaveState>("idle");
    const [error, setError] = createSignal<string>();
+
+   // The scope is picked once from props, but this page can mount before the
+   // first load lands, most often through a #/services deep link. Without this
+   // the selection stays on an empty name: the note reads "blocked for every
+   // client on ." and apply refuses to send anything, so the sliders look dead.
+   createEffect(
+      () => {
+         const current = scope();
+         const named =
+            current.kind === "profile"
+               ? props.profileNames.includes(current.name)
+               : props.clients.some((client) => client.name === current.name);
+         if (named) {
+            return undefined;
+         }
+         return current.kind === "profile"
+            ? { kind: "profile" as const, name: props.defaultProfile || props.profileNames[0] || "" }
+            : { kind: "client" as const, name: props.clients[0]?.name || "" };
+      },
+      (adopted) => {
+         if (adopted?.name) {
+            setScope(adopted);
+         }
+      },
+   );
 
    const windowCrud = createCrud<string>();
    const [winName, setWinName] = createSignal("");
@@ -106,21 +132,24 @@ export default function BlockedServices(props: Props) {
 
    function pick(kind: "profile" | "client", name: string) {
       setScope({ kind, name });
-      setSaved(false);
+      setSaveState("idle");
       setError(undefined);
    }
 
    async function apply(next: string[]) {
       const current = scope();
       if (!current.name) {
+         setError(`no ${current.kind} is selected yet`);
          return;
       }
       setBusy(true);
+      setSaveState("saving");
       setError(undefined);
       try {
          await props.onSave(current, next);
-         setSaved(true);
+         setSaveState("saved");
       } catch (cause) {
+         setSaveState("idle");
          setError(String(cause));
       } finally {
          setBusy(false);
@@ -272,6 +301,7 @@ export default function BlockedServices(props: Props) {
             <input
                type="search"
                placeholder="Search services…"
+               aria-label="Search services"
                data-testid="services-search"
                value={search()}
                onInput={(event) => setSearch(event.currentTarget.value)}
@@ -285,11 +315,7 @@ export default function BlockedServices(props: Props) {
                </button>
             </div>
             <span class="spacer" />
-            <Show when={saved() && !busy()}>
-               <span class="badge saved" data-testid="services-saved">
-                  saved
-               </span>
-            </Show>
+            <SaveStatus state={saveState()} />
             <button type="button" class="btn-mini" data-testid="services-refresh" onClick={() => void refreshCatalog()}>
                Refresh catalog
             </button>
@@ -420,6 +446,7 @@ export default function BlockedServices(props: Props) {
                               </div>
                               <CrudActions
                                  testid="window"
+                                 label={window.name}
                                  busy={windowCrud.busy()}
                                  onEdit={() => editWindow(window)}
                                  onDuplicate={() => duplicateWindow(window)}
