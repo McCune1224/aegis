@@ -50,6 +50,10 @@ export default function BlockedServices(props: Props) {
    const [busy, setBusy] = createSignal(false);
    const [saveState, setSaveState] = createSignal<SaveState>("idle");
    const [error, setError] = createSignal<string>();
+   // draft is the staged slider set and the scope it was staged on, so one
+   // layer's plan can never bleed into another's. It exists only in the page;
+   // the server learns nothing until Save.
+   const [draft, setDraft] = createSignal<{ scope: ServiceScope; services: string[] }>();
 
    // The scope is picked once from props, but this page can mount before the
    // first load lands, most often through a #/services deep link. Without this
@@ -100,7 +104,7 @@ export default function BlockedServices(props: Props) {
    const clientProfile = (name: string) =>
       props.clients.find((client) => client.name === name)?.profile ?? "";
 
-   // editableIds is the set this scope's own sliders control.
+   // editableIds is the set this scope's own sliders control on the server.
    const editableIds = createMemo(() => {
       const current = scope();
       return new Set(
@@ -111,6 +115,42 @@ export default function BlockedServices(props: Props) {
             .map((service) => service.id),
       );
    });
+
+   // staging is the draft of the scope on screen. A draft made on another
+   // scope stays parked until the operator returns to it.
+   const staging = () => {
+      const current = draft();
+      if (!current || current.scope.kind !== scope().kind || current.scope.name !== scope().name) {
+         return undefined;
+      }
+      return current.services;
+   };
+
+   // owned is the set the sliders show: the draft while one exists, the stored
+   // set otherwise.
+   const ownedIds = createMemo(() => new Set(staging() ?? [...editableIds()]));
+
+   // stagedCount is how far the draft sits from the stored set, which is the
+   // number the Save button names.
+   const stagedCount = () => {
+      const staged = staging();
+      if (!staged) {
+         return 0;
+      }
+      const next = new Set(staged);
+      let changes = 0;
+      for (const id of next) {
+         if (!editableIds().has(id)) {
+            changes += 1;
+         }
+      }
+      for (const id of editableIds()) {
+         if (!next.has(id)) {
+            changes += 1;
+         }
+      }
+      return changes;
+   };
 
    // inheritedIds is what already blocks the viewed client through its profile.
    const inheritedIds = createMemo(() => {
@@ -132,7 +172,7 @@ export default function BlockedServices(props: Props) {
    // cardState is read inside JSX expressions, not destructured beforehand, so
    // every read is tracked and a scope change re-renders the cards.
    const cardState = (service: BlockedService) => {
-      const own = editableIds().has(service.id);
+      const own = ownedIds().has(service.id);
       return { own, inherited: !own && inheritedIds().has(service.id) };
    };
 
@@ -148,6 +188,14 @@ export default function BlockedServices(props: Props) {
       setError(undefined);
    }
 
+   // stage keeps every slider move local. Save is the only path to the server,
+   // and it writes the scope's whole set once.
+   function stage(next: string[]) {
+      setDraft({ scope: scope(), services: next });
+      setError(undefined);
+      setSaveState("idle");
+   }
+
    async function apply(next: string[]) {
       const current = scope();
       if (!current.name) {
@@ -160,6 +208,7 @@ export default function BlockedServices(props: Props) {
       try {
          await props.onSave(current, next);
          setSaveState("saved");
+         setDraft(undefined);
       } catch (cause) {
          setSaveState("idle");
          setError(String(cause));
@@ -168,11 +217,22 @@ export default function BlockedServices(props: Props) {
       }
    }
 
-   // toggle flips one service in the set this scope owns. The switch's own
-   // state decides the direction: checked means the click removes it.
-   const toggle = (id: string) => apply(toggled([...editableIds()], id));
-   const blockAll = (ids: string[]) => apply([...new Set([...editableIds(), ...ids])]);
-   const unblockAll = (ids: string[]) => apply([...editableIds()].filter((id) => !ids.includes(id)));
+   const toggle = (id: string) => stage(toggled([...ownedIds()], id));
+   const blockAll = (ids: string[]) => stage([...new Set([...ownedIds(), ...ids])]);
+   const unblockAll = (ids: string[]) => stage([...ownedIds()].filter((id) => !ids.includes(id)));
+
+   function discard() {
+      setDraft(undefined);
+      setSaveState("idle");
+      setError(undefined);
+   }
+
+   function saveDraft() {
+      const staged = staging();
+      if (staged) {
+         void apply(staged);
+      }
+   }
 
    async function refreshCatalog() {
       setError(undefined);
@@ -415,6 +475,7 @@ export default function BlockedServices(props: Props) {
                <button
                   type="button"
                   class={`seg-btn${scope().kind === "profile" ? " active" : ""}`}
+                  data-testid="services-scope-profile"
                   disabled={busy()}
                   onClick={() => pick("profile", scope().kind === "profile" ? scope().name : props.defaultProfile || props.profileNames[0] || "")}
                >
@@ -423,6 +484,7 @@ export default function BlockedServices(props: Props) {
                <button
                   type="button"
                   class={`seg-btn${scope().kind === "client" ? " active" : ""}`}
+                  data-testid="services-scope-client"
                   disabled={busy()}
                   onClick={() => pick("client", scope().kind === "client" ? scope().name : props.clients[0]?.name || "")}
                >
@@ -468,6 +530,14 @@ export default function BlockedServices(props: Props) {
                </button>
             </div>
             <span class="spacer" />
+            <Show when={stagedCount() > 0}>
+               <button type="button" class="btn-mini" data-testid="services-discard" disabled={busy()} onClick={discard}>
+                  Discard
+               </button>
+               <button type="button" class="btn" data-testid="services-save" disabled={busy()} onClick={() => saveDraft()}>
+                  Save {stagedCount()} change{stagedCount() === 1 ? "" : "s"}
+               </button>
+            </Show>
             <SaveStatus state={saveState()} />
             <button type="button" class="btn-mini" data-testid="services-refresh" onClick={() => void refreshCatalog()}>
                Refresh catalog
@@ -505,14 +575,26 @@ export default function BlockedServices(props: Props) {
                         <div class="service-section-head">
                            <h2>{serviceGroupLabel(group.group)}</h2>
                            <span class="service-count">
-                              {group.services.filter((service) => editableIds().has(service.id) || inheritedIds().has(service.id)).length}
+                              {group.services.filter((service) => ownedIds().has(service.id) || inheritedIds().has(service.id)).length}
                               /
                               {group.services.length}
                            </span>
-                           <button type="button" class="btn-mini" disabled={busy()} onClick={() => blockAll(group.services.map((service) => service.id))}>
+                           <button
+                              type="button"
+                              class="btn-mini"
+                              data-testid={`group-block-${group.group || "other"}`}
+                              disabled={busy()}
+                              onClick={() => blockAll(group.services.map((service) => service.id))}
+                           >
                               Block all
                            </button>
-                           <button type="button" class="btn-mini" disabled={busy()} onClick={() => unblockAll(group.services.map((service) => service.id))}>
+                           <button
+                              type="button"
+                              class="btn-mini"
+                              data-testid={`group-unblock-${group.group || "other"}`}
+                              disabled={busy()}
+                              onClick={() => unblockAll(group.services.map((service) => service.id))}
+                           >
                               Unblock all
                            </button>
                         </div>

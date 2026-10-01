@@ -364,7 +364,7 @@ describe("Blocked Services save feedback", () => {
       expect(host.querySelector('[data-testid="scope-note"]')?.textContent).toContain("blocked for every client on default.");
    });
 
-   it("explains the write while it travels and reports the result", async () => {
+   it("stages a flip silently, explains the save while it travels, and reports the result", async () => {
       document.body.innerHTML = "";
       const host = document.createElement("div");
       document.body.appendChild(host);
@@ -377,6 +377,13 @@ describe("Blocked Services save feedback", () => {
 
       const checkbox = host.querySelector<HTMLInputElement>('[data-testid="service-chatgpt"]');
       checkbox?.click();
+      flush();
+
+      // The flip is local: nothing travels, nothing is busy yet.
+      expect(host.querySelector('[data-testid="save-status"]')).toBeNull();
+      expect(checkbox?.disabled).toBe(false);
+
+      host.querySelector<HTMLButtonElement>('[data-testid="services-save"]')?.click();
       flush();
 
       const status = host.querySelector('[data-testid="save-status"]');
