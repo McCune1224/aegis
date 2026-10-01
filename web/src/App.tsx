@@ -1,5 +1,6 @@
 import type { JSX } from "@solidjs/web";
 import { createEffect, createSignal, For, Show } from "solid-js";
+import { appHashFor, parseAppHash } from "./hash";
 import {
   createRoute as postRoute,
   createRule as postRule,
@@ -83,7 +84,7 @@ import Upstreams from "./Upstreams";
 import Settings from "./Settings";
 import { createQueryLog } from "./querylog";
 
-type Tab =
+export type Tab =
   | "dashboard"
   | "constellation"
   | "log"
@@ -95,7 +96,7 @@ type Tab =
   | "services"
   | "system";
 
-type SystemView = "upstreams" | "sources" | "settings";
+export type SystemView = "upstreams" | "sources" | "settings";
 
 const RAIL: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "Overview" },
@@ -130,8 +131,8 @@ const SYSTEM_VIEWS: { id: SystemView; label: string }[] = [
 ];
 
 export default function App() {
-  const [tab, setTab] = createSignal<Tab>("dashboard");
-  const [systemView, setSystemView] = createSignal<SystemView>("upstreams");
+  const [tab, setTab] = createSignal<Tab>(parseAppHash(location.hash).tab);
+  const [systemView, setSystemView] = createSignal<SystemView>(parseAppHash(location.hash).system);
   const [profiles, setProfiles] = createSignal<Profile[]>([]);
   const [clients, setClients] = createSignal<Client[]>([]);
   const [sources, setSources] = createSignal<Source[]>([]);
@@ -160,6 +161,15 @@ export default function App() {
   const [paletteIndex, setPaletteIndex] = createSignal(0);
 
   const log = createQueryLog({ live: live() });
+
+  createEffect(
+    () => appHashFor(tab(), systemView()),
+    (next) => {
+      if (location.hash !== next) {
+        history.replaceState(null, "", next);
+      }
+    },
+  );
 
   const paletteItems = () => {
     const items: { label: string; hint: string; keywords: string; run: () => void }[] = RAIL.map((item) => ({
