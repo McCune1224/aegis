@@ -162,12 +162,14 @@ export default function App() {
 
   const log = createQueryLog({ live: live() });
 
-  createEffect(() => {
-    const next = appHashFor(tab(), systemView());
-    if (location.hash !== next) {
-      history.replaceState(null, "", next);
-    }
-  });
+  createEffect(
+    () => appHashFor(tab(), systemView()),
+    (next) => {
+      if (location.hash !== next) {
+        history.replaceState(null, "", next);
+      }
+    },
+  );
 
   const paletteItems = () => {
     const items: { label: string; hint: string; keywords: string; run: () => void }[] = RAIL.map((item) => ({
