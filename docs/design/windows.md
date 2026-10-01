@@ -22,10 +22,13 @@ table was renamed `focus_windows` to `service_windows` in migration 00018 with
 an `action` column defaulting to `block`, so every existing window keeps its
 behaviour.
 
-The page is merged: **Blocked Services** owns the always-on slider catalog and
-the window list and form. A service set an operator can toggle and a window an
-operator can schedule are two layers of one question, "when does this service
-block?", and answering it on two screens made each half explain the other.
+The page is merged: **Blocked Services** owns the always-on slider catalog, the
+window list and form, and the schedules themselves. A service set an operator
+can toggle, a window an operator can schedule, and the clock both read are three
+layers of one question, "when does this service block?", and answering it on two
+screens made each half explain the other. The window's schedule picker creates
+or edits the schedule it names in the same drawer, an old `#/schedules` link
+lands on this page, and the standalone Schedules tab is gone.
 
 ## Where Aegis diverges from AdGuard Home
 
@@ -40,3 +43,11 @@ Windows name clients, not profiles, which matches where an exemption is
 wanted: one device, one schedule. A profile-wide time window would compile the
 same way (the profile scope exists in `services.Scope`); it is not built
 because no operator has asked for one.
+
+**The clock is a record, not a copy.** AdGuard Home stores one weekly schedule
+inside each blocked-services set, global or per client, and pauses that whole
+set while the clock is inside it. A window here names a schedule stored on its
+own, so the same hours can gate several windows and a custom rule, and editing
+that schedule on the page moves every layer reading it. The shared name carries
+the ambiguity rule too: two schedules claiming the same minute at the same
+priority fail the load instead of tie-breaking (docs/design/filter-engine.md).
