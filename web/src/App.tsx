@@ -83,6 +83,7 @@ import Rules from "./Rules";
 import Sources from "./Sources";
 import Upstreams from "./Upstreams";
 import Settings from "./Settings";
+import { applyServiceScope, dropBy, upsertBy } from "./rows";
 import { seenDevices, type Device } from "./topology";
 import { createQueryLog } from "./querylog";
 
@@ -301,128 +302,181 @@ export default function App() {
     },
   );
 
+  // Each fetcher owns one collection: fetch it and set it, nothing else. A
+  // write applies its own response to the list at once, then reload names the
+  // collections the write can also move and runs them in the background, so a
+  // reload that fails is an error on screen instead of a silent stale list.
+  const FETCHERS = {
+    profiles: async () => setProfiles(await listProfiles()),
+    clients: async () => setClients(await listClients()),
+    sources: async () => setSources(await listSources()),
+    rules: async () => setRules(await listRules()),
+    schedules: async () => setSchedules(await listSchedules()),
+    windows: async () => setWindows(await listWindows()),
+    rewrites: async () => setRewrites(await listRewrites()),
+    upstreams: async () => setUpstreamRows(await listUpstreams()),
+    routes: async () => setRoutes(await listRoutes()),
+    access: async () => setAccess(await getAccess()),
+    safesearch: async () => setSafesearch((await listSafesearch()).engines),
+    discoveries: async () => setDiscoveries((await listDiscoveries()).discoveries),
+    observed: async () => setObserved(await listObserved()),
+    services: async () => {
+      const page = await listServices();
+      setServices(page.services);
+      setServiceGroups(page.groups);
+    },
+    status: async () => {
+      const status = await getStatus();
+      setUpstreams(status.upstreams);
+      setRuleCount(status.rules ?? 0);
+    },
+  };
+  type Collection = keyof typeof FETCHERS;
+
+  function reload(...names: Collection[]): Promise<void> {
+    return Promise.all(names.map((name) => FETCHERS[name]())).then(
+      () => undefined,
+      (cause) => {
+        setError(`saved, but reloading the lists failed: ${String(cause)}`);
+      },
+    );
+  }
+
   async function saveProfile(name: string, input: ProfileInput) {
-    await putProfile(name, input);
-    await refresh();
+    const saved = await putProfile(name, input);
+    setProfiles((rows) => upsertBy(rows, saved, (row) => row.name));
   }
 
   async function saveClient(name: string, input: ClientInput) {
-    await putClient(name, input);
-    await refresh();
+    const saved = await putClient(name, input);
+    setClients((rows) => upsertBy(rows, saved, (row) => row.name));
+    reload("observed", "discoveries");
   }
 
   async function deleteProfile(name: string) {
     await removeProfile(name);
-    await refresh();
+    setProfiles((rows) => dropBy(rows, (row) => row.name, name));
+    reload("clients");
   }
 
   async function deleteClient(name: string) {
     await removeClient(name);
-    await refresh();
+    setClients((rows) => dropBy(rows, (row) => row.name, name));
+    reload("observed", "discoveries");
   }
 
   async function saveSource(name: string, input: SourceInput) {
-    await putSource(name, input);
-    await refresh();
+    const saved = await putSource(name, input);
+    setSources((rows) => upsertBy(rows, saved, (row) => row.name));
   }
 
   async function deleteSource(name: string) {
     await removeSource(name);
-    await refresh();
+    setSources((rows) => dropBy(rows, (row) => row.name, name));
+    reload("status");
   }
 
   async function addRule(input: RuleInput) {
-    await postRule(input);
-    await refresh();
+    const saved = await postRule(input);
+    setRules((rows) => upsertBy(rows, saved, (row) => String(row.id)));
+    reload("status");
   }
 
   async function changeRule(id: number, input: RuleInput) {
-    await patchRule(id, input);
-    await refresh();
+    const saved = await patchRule(id, input);
+    setRules((rows) => upsertBy(rows, saved, (row) => String(row.id)));
+    reload("status");
   }
 
   async function deleteRule(id: number) {
     await removeRule(id);
-    await refresh();
+    setRules((rows) => dropBy(rows, (row) => String(row.id), String(id)));
+    reload("status");
   }
 
   async function addSchedule(name: string, input: ScheduleInput) {
-    await putSchedule(name, input);
-    await refresh();
+    const saved = await putSchedule(name, input);
+    setSchedules((rows) => upsertBy(rows, saved, (row) => row.name));
   }
 
   async function deleteSchedule(name: string) {
     await removeSchedule(name);
-    await refresh();
+    setSchedules((rows) => dropBy(rows, (row) => row.name, name));
+    reload("windows");
   }
 
   async function addWindow(name: string, input: ServiceWindowInput) {
-    await putWindow(name, input);
-    await refresh();
+    const saved = await putWindow(name, input);
+    setWindows((rows) => upsertBy(rows, saved, (row) => row.name));
   }
 
   async function deleteServiceWindow(name: string) {
     await deleteWindowByName(name);
-    await refresh();
+    setWindows((rows) => dropBy(rows, (row) => row.name, name));
   }
 
   async function saveRewrite(pattern: string, target: string) {
-    await putRewrite(pattern, target);
-    await refresh();
+    const saved = await putRewrite(pattern, target);
+    setRewrites((rows) => upsertBy(rows, saved, (row) => row.pattern));
   }
 
   async function deleteRewrite(pattern: string) {
     await removeRewrite(pattern);
-    await refresh();
+    setRewrites((rows) => dropBy(rows, (row) => row.pattern, pattern));
   }
 
   async function saveUpstream(name: string, input: UpstreamInput) {
-    await putUpstream(name, input);
-    await refresh();
+    const saved = await putUpstream(name, input);
+    setUpstreamRows((rows) => upsertBy(rows, saved, (row) => row.name));
+    reload("status");
   }
 
   async function deleteUpstream(name: string) {
     await removeUpstream(name);
-    await refresh();
+    setUpstreamRows((rows) => dropBy(rows, (row) => row.name, name));
+    reload("status", "routes");
   }
 
   async function addRoute(input: RouteInput) {
-    await postRoute(input);
-    await refresh();
+    const saved = await postRoute(input);
+    setRoutes((rows) => upsertBy(rows, saved, (row) => String(row.id)));
   }
 
   async function changeRoute(id: number, input: RouteInput) {
-    await patchRoute(id, input);
-    await refresh();
+    const saved = await patchRoute(id, input);
+    setRoutes((rows) => upsertBy(rows, saved, (row) => String(row.id)));
   }
 
   async function deleteRoute(id: number) {
     await removeRoute(id);
-    await refresh();
+    setRoutes((rows) => dropBy(rows, (row) => String(row.id), String(id)));
   }
 
   async function makeDefault(name: string) {
-    await putDefaultProfile(name);
-    await refresh();
+    const saved = await putDefaultProfile(name);
+    setDefaultProfile(saved.profile);
   }
 
   async function saveClientServices(scope: ServiceScope, serviceIDs: string[]) {
-    if (scope.kind === "client") {
-      await putClientServices(scope.name, serviceIDs);
-    } else {
-      await putProfileServices(scope.name, serviceIDs);
-    }
-    await refresh();
+    const save = scope.kind === "client" ? putClientServices : putProfileServices;
+    await save(scope.name, serviceIDs);
+    setServices((rows) => applyServiceScope(rows, scope.kind, scope.name, serviceIDs));
   }
 
   async function refreshServiceCatalog() {
     await postRefreshServices();
-    await refresh();
+    await FETCHERS.services();
   }
 
   async function saveProfileSafesearch(name: string, engines: string[]) {
     await putProfileSafesearch(name, engines);
-    await refresh();
+    const saved = new Set(engines);
+    setSafesearch((rows) =>
+      rows.map((row) => {
+        const others = row.profiles.filter((entry) => entry !== name);
+        return { ...row, profiles: saved.has(row.id) ? [...others, name].sort() : others };
+      }),
+    );
   }
 
   async function claimObserved(entry: Observed) {
@@ -433,7 +487,6 @@ export default function App() {
       macs: [],
       prefixes: [],
     });
-    await refresh();
   }
 
   async function claimDiscovery(discovery: Discovery, name: string) {
@@ -445,7 +498,7 @@ export default function App() {
       prefixes: [],
     });
     await removeDiscovery(discovery.mac);
-    await refresh();
+    setDiscoveries((rows) => dropBy(rows, (row) => row.mac, discovery.mac));
   }
 
   // claimDevice routes a graph claim through the feed the sighting came from:
@@ -464,8 +517,8 @@ export default function App() {
   }
 
   async function saveAccess(input: AccessSettings) {
-    await putAccess(input);
-    await refresh();
+    const saved = await putAccess(input);
+    setAccess(saved);
   }
 
   return (
@@ -553,9 +606,7 @@ export default function App() {
             <QueryLog
               log={log}
               filter={logFilter()}
-              onRuleAdded={async () => {
-                await refresh();
-              }}
+              onRuleAdded={() => reload("rules", "status")}
             />
           </Show>
           <Show when={tab() === "clients"}>
@@ -568,7 +619,7 @@ export default function App() {
               onClaimObserved={claimObserved}
               onDismissDiscovery={async (mac) => {
                 await removeDiscovery(mac);
-                await refresh();
+                setDiscoveries((rows) => dropBy(rows, (row) => row.mac, mac));
               }}
               onSave={saveClient}
               onDelete={deleteClient}
