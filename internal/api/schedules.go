@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"aegis/internal/filter"
+	"aegis/internal/store"
 )
 
 // scheduleWindow is one recurring range as it arrives over HTTP. Days are
@@ -57,6 +59,10 @@ func (s *Server) listSchedules(w http.ResponseWriter, r *http.Request) {
 
 // putSchedule creates one schedule or replaces what its name held, so the
 // windows of a running server change on the next reload.
+// putSchedule creates one schedule or replaces what its name held. It goes
+// through apply, so a schedule the compiler would refuse, such as a verbatim
+// copy claiming the same minutes at the same priority, is answered as a bad
+// request before anything reaches the store and the reload stays clean.
 func (s *Server) putSchedule(w http.ResponseWriter, r *http.Request) {
 	request, err := decodeJSON[scheduleRequest](r)
 	if err != nil {
@@ -83,15 +89,21 @@ func (s *Server) putSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if err := s.store.SaveSchedule(r.Context(), schedule); err != nil {
+	err = s.apply(r.Context(),
+		func(cfg *store.Config) error {
+			for i := range cfg.Schedules {
+				if cfg.Schedules[i].Name == schedule.Name {
+					cfg.Schedules[i] = schedule
+					return nil
+				}
+			}
+			cfg.Schedules = append(cfg.Schedules, schedule)
+			return nil
+		},
+		func(ctx context.Context) error { return s.store.SaveSchedule(ctx, schedule) },
+	)
+	if err != nil {
 		writeError(w, err)
-		return
-	}
-	if err := s.reloader.Reload(r.Context()); err != nil {
-		writeError(w, fmt.Errorf("api: reload: %w", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, scheduleResponseFrom(schedule))
@@ -123,7 +135,7 @@ func parseSchedule(name string, priority int, windows []scheduleWindow) (filter.
 	return spec, nil
 }
 
-// deleteSchedule removes one schedule. Rules and focus windows still naming it
+// deleteSchedule removes one schedule. Rules and service windows still naming it
 // would fail every later reload, so the deletion is refused with the names
 // instead.
 func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
