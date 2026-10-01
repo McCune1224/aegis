@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"aegis/internal/store/storedb"
@@ -70,9 +71,24 @@ func saveUpstream(ctx context.Context, q *storedb.Queries, row Upstream) error {
 	return nil
 }
 
-// DeleteUpstream removes one upstream row. A caller validates the resulting
-// configuration first, because the resolver needs at least one enabled row.
+// ErrStillRouted marks a delete of an upstream that routes still name. The
+// upstream survives and the routes stay, so the operator re-points them first.
+var ErrStillRouted = errors.New("store: upstream still routed")
+
+// DeleteUpstream removes one upstream row. A route that still names it refuses
+// the delete, the same story the schema tells, so no caller can quietly strip
+// its routing. A caller validates the resulting configuration first, because
+// the resolver needs at least one enabled row.
 func (s *Store) DeleteUpstream(ctx context.Context, name string) error {
+	routes, err := s.queries.ListRoutes(ctx)
+	if err != nil {
+		return fmt.Errorf("store: delete upstream %q: %w", name, err)
+	}
+	for _, route := range routes {
+		if route.Upstream == name {
+			return fmt.Errorf("%w: route %d still sends its queries to upstream %q", ErrStillRouted, route.ID, name)
+		}
+	}
 	if err := s.queries.DeleteUpstream(ctx, name); err != nil {
 		return fmt.Errorf("store: delete upstream %q: %w", name, err)
 	}

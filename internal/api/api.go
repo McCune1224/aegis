@@ -319,6 +319,8 @@ func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errNotFound):
 		status = http.StatusNotFound
+	case errors.Is(err, store.ErrStillRouted):
+		status = http.StatusConflict
 	case errors.As(err, &bad):
 		status = http.StatusBadRequest
 	case errors.As(err, &clash):
