@@ -152,6 +152,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/profiles/{name}", s.getProfile)
 	mux.HandleFunc("DELETE /api/v1/profiles/{name}", s.deleteProfile)
 	mux.HandleFunc("GET /api/v1/clients", s.listClients)
+	mux.HandleFunc("GET /api/v1/clients/observed", s.listObservedClients)
 	mux.HandleFunc("PUT /api/v1/clients/{name}", s.putClient)
 	mux.HandleFunc("GET /api/v1/clients/{name}", s.getClient)
 	mux.HandleFunc("DELETE /api/v1/clients/{name}", s.deleteClient)

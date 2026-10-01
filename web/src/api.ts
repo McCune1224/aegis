@@ -283,6 +283,17 @@ export function listClients(): Promise<Client[]> {
   return request<Client[]>("/api/v1/clients");
 }
 
+export type Observed = {
+  client: string;
+  queries: number;
+  last_seen: number;
+  claimed: boolean;
+};
+
+export function listObserved(): Promise<Observed[]> {
+  return request<{ observed: Observed[] }>("/api/v1/clients/observed").then((page) => page.observed);
+}
+
 export function saveClient(name: string, input: ClientInput): Promise<Client> {
   return request<Client>(`/api/v1/clients/${encodeURIComponent(name)}`, {
     method: "PUT",
