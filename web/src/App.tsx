@@ -17,6 +17,7 @@ import {
   getStatus,
   listCatalog,
   listClients,
+  listObserved,
   listProfiles,
   listRewrites,
   listRoutes,
@@ -53,6 +54,7 @@ import {
   type ProfileInput,
   type BlockedService,
   type Discovery,
+  type Observed,
   type SafesearchEngine,
   type ThreatFinding,
   type Rewrite,
@@ -141,6 +143,7 @@ export default function App() {
   const [serviceGroups, setServiceGroups] = createSignal<string[]>([]);
   const [safesearch, setSafesearch] = createSignal<SafesearchEngine[]>([]);
   const [discoveries, setDiscoveries] = createSignal<Discovery[]>([]);
+  const [observed, setObserved] = createSignal<Observed[]>([]);
   const [threats, setThreats] = createSignal<ThreatFinding[]>([]);
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [schedules, setSchedules] = createSignal<Schedule[]>([]);
@@ -250,7 +253,7 @@ export default function App() {
   );
 
   async function refresh() {
-    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextWindows, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices, nextSafesearch, nextDiscoveries, nextThreats] =
+    const [nextProfiles, nextClients, nextSources, nextCatalog, nextRules, nextSchedules, nextWindows, nextRewrites, nextUpstreams, nextRoutes, nextAccess, nextDefault, nextStatus, nextServices, nextSafesearch, nextDiscoveries, nextThreats, nextObserved] =
       await Promise.all([
         listProfiles(),
         listClients(),
@@ -269,6 +272,7 @@ export default function App() {
         listSafesearch(),
         listDiscoveries(),
         listThreatFindings(),
+        listObserved(),
       ]);
     setProfiles(nextProfiles);
     setClients(nextClients);
@@ -289,6 +293,7 @@ export default function App() {
     setSafesearch(nextSafesearch.engines);
     setDiscoveries(nextDiscoveries.discoveries);
     setThreats(nextThreats.findings);
+    setObserved(nextObserved);
   }
 
   createEffect(
@@ -423,6 +428,17 @@ export default function App() {
     await refresh();
   }
 
+  async function claimObserved(entry: Observed) {
+    await saveClient(entry.client, {
+      profile: defaultProfile(),
+      notes: `claimed after ${entry.queries} queries`,
+      addresses: [entry.client],
+      macs: [],
+      prefixes: [],
+    });
+    await refresh();
+  }
+
   async function claimDiscovery(discovery: Discovery, name: string) {
     await saveClient(name, {
       profile: defaultProfile(),
@@ -533,6 +549,8 @@ export default function App() {
               profiles={profiles()}
               discoveries={discoveries()}
               onClaimDiscovery={claimDiscovery}
+              observed={observed()}
+              onClaimObserved={claimObserved}
               onDismissDiscovery={async (mac) => {
                 await removeDiscovery(mac);
                 await refresh();
