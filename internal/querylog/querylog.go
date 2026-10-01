@@ -116,6 +116,11 @@ func (l *QueryLog) write() {
 		if err := l.store.TrimQueries(ctx, MaxRows); err != nil {
 			l.logger.Warn("querylog: trim failed", "error", err)
 		}
+		if interval := l.retention(ctx); interval > 0 {
+			if err := l.store.TrimQueriesBefore(ctx, time.Now().Add(-interval).UnixMilli()); err != nil {
+				l.logger.Warn("querylog: interval trim failed", "error", err)
+			}
+		}
 		batch = batch[:0]
 	}
 
@@ -140,6 +145,17 @@ func (l *QueryLog) write() {
 			}
 		}
 	}
+}
+
+// retention reads the stats interval. Zero, or a failed read, keeps the log
+// at its row bound only.
+func (l *QueryLog) retention(ctx context.Context) time.Duration {
+	config, err := l.store.StatsConfig(ctx)
+	if err != nil {
+		l.logger.Warn("querylog: stats config read failed", "error", err)
+		return 0
+	}
+	return config.Interval
 }
 
 func (l *QueryLog) entriesFrom(decisions []dns.Decision) []store.QueryEntry {

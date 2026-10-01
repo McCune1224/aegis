@@ -146,6 +146,10 @@ type Source struct {
 	RefreshSeconds int64
 }
 
+type StatsIgnored struct {
+	Name string
+}
+
 type ThreatDomain struct {
 	Domain string
 	Kind   string

@@ -124,6 +124,33 @@ func TestTheLogTrimsItselfToTheBound(t *testing.T) {
 	t.Fatal("the log never trimmed to its bound")
 }
 
+func TestTheLogTrimsRowsOlderThanTheStatsInterval(t *testing.T) {
+	database := open(t)
+	require.NoError(t, database.SaveStatsConfig(t.Context(), store.StatsConfig{Interval: time.Hour}))
+
+	stale := decisionFor("stale.example", filter.ActionAllow)
+	stale.Time = time.Now().Add(-2 * time.Hour)
+	fresh := decisionFor("fresh.example", filter.ActionAllow)
+	require.NoError(t, database.RecordQueries(t.Context(), []store.QueryEntry{{
+		Time: stale.Time, Client: stale.Address, Name: stale.Name, Type: stale.Type, Verdict: stale.Action,
+	}}))
+
+	log := querylog.New(database, quiet())
+	defer func() { _ = log.Close() }()
+	log.Observe(fresh)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		entries, err := database.Queries(t.Context(), store.QueryFilter{})
+		require.NoError(t, err)
+		if len(entries) == 1 && entries[0].Name.String() == "fresh.example" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the stale row survived the interval trim after a flush")
+}
+
 func waitFor(t *testing.T, database *store.Store, want int) []store.QueryEntry {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
