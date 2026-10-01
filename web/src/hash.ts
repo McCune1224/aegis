@@ -12,11 +12,14 @@ const TAB_IDS: readonly Tab[] = [
   "clients",
   "profiles",
   "rules",
-  "schedules",
   "rewrites",
   "services",
   "system",
 ];
+
+// Links saved before schedules moved onto the services page still say
+// #/schedules, so the parser lands them where the schedules now live.
+const RETIRED_TABS: Record<string, Tab> = { schedules: "services" };
 
 const SYSTEM_IDS: readonly SystemView[] = ["upstreams", "sources", "settings"];
 
@@ -33,6 +36,9 @@ function isSystem(value: string | undefined): value is SystemView {
 export function parseAppHash(hash: string): AppRoute {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   const [head, sub] = parts;
+  if (head && head in RETIRED_TABS) {
+    return { tab: RETIRED_TABS[head], system: DEFAULT_ROUTE.system };
+  }
   if (!isTab(head)) {
     return DEFAULT_ROUTE;
   }

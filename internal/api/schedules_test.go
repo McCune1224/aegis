@@ -55,6 +55,32 @@ func TestAScheduleTimesARealRule(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, status, body)
 }
 
+// A verbatim copy of a schedule claims the same minutes at the same priority,
+// which the compiler refuses rather than picking a winner nobody can debug.
+// The refusal has to happen before the write: a row the runtime never loaded
+// would sit between the database and every later reload.
+func TestAScheduleThatCollidesWithAnotherIsRefusedBeforeItIsWritten(t *testing.T) {
+	h := startHarness(t)
+
+	body := `{"priority":1,"windows":[{"days":[1,2,3,4,5],"start":"00:00","end":"23:59"}]}`
+	status, response := h.do(t, http.MethodPut, "/api/v1/schedules/always", body)
+	require.Equal(t, http.StatusOK, status, response)
+
+	status, response = h.do(t, http.MethodPut, "/api/v1/schedules/always-copy", body)
+	require.Equal(t, http.StatusBadRequest, status, response)
+	require.Contains(t, response, "always")
+
+	status, response = h.do(t, http.MethodGet, "/api/v1/schedules", "")
+	require.Equal(t, http.StatusOK, status, response)
+	require.Contains(t, response, `"name":"always"`)
+	require.NotContains(t, response, "always-copy")
+
+	// The server still answers, and an edit that breaks the tie still lands.
+	status, response = h.do(t, http.MethodPut, "/api/v1/schedules/always",
+		`{"priority":2,"windows":[{"days":[1,2,3,4,5],"start":"00:00","end":"23:59"}]}`)
+	require.Equal(t, http.StatusOK, status, response)
+}
+
 func TestScheduleInputIsRejectedWithFourHundred(t *testing.T) {
 	h := startHarness(t)
 

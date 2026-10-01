@@ -3,12 +3,12 @@ import { createSignal, flush } from "solid-js";
 import { render } from "@solidjs/web";
 import type { JSX } from "@solidjs/web";
 import { describe, expect, it } from "vitest";
+import type { ScheduleInput } from "./api";
 import BlockedServices from "./BlockedServices";
 import Clients from "./Clients";
 import Profiles from "./Profiles";
 import Rewrites from "./Rewrites";
 import Rules from "./Rules";
-import Schedules from "./Schedules";
 import Sources from "./Sources";
 import Upstreams from "./Upstreams";
 
@@ -48,6 +48,30 @@ const client = { name: "phone", profile: "kids", notes: "", addresses: ["10.9.9.
 const schedule = { name: "night", priority: 1, windows: [{ days: [1], start: "21:00", end: "07:00" }] };
 const window = { name: "video-time", action: "block" as const, schedule: "night", clients: ["phone"], services: ["discord"] };
 
+type ServicesProps = Parameters<typeof BlockedServices>[0];
+
+// servicesPage is one page with data already loaded, so a test states only what
+// it changes: the schedules, the save it wants to watch, or both.
+function servicesPage(over?: Partial<ServicesProps>): ServicesProps {
+   return {
+      services: [{ id: "discord", name: "Discord", group: "Chat", rule_count: 3, profiles: ["kids"], clients: [] }],
+      serviceGroups: ["Chat"],
+      profileNames: ["kids"],
+      clients: [client],
+      defaultProfile: "kids",
+      schedules: [schedule],
+      windows: [window],
+      rules: [],
+      onSave: noop,
+      onRefreshServices: noop,
+      onSaveWindow: noop,
+      onDeleteWindow: noop,
+      onSaveSchedule: noop,
+      onDeleteSchedule: noop,
+      ...over,
+   };
+}
+
 describe("every list page offers the same verbs", () => {
    it("Rules: edit, duplicate, delete", () => {
       const host = mount(() => (
@@ -65,10 +89,8 @@ describe("every list page offers the same verbs", () => {
       expect(button(host, "rule-delete").textContent).toBe("Delete");
    });
 
-   it("Schedules: edit, duplicate, delete", () => {
-      const host = mount(() => (
-         <Schedules schedules={[schedule]} rules={[]} onSave={noop} onDelete={noop} />
-      ));
+   it("Blocked Services schedules: edit, duplicate, delete", () => {
+      const host = mount(() => <BlockedServices {...servicesPage()} />);
       expect(button(host, "schedule-edit")).toBeTruthy();
       expect(button(host, "schedule-duplicate")).toBeTruthy();
       expect(button(host, "schedule-delete")).toBeTruthy();
@@ -168,24 +190,109 @@ describe("every list page offers the same verbs", () => {
    });
 
    it("Blocked Services windows: edit, duplicate, delete", () => {
-      const host = mount(() => (
-         <BlockedServices
-            services={[{ id: "discord", name: "Discord", group: "Chat", rule_count: 3, profiles: ["kids"], clients: [] }]}
-            serviceGroups={["Chat"]}
-            profileNames={["kids"]}
-            clients={[client]}
-            defaultProfile="kids"
-            schedules={[schedule]}
-            windows={[window]}
-            onSave={noop}
-            onRefreshServices={noop}
-            onSaveWindow={noop}
-            onDeleteWindow={noop}
-         />
-      ));
+      const host = mount(() => <BlockedServices {...servicesPage()} />);
       expect(button(host, "window-edit")).toBeTruthy();
       expect(button(host, "window-duplicate")).toBeTruthy();
       expect(button(host, "window-delete")).toBeTruthy();
+   });
+});
+
+describe("the services page owns the schedules a window reads", () => {
+   function submit(host: HTMLElement, testid: string): void {
+      button(host, testid).form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      flush();
+   }
+
+   function type(host: HTMLElement, testid: string, text: string): void {
+      const field = host.querySelector<HTMLInputElement>(`[data-testid="${testid}"]`);
+      if (!field) {
+         throw new Error(`no ${testid} in the rendered page`);
+      }
+      field.value = text;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      flush();
+   }
+
+   it("duplicates a schedule under a free name and saves it as that name", async () => {
+      const saved: [string, ScheduleInput][] = [];
+      const host = mount(() => (
+         <BlockedServices
+            {...servicesPage({
+               schedules: [schedule, { name: "night-copy", priority: 2, windows: [] }],
+               onSaveSchedule: async (name, input) => {
+                  saved.push([name, input]);
+               },
+            })}
+         />
+      ));
+
+      button(host, "schedule-duplicate").click();
+      flush();
+      expect(drawerTitle(host)).toBe("Duplicate night");
+      expect(value(host, "schedule-name")).toBe("night-copy-2");
+
+      submit(host, "schedule-save");
+      expect(saved).toEqual([["night-copy-2", { priority: 1, windows: [{ days: [1], start: "21:00", end: "07:00" }] }]]);
+   });
+
+   it("creates a schedule from the page without visiting another tab", async () => {
+      const saved: string[] = [];
+      const host = mount(() => (
+         <BlockedServices
+            {...servicesPage({
+               schedules: [],
+               onSaveSchedule: async (name) => {
+                  saved.push(name);
+               },
+            })}
+         />
+      ));
+
+      expect(host.querySelector('[data-testid="schedules-empty"]')).toBeTruthy();
+      button(host, "schedule-add").click();
+      flush();
+      expect(drawerTitle(host)).toBe("New schedule");
+
+      type(host, "schedule-name", "video-time");
+      button(host, "schedule-add-window").click();
+      flush();
+      submit(host, "schedule-save");
+      expect(saved).toEqual(["video-time"]);
+   });
+
+   it("opens the schedule editor from the window form and comes back to it", () => {
+      const host = mount(() => <BlockedServices {...servicesPage({ schedules: [] })} />);
+
+      button(host, "window-new").click();
+      flush();
+      expect(drawerTitle(host)).toBe("New window");
+
+      button(host, "window-new-schedule").click();
+      flush();
+      expect(drawerTitle(host)).toBe("New schedule");
+
+      host.querySelector<HTMLButtonElement>(".drawer-head .icon-btn")?.click();
+      flush();
+      expect(drawerTitle(host)).toBe("New window");
+   });
+
+   it("shows why a schedule a window still names cannot be deleted", async () => {
+      const host = mount(() => (
+         <BlockedServices
+            {...servicesPage({
+               onDeleteSchedule: async () => {
+                  throw new Error(`schedule night is still named by window "video-time"`);
+               },
+            })}
+         />
+      ));
+
+      button(host, "schedule-delete").click();
+      flush();
+      button(host, "schedule-delete").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+      expect(host.querySelector('[data-testid="schedule-error"]')?.textContent).toContain('window "video-time"');
    });
 });
 
@@ -230,7 +337,7 @@ describe("duplicate copies the row under a free key", () => {
 
 describe("Blocked Services save feedback", () => {
    function servicesProps(names: string[], onSave: () => Promise<void>) {
-      return {
+      return servicesPage({
          services: [{ id: "chatgpt", name: "ChatGPT", group: "Artificial intelligence", rule_count: 1, profiles: [], clients: [] }],
          serviceGroups: ["Artificial intelligence"],
          profileNames: names,
@@ -239,10 +346,7 @@ describe("Blocked Services save feedback", () => {
          schedules: [],
          windows: [],
          onSave,
-         onRefreshServices: noop,
-         onSaveWindow: noop,
-         onDeleteWindow: noop,
-      };
+      });
    }
 
    it("adopts a scope once the first load lands", () => {

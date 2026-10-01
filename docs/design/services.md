@@ -48,6 +48,16 @@ stand for whole labels, so those rules carry no meaning here and are among the
 skipped. Of 2395 rules in the catalog as published, 2379 become rules and 16 are
 skipped.
 
+## One page answers when the service blocks
+
+The console has one page for the three layers of that question: **Blocked
+Services** carries the always-on toggles, the time windows that block or exempt
+a service for named clients, and the schedules those windows read. The window's
+schedule picker creates or edits the schedule it names in the same drawer, so a
+clock is never built on another screen first. A link that still says
+`#/schedules` lands here, and the standalone Schedules tab is gone: answering
+"when does this service block?" on two screens made each half explain the other.
+
 ## Where Aegis diverges from AdGuard Home
 
 **The layers add instead of override.** AdGuard Home keys blocked services on
@@ -70,6 +80,16 @@ against every query with its general rule engine. Aegis converts the subset with
 a DNS meaning into indexed name rules and skips the rest, so the per-query cost
 stays the same as any other rule and the skipped count is a number an operator
 can see rather than a rule that quietly never fires.
+
+**Schedules are named records.** AdGuard Home carries one inline weekly
+schedule per blocked-services set, global or per client, and reads it inverted:
+while the clock is inside the schedule the set is not blocked. Nothing else can
+read that clock, so every client keeps its own copy of the same hours. Aegis
+schedules are named and reusable: a window names one, a custom rule can name
+one, and both sit next to the toggles they govern. The cost of a name is that
+two schedules claiming the same minute at the same priority fail the load
+instead of tie-breaking, so a duplicated schedule has to change its priority or
+its minutes before it will save.
 
 ## How a refresh reaches the running server
 

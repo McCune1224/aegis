@@ -12,6 +12,10 @@ describe("parseAppHash", () => {
     expect(parseAppHash("#/nope")).toEqual({ tab: "dashboard", system: "upstreams" });
     expect(parseAppHash("#/system/nope")).toEqual({ tab: "system", system: "upstreams" });
   });
+
+  it("lands an old schedules link on the services page that now owns them", () => {
+    expect(parseAppHash("#/schedules")).toEqual({ tab: "services", system: "upstreams" });
+  });
 });
 
 describe("appHashFor", () => {

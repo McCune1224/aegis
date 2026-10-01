@@ -80,7 +80,6 @@ import QueryLog from "./QueryLog";
 import Profiles from "./Profiles";
 import Rewrites from "./Rewrites";
 import Rules from "./Rules";
-import Schedules from "./Schedules";
 import Sources from "./Sources";
 import Upstreams from "./Upstreams";
 import Settings from "./Settings";
@@ -93,7 +92,6 @@ export type Tab =
   | "clients"
   | "profiles"
   | "rules"
-  | "schedules"
   | "rewrites"
   | "services"
   | "system";
@@ -107,7 +105,6 @@ const RAIL: { id: Tab; label: string }[] = [
   { id: "clients", label: "Clients" },
   { id: "profiles", label: "Profiles" },
   { id: "rules", label: "Rules" },
-  { id: "schedules", label: "Schedules" },
   { id: "rewrites", label: "Rewrites" },
   { id: "services", label: "Blocked Services" },
   { id: "system", label: "System" },
@@ -120,7 +117,6 @@ const VIEW_NAMES: Record<Tab, string> = {
   clients: "Clients",
   profiles: "Profiles",
   rules: "Rules",
-  schedules: "Schedules",
   rewrites: "Rewrites",
   services: "Blocked Services",
   system: "System",
@@ -580,14 +576,6 @@ export default function App() {
               onDelete={deleteRule}
             />
           </Show>
-          <Show when={tab() === "schedules"}>
-            <Schedules
-              schedules={schedules()}
-              rules={rules()}
-              onSave={addSchedule}
-              onDelete={deleteSchedule}
-            />
-          </Show>
           <Show when={tab() === "rewrites"}>
             <Rewrites rewrites={rewrites()} onSave={saveRewrite} onDelete={deleteRewrite} />
           </Show>
@@ -600,10 +588,13 @@ export default function App() {
               defaultProfile={defaultProfile()}
               schedules={schedules()}
               windows={windows()}
+              rules={rules()}
               onSave={saveClientServices}
               onRefreshServices={refreshServiceCatalog}
               onSaveWindow={addWindow}
               onDeleteWindow={deleteServiceWindow}
+              onSaveSchedule={addSchedule}
+              onDeleteSchedule={deleteSchedule}
             />
           </Show>
           <Show when={tab() === "system"}>

@@ -32,6 +32,9 @@ profile.cov
 *.db-shm
 *.db-wal
 
+# Throwaway state from an image capture
+/.media/
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 

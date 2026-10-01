@@ -1,24 +1,20 @@
 import { createMemo, createSignal, createEffect, For, Show } from "solid-js";
-import type { BlockedService, Client, Schedule, ServiceWindow, ServiceWindowInput } from "./api";
+import type {
+   BlockedService,
+   Client,
+   Rule,
+   Schedule,
+   ScheduleInput,
+   ScheduleWindow,
+   ServiceWindow,
+   ServiceWindowInput,
+} from "./api";
 import CrudActions from "./CrudActions";
 import { createCrud, duplicateName, editorTitle, type SaveState } from "./crud";
 import { groupServices, groupState, serviceGroupLabel, toggled, toggledGroup } from "./services";
+import { describeSchedule, scheduleUsage } from "./schedules";
 import Drawer from "./Drawer";
 import SaveStatus from "./SaveStatus";
-
-const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-
-function describeSchedule(schedule: Schedule | undefined): string {
-   if (!schedule) {
-      return "";
-   }
-   return schedule.windows
-      .map((window) => {
-         const days = window.days.length === 7 ? "every day" : window.days.map((day) => DAY_LABELS[day] ?? "?").join(" ");
-         return `${days} ${window.start}-${window.end}`;
-      })
-      .join("; ");
-}
 
 // Scope names the layer the sliders on this page edit: a profile blocks a
 // service for every client on it, a client blocks one for itself alone. The
@@ -34,10 +30,15 @@ type Props = {
    defaultProfile: string;
    schedules: Schedule[];
    windows: ServiceWindow[];
+   // rules are the custom rules a schedule can also gate, which is what the
+   // usage line and a refused delete name.
+   rules: Rule[];
    onSave: (scope: ServiceScope, services: string[]) => Promise<void>;
    onRefreshServices: () => Promise<void>;
    onSaveWindow: (name: string, input: ServiceWindowInput) => Promise<void>;
    onDeleteWindow: (name: string) => Promise<void>;
+   onSaveSchedule: (name: string, input: ScheduleInput) => Promise<void>;
+   onDeleteSchedule: (name: string) => Promise<void>;
 };
 
 export default function BlockedServices(props: Props) {
@@ -82,6 +83,17 @@ export default function BlockedServices(props: Props) {
    const [winClients, setWinClients] = createSignal<string[]>([]);
    const [winServices, setWinServices] = createSignal<string[]>([]);
    const [winCollapsed, setWinCollapsed] = createSignal<string[]>([]);
+
+   // One drawer edits either record kind, because a window is nothing without
+   // its schedule and the two forms live on one page. A schedule opened from
+   // the window form remembers that, so closing it returns to the window being
+   // written instead of dropping it.
+   const scheduleCrud = createCrud<string>();
+   const [drawerMode, setDrawerMode] = createSignal<"window" | "schedule">();
+   const [fromWindowForm, setFromWindowForm] = createSignal(false);
+   const [schedName, setSchedName] = createSignal("");
+   const [schedPriority, setSchedPriority] = createSignal("1");
+   const [schedWindows, setSchedWindows] = createSignal<ScheduleWindow[]>([]);
 
    const grouped = createMemo(() => groupServices(props.services, props.serviceGroups));
 
@@ -192,11 +204,15 @@ export default function BlockedServices(props: Props) {
 
    function openNewWindow() {
       resetWindow();
+      setFromWindowForm(false);
+      setDrawerMode("window");
       windowCrud.openNew();
    }
 
    function editWindow(window: ServiceWindow) {
       fillWindow(window);
+      setFromWindowForm(false);
+      setDrawerMode("window");
       windowCrud.openEdit(window.name);
    }
 
@@ -205,6 +221,8 @@ export default function BlockedServices(props: Props) {
    function duplicateWindow(window: ServiceWindow) {
       fillWindow(window);
       setWinName(duplicateName(window.name, props.windows.map((entry) => entry.name)));
+      setFromWindowForm(false);
+      setDrawerMode("window");
       windowCrud.openDuplicate(window.name);
    }
 
@@ -237,6 +255,7 @@ export default function BlockedServices(props: Props) {
          await props.onSaveWindow(key, input);
          resetWindow();
          windowCrud.close();
+         setDrawerMode(undefined);
       });
    }
 
@@ -247,8 +266,142 @@ export default function BlockedServices(props: Props) {
          if (editor.mode === "edit" && editor.key === target) {
             resetWindow();
             windowCrud.close();
+            setDrawerMode(undefined);
          }
       });
+   }
+
+   function resetSchedule() {
+      setSchedName("");
+      setSchedPriority("1");
+      setSchedWindows([]);
+   }
+
+   function fillSchedule(schedule: Schedule) {
+      setSchedName(schedule.name);
+      setSchedPriority(String(schedule.priority));
+      setSchedWindows(schedule.windows.map((window) => ({ ...window, days: [...window.days] })));
+   }
+
+   // blankScheduleWindow is the weeknights span, the shape an operator reaches
+   // for first; the editor takes it from there.
+   function blankScheduleWindow(): ScheduleWindow {
+      return { days: [1, 2, 3, 4, 5], start: "21:00", end: "07:00" };
+   }
+
+   function toggleScheduleDay(index: number, day: number) {
+      setSchedWindows((current) =>
+         current.map((window, position) => {
+            if (position !== index) {
+               return window;
+            }
+            const days = window.days.includes(day) ? window.days.filter((entry) => entry !== day) : [...window.days, day].sort();
+            return { ...window, days };
+         }),
+      );
+   }
+
+   function setScheduleWindowAt(index: number, patch: { start?: string; end?: string }) {
+      setSchedWindows((current) =>
+         current.map((window, position) => (position === index ? { ...window, ...patch } : window)),
+      );
+   }
+
+   // openNewSchedule takes the flag that says the window form asked for it, so
+   // closing the schedule editor returns to the window instead of leaving the
+   // operator with nothing on screen.
+   function openNewSchedule(fromForm: boolean) {
+      resetSchedule();
+      setFromWindowForm(fromForm);
+      setDrawerMode("schedule");
+      scheduleCrud.openNew();
+   }
+
+   function editSchedule(schedule: Schedule) {
+      fillSchedule(schedule);
+      setFromWindowForm(false);
+      setDrawerMode("schedule");
+      scheduleCrud.openEdit(schedule.name);
+   }
+
+   // The name is the key the schedules API writes through, so the copy asks for
+   // a free one and keeps the priority and the windows.
+   function duplicateSchedule(schedule: Schedule) {
+      fillSchedule(schedule);
+      setSchedName(duplicateName(schedule.name, props.schedules.map((entry) => entry.name)));
+      setFromWindowForm(false);
+      setDrawerMode("schedule");
+      scheduleCrud.openDuplicate(schedule.name);
+   }
+
+   function backToWindowForm(): boolean {
+      return drawerMode() === "schedule" && fromWindowForm() && windowCrud.editor().mode !== "closed";
+   }
+
+   function closeDrawer() {
+      const back = backToWindowForm();
+      scheduleCrud.close();
+      setFromWindowForm(false);
+      if (back) {
+         setDrawerMode("window");
+         return;
+      }
+      windowCrud.close();
+      setDrawerMode(undefined);
+   }
+
+   async function submitSchedule(event: SubmitEvent) {
+      event.preventDefault();
+      const key = schedName().trim();
+      if (!key) {
+         scheduleCrud.setError("a schedule needs a name");
+         return;
+      }
+      if (schedWindows().length === 0) {
+         scheduleCrud.setError("a schedule needs at least one window");
+         return;
+      }
+      const input: ScheduleInput = { priority: Number(schedPriority()) || 1, windows: schedWindows() };
+      const back = backToWindowForm();
+      await scheduleCrud.run(async () => {
+         await props.onSaveSchedule(key, input);
+         if (back && !winSchedule()) {
+            setWinSchedule(key);
+         }
+         resetSchedule();
+         scheduleCrud.close();
+         setFromWindowForm(false);
+         setDrawerMode(back ? "window" : undefined);
+      });
+   }
+
+   async function removeSchedule(target: string) {
+      // The editor state is read before the request, because a continuation
+      // that reads a signal after the await runs outside any tracking scope.
+      const editor = scheduleCrud.editor();
+      const back = backToWindowForm();
+      await scheduleCrud.run(async () => {
+         await props.onDeleteSchedule(target);
+         if (editor.mode === "edit" && editor.key === target) {
+            resetSchedule();
+            scheduleCrud.close();
+            setDrawerMode(back ? "window" : undefined);
+         }
+      });
+   }
+
+   // usageLine reads why a schedule matters before an operator deletes it: the
+   // windows and the custom rules that still name it.
+   function usageLine(name: string): string {
+      const used = scheduleUsage(name, props.windows, props.rules);
+      const parts: string[] = [];
+      if (used.windows > 0) {
+         parts.push(`${used.windows} window${used.windows === 1 ? "" : "s"}`);
+      }
+      if (used.rules > 0) {
+         parts.push(`${used.rules} rule${used.rules === 1 ? "" : "s"}`);
+      }
+      return parts.length > 0 ? `named by ${parts.join(" and ")}` : "not named by anything yet";
    }
 
    function toggleCollapsed(group: string) {
@@ -399,7 +552,7 @@ export default function BlockedServices(props: Props) {
                      <span class="muted" style={{ "font-size": "11.5px", "margin-right": "12px" }}>
                         A window changes service blocking for its clients while its schedule holds.
                      </span>
-                     <button type="button" class="btn-mini" onClick={openNewWindow}>
+                     <button type="button" class="btn-mini" data-testid="window-new" onClick={openNewWindow}>
                         + New window
                      </button>
                   </div>
@@ -458,14 +611,77 @@ export default function BlockedServices(props: Props) {
                   </ul>
                </section>
 
+               <section class="sheet" style={{ "margin-top": "22px" }}>
+                  <div class="sheet-head">
+                     <h2>Schedules</h2>
+                     <span class="muted" style={{ "font-size": "11.5px", "margin-right": "12px" }}>
+                        A schedule is the clock a window or a rule reads, and it applies only while it covers the query minute.
+                     </span>
+                     <button type="button" class="btn-mini" data-testid="schedule-add" onClick={() => openNewSchedule(false)}>
+                        + New schedule
+                     </button>
+                  </div>
+                  <Show when={scheduleCrud.error()}>
+                     <p class="error" data-testid="schedule-error" style={{ margin: "10px 16px" }}>
+                        {scheduleCrud.error()}
+                     </p>
+                  </Show>
+                  <Show when={props.schedules.length === 0}>
+                     <p class="muted" data-testid="schedules-empty" style={{ padding: "12px 16px" }}>
+                        No schedules yet. A window needs one to say when it holds.
+                     </p>
+                  </Show>
+                  <ul style={{ "list-style": "none", padding: "10px 12px", display: "flex", "flex-direction": "column", gap: "8px" }}>
+                     <For each={props.schedules}>
+                        {(schedule) => (
+                           <li
+                              data-testid="schedule-row"
+                              style={{
+                                 display: "flex",
+                                 "align-items": "center",
+                                 "justify-content": "space-between",
+                                 gap: "12px",
+                                 padding: "9px 12px",
+                                 border: "1px solid var(--line)",
+                                 "border-radius": "12px",
+                                 background: "var(--surface-2)",
+                              }}
+                           >
+                              <div style={{ display: "flex", "flex-direction": "column", gap: "2px", "min-width": "0" }}>
+                                 <span class="entry-title">
+                                    {schedule.name}
+                                    <span class="badge kind" data-testid="schedule-priority-badge">
+                                       p{schedule.priority}
+                                    </span>
+                                 </span>
+                                 <span class="entry-sub">
+                                    {describeSchedule(schedule)}
+                                    {" · "}
+                                    {usageLine(schedule.name)}
+                                 </span>
+                              </div>
+                              <CrudActions
+                                 testid="schedule"
+                                 label={schedule.name}
+                                 busy={scheduleCrud.busy()}
+                                 onEdit={() => editSchedule(schedule)}
+                                 onDuplicate={() => duplicateSchedule(schedule)}
+                                 onDelete={() => void removeSchedule(schedule.name)}
+                              />
+                           </li>
+                        )}
+                     </For>
+                  </ul>
+               </section>
+
                {error() ? <p class="error">{error()}</p> : null}
             </div>
          </div>
 
          <Drawer
-            open={windowCrud.editor().mode !== "closed"}
+            open={drawerMode() === "window"}
             title={editorTitle(windowCrud.editor(), "window")}
-            onClose={windowCrud.close}
+            onClose={closeDrawer}
          >
             <form onSubmit={(event) => void submitWindow(event)} style={{ display: "contents" }}>
                <label>
@@ -485,11 +701,14 @@ export default function BlockedServices(props: Props) {
                      <For each={props.schedules}>{(entry) => <option value={entry.name}>{entry.name}</option>}</For>
                   </select>
                </label>
-               <Show when={props.schedules.length === 0}>
-                  <p class="muted" style={{ "font-size": "11.5px" }}>
-                     Create a schedule first; a window is only active while its schedule holds.
-                  </p>
-               </Show>
+               <div class="row-actions" style={{ "justify-content": "space-between", "align-items": "center" }}>
+                  <span class="muted" style={{ "font-size": "11.5px" }}>
+                     A window holds only while its schedule covers the query minute.
+                  </span>
+                  <button type="button" class="btn-ghost" data-testid="window-new-schedule" onClick={() => openNewSchedule(true)}>
+                     + New schedule
+                  </button>
+               </div>
                <div class="window-action-picker">
                   <span>While the schedule holds</span>
                   <div class="seg">
@@ -596,6 +815,97 @@ export default function BlockedServices(props: Props) {
                <div class="row-actions" style={{ "justify-content": "flex-end" }}>
                   <button type="submit" class="btn" data-testid="window-save" disabled={windowCrud.busy()}>
                      Save window
+                  </button>
+               </div>
+            </form>
+         </Drawer>
+
+         <Drawer
+            open={drawerMode() === "schedule"}
+            title={editorTitle(scheduleCrud.editor(), "schedule")}
+            onClose={closeDrawer}
+         >
+            <form onSubmit={(event) => void submitSchedule(event)} style={{ display: "contents" }}>
+               <label>
+                  Name
+                  <input
+                     data-testid="schedule-name"
+                     value={schedName()}
+                     placeholder="night"
+                     disabled={scheduleCrud.editor().mode === "edit"}
+                     onInput={(event) => setSchedName(event.currentTarget.value)}
+                  />
+               </label>
+               <label>
+                  Priority
+                  <input
+                     data-testid="schedule-priority"
+                     type="number"
+                     value={schedPriority()}
+                     onInput={(event) => setSchedPriority(event.currentTarget.value)}
+                  />
+               </label>
+               <p class="muted" style={{ "font-size": "11.5px" }}>
+                  Priority breaks the tie when two schedules cover the same minute; a higher number wins.
+               </p>
+
+               <div class="windows-editor">
+                  <For each={schedWindows()}>
+                     {(entry, index) => (
+                        <div class="window-editor" data-testid="schedule-window">
+                           <div class="day-picker">
+                              <For each={["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]}>
+                                 {(label, day) => (
+                                    <label class="day-option">
+                                       <input
+                                          type="checkbox"
+                                          checked={entry.days.includes(day())}
+                                          onChange={() => toggleScheduleDay(index(), day())}
+                                       />
+                                       {label}
+                                    </label>
+                                 )}
+                              </For>
+                           </div>
+                           <input
+                              type="time"
+                              value={entry.start}
+                              onInput={(event) => setScheduleWindowAt(index(), { start: event.currentTarget.value })}
+                           />
+                           <input
+                              type="time"
+                              value={entry.end}
+                              onInput={(event) => setScheduleWindowAt(index(), { end: event.currentTarget.value })}
+                           />
+                           <button
+                              type="button"
+                              class="btn-mini"
+                              onClick={() => setSchedWindows((current) => current.filter((_, position) => position !== index()))}
+                           >
+                              Remove
+                           </button>
+                        </div>
+                     )}
+                  </For>
+                  <button
+                     type="button"
+                     class="btn-ghost"
+                     data-testid="schedule-add-window"
+                     onClick={() => setSchedWindows((current) => [...current, blankScheduleWindow()])}
+                  >
+                     Add window
+                  </button>
+               </div>
+
+               <Show when={scheduleCrud.error()}>
+                  <p class="error" data-testid="schedule-form-error">
+                     {scheduleCrud.error()}
+                  </p>
+               </Show>
+               <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+                  <SaveStatus state={scheduleCrud.saveState()} />
+                  <button type="submit" class="btn" data-testid="schedule-save" disabled={scheduleCrud.busy()}>
+                     Save schedule
                   </button>
                </div>
             </form>
