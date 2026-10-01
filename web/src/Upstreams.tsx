@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import type { Route, RouteInput, Upstream, UpstreamInput } from "./api";
 import CrudActions from "./CrudActions";
+import SaveStatus from "./SaveStatus";
 import DataTable, { type Column } from "./DataTable";
 import { createCrud, duplicateName, editorTitle } from "./crud";
 import Drawer from "./Drawer";
@@ -212,6 +213,7 @@ export default function Upstreams(props: Props) {
          render: (row) => (
             <CrudActions
                testid="upstream"
+               label={row.name}
                busy={upstreamCrud.busy()}
                onEdit={() => editUpstream(row)}
                onDuplicate={() => duplicateUpstream(row)}
@@ -250,6 +252,7 @@ export default function Upstreams(props: Props) {
          render: (route) => (
             <CrudActions
                testid="route"
+               label={route.domain || "any domain"}
                busy={routeCrud.busy()}
                onEdit={() => editRoute(route)}
                onDuplicate={() => duplicateRoute(route)}
@@ -353,6 +356,7 @@ export default function Upstreams(props: Props) {
                </label>
                {upstreamCrud.error() ? <p class="error">{upstreamCrud.error()}</p> : null}
                <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+                  <SaveStatus state={upstreamCrud.saveState()} />
                   <button type="submit" class="btn" data-testid="upstream-save" disabled={upstreamCrud.busy()}>
                      Save
                   </button>
@@ -397,6 +401,7 @@ export default function Upstreams(props: Props) {
                </label>
                {routeCrud.error() ? <p class="error">{routeCrud.error()}</p> : null}
                <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+                  <SaveStatus state={routeCrud.saveState()} />
                   <button type="submit" class="btn" data-testid="route-save" disabled={routeCrud.busy()}>
                      Save
                   </button>

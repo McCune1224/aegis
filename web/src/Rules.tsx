@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import type { Rule, RuleInput } from "./api";
 import CrudActions from "./CrudActions";
+import SaveStatus from "./SaveStatus";
 import DataTable, { type Column } from "./DataTable";
 import { createCrud, editorTitle } from "./crud";
 import Drawer from "./Drawer";
@@ -194,6 +195,7 @@ export default function Rules(props: Props) {
          render: (rule) => (
             <CrudActions
                testid="rule"
+               label={rule.domain}
                busy={crud.busy()}
                onEdit={() => edit(rule)}
                onDuplicate={() => duplicate(rule)}
@@ -298,6 +300,7 @@ export default function Rules(props: Props) {
                </label>
                {crud.error() ? <p class="error">{crud.error()}</p> : null}
                <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+                  <SaveStatus state={crud.saveState()} />
                   <button type="submit" class="btn" data-testid="rule-save" disabled={crud.busy()}>
                      Save
                   </button>

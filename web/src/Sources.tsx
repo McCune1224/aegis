@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import { previewSource, refreshSource, type CatalogEntry, type Source, type SourceInput, type SourcePreview } from "./api";
 import CrudActions from "./CrudActions";
+import SaveStatus from "./SaveStatus";
 import DataTable, { type Column } from "./DataTable";
 import { createCrud, duplicateName, editorTitle } from "./crud";
 import Drawer from "./Drawer";
@@ -285,6 +286,7 @@ export default function Sources(props: Props) {
                </button>
                <CrudActions
                   testid="source"
+                  label={source.name}
                   busy={crud.busy()}
                   onEdit={() => edit(source)}
                   onDuplicate={() => duplicate(source)}
@@ -372,6 +374,7 @@ export default function Sources(props: Props) {
                </label>
                {crud.error() ? <p class="error">{crud.error()}</p> : null}
                <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+                  <SaveStatus state={crud.saveState()} />
                   <button type="submit" class="btn" data-testid="source-save" disabled={crud.busy()}>
                      Save
                   </button>

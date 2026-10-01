@@ -2,6 +2,7 @@ import { createSignal, For, Show } from "solid-js";
 import type { Profile, ProfileInput, SafesearchEngine } from "./api";
 import { BLOCKING_MODES } from "./api";
 import CrudActions from "./CrudActions";
+import SaveStatus from "./SaveStatus";
 import { createCrud, duplicateName, editorTitle } from "./crud";
 import { toggled } from "./services";
 import Drawer from "./Drawer";
@@ -164,6 +165,7 @@ export default function Profiles(props: Props) {
                         </span>
                         <CrudActions
                            testid="profile"
+                           label={profile.name}
                            busy={crud.busy()}
                            onEdit={() => edit(profile)}
                            onDuplicate={() => duplicate(profile)}
@@ -246,6 +248,7 @@ export default function Profiles(props: Props) {
                         Make default
                      </button>
                   </Show>
+                  <SaveStatus state={crud.saveState()} />
                   <button type="submit" class="btn" data-testid="profile-save" disabled={crud.busy()}>
                      Save
                   </button>

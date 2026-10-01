@@ -57,4 +57,34 @@ describe("createCrud", () => {
       flush();
       expect(crud.editor()).toEqual({ mode: "closed" });
    });
+
+   it("reports saving while a run is in flight and saved once it lands", async () => {
+      const crud = createCrud<string>();
+      expect(crud.saveState()).toBe("idle");
+
+      let release = () => {};
+      const inFlight = new Promise<void>((resolve) => {
+         release = resolve;
+      });
+      const run = crud.run(() => inFlight);
+      flush();
+      expect(crud.saveState()).toBe("saving");
+      expect(crud.busy()).toBe(true);
+
+      release();
+      await run;
+      flush();
+      expect(crud.saveState()).toBe("saved");
+      expect(crud.busy()).toBe(false);
+   });
+
+   it("leaves no saved badge behind when the run fails", async () => {
+      const crud = createCrud<string>();
+      await crud.run(async () => {
+         throw new Error("refused");
+      });
+      flush();
+      expect(crud.saveState()).toBe("idle");
+      expect(crud.error()).toBe("Error: refused");
+   });
 });

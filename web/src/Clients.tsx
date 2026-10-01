@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import type { Client, ClientInput, Discovery, Observed, Profile } from "./api";
 import CrudActions from "./CrudActions";
+import SaveStatus from "./SaveStatus";
 import Discoveries from "./Discoveries";
 import { createCrud, duplicateName, editorTitle } from "./crud";
 import Drawer from "./Drawer";
@@ -158,6 +159,7 @@ export default function Clients(props: Props) {
                         </span>
                         <CrudActions
                            testid="client"
+                           label={client.name}
                            busy={crud.busy()}
                            onEdit={() => edit(client)}
                            onDuplicate={() => duplicate(client)}
@@ -301,6 +303,7 @@ export default function Clients(props: Props) {
                </label>
                {crud.error() ? <p class="error">{crud.error()}</p> : null}
                <div class="row-actions" style={{ "justify-content": "flex-end" }}>
+                  <SaveStatus state={crud.saveState()} />
                   <button type="submit" class="btn" data-testid="client-save" disabled={crud.busy()}>
                      Save
                   </button>

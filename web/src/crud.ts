@@ -1,5 +1,10 @@
 import { createSignal } from "solid-js";
 
+// SaveState is what the operator needs to see while a write travels: nothing,
+// the write in flight, or the write landed. A page shows it instead of leaving
+// a frozen form to explain itself.
+export type SaveState = "idle" | "saving" | "saved";
+
 // Every list page edits a row the same three ways: new, rewrite in place, or
 // copy under a free key. Naming the state once is what keeps a page from
 // growing an "editing" boolean and a separate "duplicating" one that drift.
@@ -60,12 +65,18 @@ export function createCrud<K>() {
    const [editor, setEditor] = createSignal<Editor<K>>({ mode: "closed" });
    const [busy, setBusy] = createSignal(false);
    const [error, setError] = createSignal<string>();
+   const [saveState, setSaveState] = createSignal<SaveState>("idle");
 
    return {
       editor,
       busy,
       error,
+      saveState,
       setError,
+
+      clearSaved(): void {
+         setSaveState("idle");
+      },
 
       openNew(): void {
          setError(undefined);
@@ -87,14 +98,18 @@ export function createCrud<K>() {
       },
 
       async run(action: () => Promise<void>): Promise<void> {
+         setSaveState("saving");
          setBusy(true);
          setError(undefined);
+         let failed = false;
          try {
             await action();
          } catch (cause) {
+            failed = true;
             setError(String(cause));
          } finally {
             setBusy(false);
+            setSaveState(failed ? "idle" : "saved");
          }
       },
    };
