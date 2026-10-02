@@ -5,6 +5,7 @@
 //
 //   node scripts/e2e/drive.mjs baseline     write round trips on the current build
 //   node scripts/e2e/drive.mjs gaps         the three dogfooding gap proofs
+//   node scripts/e2e/drive.mjs prove        save-then-block, then the full-wipe round trip
 //
 // The binary under test is AEGIS_BIN (default bin/aegis). Everything else is
 // picked free at run time and thrown away at exit.
@@ -42,6 +43,23 @@ async function waitUntilHealthy(base, timeoutMs = 20000) {
     await sleep(120);
   }
   throw new Error(`aegis never answered on ${base}`);
+}
+
+// waitUntil polls one condition until it holds. Waiting on state rather than on
+// a clock is what keeps a slow build from failing a proof that would pass.
+async function waitUntil(fn, label, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (await fn()) {
+        return;
+      }
+    } catch {
+      // not readable yet
+    }
+    await sleep(120);
+  }
+  throw new Error(`never became true: ${label}`);
 }
 
 class Rig {
@@ -118,6 +136,15 @@ class Rig {
     for (const name of ["ads.example.com", "ads.example.com", "example.com", "tracker.example.net"]) {
       spawnSync("dig", ["+short", "-p", String(this.ports.dns), "@127.0.0.1", name], { timeout: 5000 });
     }
+
+    // The log flushes once a second and the page reads its observed feed once
+    // when it boots, so the rows these digs produced have to be readable before
+    // the browser opens. Otherwise the graph is built from a feed that has never
+    // heard of the address and the device never draws.
+    await waitUntil(async () => {
+      const log = await (await fetch(`${this.base}/api/v1/queries?client=127.0.0.1&limit=1`)).json();
+      return log.queries.length > 0;
+    }, "the seeded queries reach the query log");
 
     // Discoveries have no API write path; the DHCP server is the only writer.
     // A run seeds the rows directly, the same class of write the media capture
@@ -583,11 +610,169 @@ async function gaps() {
   }
 }
 
+// ── prove: the save reaches the filter, and a wipe leaves a working server ──
+
+async function prove() {
+  const rig = await new Rig({ bin: BIN }).up();
+  const browser = await Browser.launch({ port: rig.ports.devtools });
+  const failures = [];
+  const check = (name, ok, detail) => {
+    console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail === undefined ? "" : ` — ${detail}`}`);
+    if (!ok) {
+      failures.push(name);
+    }
+  };
+
+  // One real DNS question, read the way an operator reads it: the rcode plus
+  // whatever the answer section carries.
+  const dig = (name) => {
+    const run = spawnSync("dig", ["+time=3", "+tries=1", "-p", String(rig.ports.dns), "@127.0.0.1", name, "A"], { timeout: 15000 });
+    const answer = run.stdout.toString();
+    const status = /status: (\w+)/.exec(answer)?.[1] ?? "no answer";
+    const section = /;; ANSWER SECTION:\n([\s\S]*?)\n\n/.exec(answer)?.[1] ?? "";
+    return { status, answers: section.split("\n").filter(Boolean) };
+  };
+
+  // The log flushes once a second, so a verdict is waited for rather than
+  // assumed, and a caller asks for the row it means: the newest row for a name
+  // is the question just asked, but only once the flush carried it.
+  const rowFor = async (name, matches) => {
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const log = await (await fetch(`${rig.base}/api/v1/queries?limit=20`)).json();
+      const row = log.queries.find((entry) => entry.name === name && matches(entry));
+      if (row) {
+        return row;
+      }
+      await sleep(250);
+    }
+    return null;
+  };
+
+  try {
+    // The catalog is the input a save needs, so the run waits for the stored
+    // copy instead of racing the boot fetch.
+    await waitUntil(
+      async () => (await (await fetch(`${rig.base}/api/v1/services`)).json()).services.length > 0,
+      "the services catalog is stored",
+    );
+
+    // One setting in place before the browser opens, so the Settings page has
+    // a tag to show and the wipe has a list to empty. It goes in the denied
+    // list: a non-empty allowed list serves only what it names, which would
+    // shut the harness's own queries out.
+    const stored = await fetch(`${rig.base}/api/v1/access`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allowed: [], disallowed: ["192.0.2.1/32"] }),
+    });
+    check("an access list is stored before the wipe", stored.ok);
+
+    const page = await browser.newPage();
+    await page.viewport({ width: 1440, height: 900 });
+    await page.open(`${rig.base}/#/services`);
+    await page.waitFor(`document.querySelectorAll('[data-testid^="service-"]').length > 0`);
+    const requests = watchRequests(page);
+
+    const catalog = await (await fetch(`${rig.base}/api/v1/services`)).json();
+    const reddit = catalog.services.find((service) => service.id === "reddit");
+    check("the catalog carries reddit", Boolean(reddit), JSON.stringify(catalog.services.slice(0, 3).map((service) => service.id)));
+    if (!reddit) {
+      throw new Error("no reddit in the catalog, so there is nothing to save");
+    }
+
+    // ── save then block ─────────────────────────────────────────────────────
+    const before = dig("reddit.com");
+    check("reddit.com is let through before the save", before.status !== "NXDOMAIN", `status ${before.status}, ${before.answers.length} answers`);
+    const beforeRow = await rowFor("reddit.com", (entry) => entry.verdict === "allow");
+    check("the log agrees the query was allowed", Boolean(beforeRow), JSON.stringify(beforeRow));
+
+    await page.click(`[data-testid="service-${reddit.id}"]`);
+    await page.waitFor(`document.querySelector('[data-testid="services-save"]') !== null`);
+    await page.click('[data-testid="services-save"]');
+    await page.waitFor(`document.querySelector('[data-testid="save-status"]')?.textContent === 'saved'`, { label: "the save lands" });
+
+    const after = dig("reddit.com");
+    check("reddit.com is blocked after the save", after.status === "NXDOMAIN", `status ${after.status}`);
+    const afterRow = await rowFor("reddit.com", (entry) => entry.verdict === "block" && String(entry.rule ?? "").startsWith(`${reddit.id}:`));
+    check("the block carries the service rule", Boolean(afterRow), JSON.stringify(afterRow));
+
+    // ── the full-wipe round trip ────────────────────────────────────────────
+    const clientsBefore = (await (await fetch(`${rig.base}/api/v1/clients`)).json()).length;
+    const discoveriesBefore = (await (await fetch(`${rig.base}/api/v1/discoveries`)).json()).discoveries.length;
+    const queriesBefore = (await (await fetch(`${rig.base}/api/v1/queries?limit=1`)).json()).queries.length;
+    check(
+      "the box holds something before the wipe",
+      clientsBefore > 0 && discoveriesBefore > 0 && queriesBefore > 0,
+      `${clientsBefore} clients, ${discoveriesBefore} discoveries, ${queriesBefore}+ queries`,
+    );
+
+    await page.click('[data-testid="tab-system"]');
+    await page.waitFor(`Boolean(document.querySelector('[data-testid="tab-settings"]'))`, { label: "the system subnav" });
+    await page.click('[data-testid="tab-settings"]');
+    await page.waitFor(`Boolean(document.querySelector('[data-testid="settings-reset"]'))`, { label: "the reset button" });
+    check("the access tag is on screen", await page.evaluate(`document.querySelector('[data-testid="access-deny-tag"]') !== null`));
+
+    requests.length = 0;
+    await page.click('[data-testid="settings-reset"]');
+    await sleep(300);
+    const armed = await text(page, '[data-testid="settings-reset"]');
+    check("the first press arms and sends nothing", count(requests, "POST", "/api/v1/reset") === 0 && armed.includes("Confirm wipe"), armed);
+
+    await page.click('[data-testid="settings-reset"]');
+    await waitUntil(async () => (await (await fetch(`${rig.base}/api/v1/clients`)).json()).length === 0, "the wipe lands");
+    check("one wipe, one request", count(requests, "POST", "/api/v1/reset") === 1, `${count(requests, "POST", "/api/v1/reset")} POSTs`);
+
+    const clientsAfter = (await (await fetch(`${rig.base}/api/v1/clients`)).json()).length;
+    const discoveriesAfter = (await (await fetch(`${rig.base}/api/v1/discoveries`)).json()).discoveries.length;
+    const queriesAfter = (await (await fetch(`${rig.base}/api/v1/queries?limit=1`)).json()).queries.length;
+    const servicesAfter = (await (await fetch(`${rig.base}/api/v1/services`)).json()).services.length;
+    const accessAfter = await (await fetch(`${rig.base}/api/v1/access`)).json();
+    check("clients are gone", clientsAfter === 0, `${clientsAfter} left`);
+    check("discoveries are gone", discoveriesAfter === 0, `${discoveriesAfter} left`);
+    check("the query log is gone", queriesAfter === 0, `${queriesAfter} left`);
+    check("the services catalog is gone", servicesAfter === 0, `${servicesAfter} left`);
+    check("settings are gone", accessAfter.allowed.length === 0 && accessAfter.disallowed.length === 0, JSON.stringify(accessAfter));
+
+    await page.waitFor(`document.querySelector('[data-testid="access-deny-tag"]') === null`, { label: "the access tag leaves the screen" });
+    check("the page shows the empty state", await page.evaluate(`document.body.textContent.includes("nobody is refused")`));
+
+    // The wiped server still answers: the blocklist file it booted with is
+    // untouched, and a name nothing blocks still leaves for upstream.
+    const stillBlocks = dig("ads.example.com");
+    check("the wiped server still blocks", stillBlocks.status === "NXDOMAIN", `status ${stillBlocks.status}`);
+    const stillServes = dig("example.com");
+    check("the wiped server still serves", stillServes.status !== "NXDOMAIN", `status ${stillServes.status}`);
+
+    // And the save path still works on it: one press brings the catalog back,
+    // and the slider blocks again.
+    await page.click('[data-testid="tab-services"]');
+    await page.waitFor(`document.body.textContent.includes("No services in the catalog yet")`, { label: "the services page is empty" });
+    await page.click('[data-testid="services-refresh"]');
+    await page.waitFor(`document.querySelectorAll('[data-testid^="service-"]').length > 0`, { label: "the catalog comes back", timeoutMs: 30000 });
+    await page.click(`[data-testid="service-${reddit.id}"]`);
+    await page.waitFor(`document.querySelector('[data-testid="services-save"]') !== null`);
+    await page.click('[data-testid="services-save"]');
+    await page.waitFor(`document.querySelector('[data-testid="save-status"]')?.textContent === 'saved'`, { label: "the save lands again" });
+    const again = dig("reddit.com");
+    check("save-then-block works on the wiped server", again.status === "NXDOMAIN", `status ${again.status}`);
+
+    if (failures.length > 0) {
+      throw new Error(`${failures.length} checks failed: ${failures.join("; ")}`);
+    }
+    console.log("ALL CHECKS PASSED");
+  } finally {
+    await browser.close();
+    await rig.down();
+  }
+}
+
 const command = process.argv[2] ?? "baseline";
 if (command === "baseline") {
   await baseline();
 } else if (command === "gaps") {
   await gaps();
+} else if (command === "prove") {
+  await prove();
 } else if (command === "shots") {
   const out = process.argv[3] ?? "/tmp/opencode/gap";
   const rig = await new Rig({ bin: BIN }).up();
