@@ -2,15 +2,17 @@
 
 Aegis ships as one static binary and one multi-arch container, and nothing else
 lives between the build and a running resolver. There is no configuration
-management, no orchestrator, and no auto-updater. This records the two supported
-ways to run it, how a release is cut, and where the boundary sits.
+management and no orchestrator; upgrades are one command against a published
+release. This records the two supported ways to run it, how a release is cut,
+and where the boundary sits.
 
 ## The decision
 
 An operator either copies the binary and runs it under systemd, or runs the
 published image. Both read the same SQLite file and the same flags, so moving
-between them is copying that file. Neither path needs root for DNS when a
-resolver already holds port 53, which is the common case on a home network.
+between them is copying that file. Installing the system copy takes one
+sudo; running it never does, because DNS sits on a high port while a resolver
+already holds port 53, which is the common case on a home network.
 
 The alternative was a packaged artifact per distribution (deb, rpm, an installer
 script). It was rejected because it multiplies the things that can drift from
@@ -40,15 +42,21 @@ A release is therefore:
     git tag v0.1.0
     git push origin v0.1.0
 
-## Raspberry Pi: binary and a user systemd unit
+## Raspberry Pi: binary, a system unit, one sudo
 
-No root is needed. The DNS listener uses a high port and the API stays on
-loopback, so the whole service runs as the login user.
+The install takes root once and the service never gets it back. The binary
+lands in `/usr/local/bin`, the database in `/var/lib/aegis`, and systemd runs
+the unit as a dedicated `aegis` user that can write only the data directory.
+The version in the paths below is the release being installed; every asset is
+named `aegis_<version>_<os>_<arch>` and `checksums.txt` beside it covers it.
 
-    scp aegis-linux-arm64 pi:~/aegis
-    ssh pi 'chmod +x ~/aegis && mkdir -p ~/aegis-data ~/.config/systemd/user'
+    curl -sL https://github.com/McCune1224/aegis/releases/download/v0.2.0/aegis_0.2.0_linux_arm64.tar.gz \
+      | tar -C /tmp -xz aegis
+    sudo install -m 0755 /tmp/aegis /usr/local/bin/aegis
+    sudo useradd --system --home-dir /var/lib/aegis --shell /usr/sbin/nologin aegis
+    sudo install -d -o aegis -g aegis -m 0755 /var/lib/aegis
 
-    ~/.config/systemd/user/aegis.service:
+    /etc/systemd/system/aegis.service:
 
     [Unit]
     Description=Aegis DNS sinkhole
@@ -57,14 +65,35 @@ loopback, so the whole service runs as the login user.
 
     [Service]
     Type=simple
-    ExecStart=%h/aegis serve --db %h/aegis-data/aegis.db \
+    User=aegis
+    Group=aegis
+    ExecStart=/usr/local/bin/aegis serve --db /var/lib/aegis/aegis.db \
       --dns-address 0.0.0.0:15353 --api-address 127.0.0.1:18099 \
       --upstream 9.9.9.9:53
     Restart=on-failure
     RestartSec=3
 
     [Install]
-    WantedBy=default.target
+    WantedBy=multi-user.target
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now aegis
+
+The high port is deliberate. AdGuard Home already holds port 53 and keeps it.
+The cutover this document used to describe was retired on 2026-09-24. Aegis
+stays a second resolver on `:15353` and never takes `:53`, so there is no
+cutover to survive and no household rollback to write.
+
+### Without sudo
+
+Where sudo is unavailable the same unit runs as a user unit in the home
+directory, at the cost of one install only this user owns. Write it to
+`~/.config/systemd/user/aegis.service`, drop `User=` and `Group=`, set
+`WantedBy=default.target`, and point `ExecStart` at `%h/aegis` with the
+database at `%h/aegis-data/aegis.db`:
+
+    scp aegis_0.2.0_linux_arm64.tar.gz pi:~/aegis.tar.gz
+    ssh pi 'tar -C ~ -xzf aegis.tar.gz && mkdir -p ~/aegis-data ~/.config/systemd/user'
 
     loginctl enable-linger "$USER"
     systemctl --user daemon-reload
@@ -72,11 +101,6 @@ loopback, so the whole service runs as the login user.
 
 `enable-linger` is what makes a user unit outlive the SSH session and start at
 boot; without it the service stops when the last session closes.
-
-The high port is deliberate. AdGuard Home already holds port 53 and keeps it.
-The cutover this document used to describe was retired on 2026-09-24. Aegis
-stays a second resolver on `:15353` and never takes `:53`, so there is no
-cutover to survive and no household rollback to write.
 
 ## What the Pi blocks
 
@@ -99,6 +123,25 @@ Both settings live in the API, so rolling them back is three calls:
 Verify against the high port. `dig -p 15353 @<pi-address> doubleclick.net`
 answers NXDOMAIN while blocking is on and NOERROR after the rollback.
 
+## Updating
+
+`aegis update` replaces the running binary with the newest published release:
+
+    sudo aegis update
+
+It reads the release metadata, downloads the asset for this platform, checks
+it against the release's `checksums.txt`, moves the new binary over the old
+one, and restarts the service when systemd is already running it. A build
+that carries no release version, or one past the newest tag, is refused
+unless `--force` says otherwise, so a snapshot is never silently replaced.
+
+    aegis update --check             # report only, safe to run from cron
+    aegis update --repo fork/name    # another repository's releases
+
+A box running the user unit above runs the same command as that user, with
+no sudo. Updating a container is not this command's job; pull the image
+instead.
+
 ## Container
 
 The image is `scratch` plus the binary, a CA bundle, and a volume for the
@@ -115,14 +158,17 @@ or a high DNS port beside an existing resolver.
 
 ## Deferred, with the reason
 
-**Auto-update and rollback.** The service is a file and a unit; replacing the
-file and restarting is the update. A watchtower-style puller or a self-updater
-adds a second process with the power to replace the resolver, for a task an
-operator does by hand once a release. Revisit if there are enough hosts that
-manual updates become the bottleneck.
+**An always-on updater.** `aegis update` is the update, run by the operator
+or by one cron line. A process that polls for releases and rewrites the
+resolver on its own adds a second process with the power to replace the
+resolver, and it inherits the job of deciding when a household is ready for
+a restart. Checking from the running service so the console can badge an
+available version is the same decision and stays deferred with it. Revisit if
+enough hosts make the command the bottleneck.
 
 **A shipped unit file.** The unit above lives in this document rather than in
-the repo, because the paths, the port, and the upstream are host-specific and a
-templated unit would carry every operator's choices as defaults. Revisit when a
-second host needs the same file and the differences are values rather than
-structure.
+the repo. Its paths are now the same on every host, but the port, the
+upstream, and the listen addresses are the operator's choices, and a
+templated unit would carry them as defaults. Revisit when it ships as part of
+an `aegis service install` command that writes the unit from the values
+passed at install time.
