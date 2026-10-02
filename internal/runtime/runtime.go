@@ -199,6 +199,10 @@ func (r *Runtime) publish(ctx context.Context) error {
 
 	r.switcher.Swap(pool)
 	r.current.Store(&snapshot{set: set, identity: identity, rewrites: rewrite.New(cfg.Rewrites), safeSearch: safeSearch, routes: upstream.NewRouter(routes), gate: gate{allowed: cfg.Allowed, disallowed: cfg.Disallowed}})
+	// The line an operator reads after a write: what went live, and how much of
+	// it an enabled service contributed. A reload that fails instead leaves the
+	// caller's error on the wire and this line absent.
+	r.logger.Info("config published", "rules", set.Len(), "service_rules", len(serviceList))
 	return nil
 }
 
