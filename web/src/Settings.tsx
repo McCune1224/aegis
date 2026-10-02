@@ -11,6 +11,9 @@ type Props = {
   onSetWindow: (minutes: number) => void;
   live: boolean;
   onSetLive: (live: boolean) => void;
+  // onReset is the full wipe: it runs only after the second press on the
+  // screen, and it re-reads every list once the server has emptied them.
+  onReset: () => Promise<void>;
 };
 
 // Settings covers what the API can change today plus the console's display
@@ -22,6 +25,9 @@ export default function Settings(props: Props) {
   const [denyEntry, setDenyEntry] = createSignal("");
   const [accessError, setAccessError] = createSignal<string>();
   const [accessBusy, setAccessBusy] = createSignal(false);
+  const [armed, setArmed] = createSignal(false);
+  const [resetting, setResetting] = createSignal(false);
+  const [resetError, setResetError] = createSignal<string>();
 
   function persistWindow(minutes: number) {
     props.onSetWindow(minutes);
@@ -33,6 +39,26 @@ export default function Settings(props: Props) {
     localStorage.setItem("aegis.live", live ? "1" : "0");
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+  }
+
+  // wipe arms on the first press and runs on the second, so the destructive
+  // call is two deliberate clicks rather than one slip.
+  async function wipe() {
+    if (!armed()) {
+      setArmed(true);
+      setResetError(undefined);
+      return;
+    }
+    setResetting(true);
+    setResetError(undefined);
+    try {
+      await props.onReset();
+      setArmed(false);
+    } catch (cause) {
+      setResetError(String(cause));
+    } finally {
+      setResetting(false);
+    }
   }
 
   async function saveAccess(next: AccessSettings): Promise<boolean> {
@@ -232,6 +258,40 @@ export default function Settings(props: Props) {
                 <span>start the query log in live mode</span>
               </label>
             </form>
+          </div>
+        </section>
+
+        <section class="sheet">
+          <div class="sheet-head">
+            <h2>Full wipe</h2>
+          </div>
+          <div class="sheet-body">
+            <p class="muted" data-testid="reset-note" style={{ "font-size": "12px", "margin-bottom": "12px" }}>
+              Empties clients, discoveries, the query log, the services catalog, and the stored settings with their
+              access lists. Profiles, rules, rewrites, schedules, upstreams, sources, and threat feeds stay. The
+              server keeps serving and blocking the moment the wipe lands.
+            </p>
+            <div class="row-actions">
+              <Show when={armed()}>
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  data-testid="settings-reset-cancel"
+                  disabled={resetting()}
+                  onClick={() => setArmed(false)}
+                >
+                  Cancel
+                </button>
+              </Show>
+              <button type="button" class="btn" data-testid="settings-reset" disabled={resetting()} onClick={() => void wipe()}>
+                {armed() ? "Confirm wipe" : "Wipe everything"}
+              </button>
+            </div>
+            <Show when={resetError()}>
+              <p class="error" data-testid="settings-reset-error">
+                {resetError()}
+              </p>
+            </Show>
           </div>
         </section>
       </div>

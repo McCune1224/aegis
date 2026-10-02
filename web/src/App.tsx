@@ -31,6 +31,7 @@ import {
   listServices,
   listSources,
   listUpstreams,
+  postReset,
   refreshServices as postRefreshServices,
   saveClient as putClient,
   saveClientServices as putClientServices,
@@ -521,6 +522,14 @@ export default function App() {
     setAccess(saved);
   }
 
+  // resetAll takes the full wipe and re-reads every list it emptied, so the
+  // screen shows the empty state instead of the rows that just went.
+  async function resetAll() {
+    await postReset();
+    await refresh();
+    await log.load({ limit: 2000 });
+  }
+
   return (
     <>
       <div class="app">
@@ -715,6 +724,7 @@ export default function App() {
                   onSetWindow={setWindowMinutes}
                   live={live()}
                   onSetLive={setLive}
+                  onReset={resetAll}
                 />
               </Show>
             </div>

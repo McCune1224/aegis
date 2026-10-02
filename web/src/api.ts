@@ -251,6 +251,26 @@ export function setDefaultProfile(profile: string): Promise<{ profile: string }>
    });
 }
 
+// ResetWipe is what one full wipe gave up, one count per area it names.
+export type ResetWipe = {
+   status: string;
+   clients: number;
+   discoveries: number;
+   queries: number;
+   services: number;
+   settings: number;
+};
+
+// postReset asks the running server for the full wipe. The confirmation
+// travels in the body, so a call that forgets it is refused by the server
+// rather than by this screen.
+export function postReset(): Promise<ResetWipe> {
+   return request<ResetWipe>("/api/v1/reset", {
+      method: "POST",
+      body: JSON.stringify({ confirm: "reset" }),
+   });
+}
+
 export type Lease = {
    address: string;
    mac: string;
