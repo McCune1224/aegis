@@ -588,6 +588,31 @@ if (command === "baseline") {
   await baseline();
 } else if (command === "gaps") {
   await gaps();
+} else if (command === "shots") {
+  const out = process.argv[3] ?? "/tmp/opencode/gap";
+  const rig = await new Rig({ bin: BIN }).up();
+  const browser = await Browser.launch({ port: rig.ports.devtools });
+  try {
+    const page = await browser.newPage();
+    await page.viewport({ width: 1440, height: 900 });
+    await page.open(`${rig.base}/#/services`);
+    await page.waitFor(`document.querySelectorAll('[data-testid^="service-"]').length > 0`);
+    const catalog = await (await fetch(`${rig.base}/api/v1/services`)).json();
+    const ids = catalog.services.slice(0, 3).map((service) => service.id);
+    for (const id of ids) {
+      await page.click(`[data-testid="service-${id}"]`);
+      await sleep(120);
+    }
+    await page.shot(`${out}/services-staged.png`);
+    await page.click('[data-testid="tab-constellation"]');
+    await page.waitFor(`document.querySelector('[data-testid="screen-constellation"] svg') !== null`);
+    await sleep(2500);
+    await page.shot(`${out}/constellation.png`);
+    console.log(`shots in ${out}`);
+  } finally {
+    await browser.close();
+    await rig.down();
+  }
 } else {
   console.error(`unknown command ${command}`);
   process.exit(2);
