@@ -283,3 +283,38 @@ func TestEnablingAnUnknownServiceOrProfileIsRefused(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, body)
 	require.Contains(t, body, `"services":[]`)
 }
+
+// redditCatalog is the Reddit entry as AdGuard publishes it, copied from
+// HostlistsRegistry's services.json, so the save path is exercised in the
+// dialect a running instance really fetches rather than in a hand-written row.
+const redditCatalog = `{"blocked_services":[{"id":"reddit","name":"Reddit","group":"social_network","rules":["||reddit.com^","||redditstatic.com^","||redditmail.com^","||redditmedia.com^","||redd.it^"]}],"groups":[{"id":"social_network"}]}`
+
+// TestSavingAServiceBlocksTheDomainsOfItsCatalogRules is the regression net
+// for the save path: a store with no enablements, one PUT through the endpoint
+// the console saves through, and a real query on the harness's ephemeral DNS
+// port. The control queries before the save prove the same names are let
+// through until it lands, so this test fails exactly when a saved enable stops
+// reaching the live filter.
+func TestSavingAServiceBlocksTheDomainsOfItsCatalogRules(t *testing.T) {
+	h := startHarness(t)
+
+	catalog, err := services.ParseCatalog([]byte(redditCatalog))
+	require.NoError(t, err)
+	require.NoError(t, h.database.SaveCatalog(t.Context(), time.Now().UTC(), catalog.Services))
+
+	// Control: nothing blocks these names yet, so both leave for upstream, and
+	// a dead upstream answers with a server failure rather than the sinkhole's
+	// name error.
+	require.NotEqual(t, mdns.RcodeNameError, askFrom(t, "127.0.0.1", "reddit.com.", h.dnsAddress).Rcode)
+	require.NotEqual(t, mdns.RcodeNameError, askFrom(t, "127.0.0.1", "redd.it.", h.dnsAddress).Rcode)
+
+	status, body := h.do(t, http.MethodPut, "/api/v1/profiles/default/services", `{"services":["reddit"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	require.Equal(t, mdns.RcodeNameError, askFrom(t, "127.0.0.1", "reddit.com.", h.dnsAddress).Rcode)
+	require.Equal(t, mdns.RcodeNameError, askFrom(t, "127.0.0.1", "www.reddit.com.", h.dnsAddress).Rcode)
+	require.Equal(t, mdns.RcodeNameError, askFrom(t, "127.0.0.1", "redd.it.", h.dnsAddress).Rcode)
+	// A name no rule in the catalog covers still leaves, so the block came from
+	// the save and not from something the harness does to every query.
+	require.NotEqual(t, mdns.RcodeNameError, askFrom(t, "127.0.0.1", "gitlab.com.", h.dnsAddress).Rcode)
+}
