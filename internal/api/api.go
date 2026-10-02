@@ -212,6 +212,7 @@ func (s *Server) routes() http.Handler {
 		mux.HandleFunc("POST /api/v1/threats/feeds/{name}/refresh", s.refreshThreatFeed)
 	}
 	mux.HandleFunc("POST /api/v1/reload", s.reload)
+	mux.HandleFunc("POST /api/v1/reset", s.postReset)
 	if s.files != nil {
 		mux.Handle("GET /", http.FileServerFS(s.files))
 	}
