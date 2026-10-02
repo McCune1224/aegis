@@ -82,7 +82,31 @@ named `aegis_<version>_<os>_<arch>` and `checksums.txt` beside it covers it.
 The high port is deliberate. AdGuard Home already holds port 53 and keeps it.
 The cutover this document used to describe was retired on 2026-09-24. Aegis
 stays a second resolver on `:15353` and never takes `:53`, so there is no
-cutover to survive and no household rollback to write.
+cutover to survive and no household rollback to write. Where nothing else
+holds port 53, use the variant below instead.
+
+### Aegis as the only resolver
+
+A box with no other resolver runs Aegis on `:53` itself. Two lines of the
+unit change, the listener and the capability:
+
+    AmbientCapabilities=CAP_NET_BIND_SERVICE
+    ExecStart=/usr/local/bin/aegis serve --db /var/lib/aegis/aegis.db \
+      --dns-address 0.0.0.0:53 --api-address 127.0.0.1:18099 \
+      --upstream 9.9.9.9:53
+
+The capability is the whole difference from the unit above. AdGuard Home's
+service runs its process as root, which is what lets it bind port 53; this
+unit keeps the `aegis` user unprivileged and grants only the right to bind
+ports below 1024. The process never runs as root.
+
+This layout carries two cautions of its own. Every client that points at
+port 53 loses DNS while the service is stopped, so the stop and the start
+of an update are the vulnerable moments and the replacement binary should
+be staged before the old service goes down. And the API has no
+authentication, so `127.0.0.1:18099` behind an ssh tunnel stays the
+default; binding it wider is a decision about the management network, not
+a convenience.
 
 ### Without sudo
 
